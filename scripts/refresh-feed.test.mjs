@@ -52,6 +52,16 @@ test("Apify mode authenticates, keeps stable history, and lets the newest row wi
       status: "ended",
       observedAt: "2026-08-01T10:00:00.000Z",
       observations: [],
+    }, {
+      id: "legacy-shopgoodwill-prototype",
+      externalId: "999999999",
+      source: "ShopGoodwill manual research snapshot",
+      sourceKey: "shopgoodwill",
+      title: "Legacy unsupported prototype estimate",
+      resaleMedian: 999,
+      status: "active",
+      observedAt: "2026-08-01T10:00:00.000Z",
+      observations: [],
     }],
   };
   await writeFile(outputPath, `${OUTPUT_PREFIX}${JSON.stringify(priorEnvelope)};\n`, "utf8");
@@ -233,6 +243,7 @@ test("Apify mode authenticates, keeps stable history, and lets the newest row wi
   assert.equal("forecast" in imported.observations[2], false, "Nested supplied history must remain forecast-free");
   assert.deepEqual(imported.observations[3].forecast, imported.forecast);
   assert.ok(envelope.items.some((item) => item.id === "manual-retained"));
+  assert.equal(envelope.items.some((item) => item.id === "legacy-shopgoodwill-prototype"), false);
 
   const firstOutput = await readFile(outputPath, "utf8");
   const repeatedResult = await runNode(childArgs, childOptions);
@@ -388,6 +399,60 @@ test("the ShopGoodwill close check records a final outcome from the item-detail 
   assert.equal(envelope.items[0].finalPrice, 72.5);
   assert.equal(envelope.items[0].bidCount, 9);
   assert.equal(envelope.items[0].resaleVertical, "Watches");
+});
+
+test("source-described gold weight receives a live melt ceiling without becoming verified resale evidence", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "shopgoodwill-metal-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url) => {
+      if (String(url) === "https://api.gold-api.com/price/XAU") {
+        return new Response(JSON.stringify({ currency: "USD", price: 3100, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://api.gold-api.com/price/XAG") {
+        return new Response(JSON.stringify({ currency: "USD", price: 35, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://buyerapi.shopgoodwill.com/api/ItemDetail/GetItemDetailModelByItemId/272052013") {
+        return new Response(JSON.stringify({
+          itemId: 272052013,
+          title: "14K Yellow Gold Ring 10 Grams with Diamond",
+          currentPrice: 250,
+          numberOfBids: 5,
+          endTime: "2099-08-02T04:08:05",
+          serverTime: "2099-08-01T04:08:05",
+          category: "Jewelry",
+        }), { status: 200 });
+      }
+      throw new Error("Unexpected URL: " + url);
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "false",
+        BIDAI_SHOPGOODWILL_MODE: "items",
+        BIDAI_SHOPGOODWILL_ITEM_IDS: "272052013",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const item = (await readEnvelope(join(fixture.data, "live-snapshots.js"))).items[0];
+  assert.equal(item.metalEstimate.metal, "gold");
+  assert.equal(item.metalEstimate.purityLabel, "14k");
+  assert.equal(item.metalEstimate.grossWeightGrams, 10);
+  assert.ok(item.metalEstimate.meltCeiling > 580 && item.metalEstimate.meltCeiling < 582);
+  assert.match(item.metalEstimate.nonMetalWarning, /non-metal material/i);
+  assert.equal(item.metalEstimate.requiresIndependentTesting, true);
+  assert.equal(item.resaleMarket, undefined);
+  assert.equal(item.resaleMedian, undefined);
+  assert.equal(item.intrinsicValueEvidence, undefined);
 });
 
 test("authorization guard makes no request and leaves published data unchanged", async (t) => {

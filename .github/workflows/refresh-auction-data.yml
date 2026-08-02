@@ -44,6 +44,14 @@ jobs:
           BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "200"
         run: node scripts/refresh-all-sources.mjs
 
+      - name: Enrich with authorized completed-sale evidence
+        env:
+          BIDAI_RESALE_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_RESALE_SOURCE_AUTHORIZED }}
+          BIDAI_RESALE_FEED_URL: ${{ secrets.BIDAI_RESALE_FEED_URL }}
+          BIDAI_RESALE_FEED_TOKEN: ${{ secrets.BIDAI_RESALE_FEED_TOKEN }}
+          BIDAI_RESALE_BATCH_SIZE: "500"
+        run: node scripts/enrich-resale.mjs
+
       - name: Commit changed snapshot data
         shell: bash
         run: |

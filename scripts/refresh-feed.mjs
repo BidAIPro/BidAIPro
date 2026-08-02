@@ -29,6 +29,11 @@ const SHOPGOODWILL_PRIORITY_SEARCHES = [
   "collectibles",
   "electronics",
 ];
+const METAL_QUOTE_ENDPOINTS = {
+  gold: "https://api.gold-api.com/price/XAU",
+  silver: "https://api.gold-api.com/price/XAG",
+};
+const TROY_OUNCE_GRAMS = 31.1034768;
 const VERIFIED_FORECAST_STATUSES = new Set(["available", "ready", "verified"]);
 const SOURCE_DOMAINS = [
   ["shopgoodwill.com", "shopgoodwill"],
@@ -194,6 +199,9 @@ function normalizeComparable(value, kind, fallbackSource) {
     soldAt: kind === "sale" ? endedAt : null,
     url,
     outcomeObservedAt: timestamp(pick(value, "outcomeObservedAt", "outcome_observed_at", "finalObservedAt", "final_observed_at", "capturedAt", "captured_at", "observedAt", "observed_at")),
+    listedAt: timestamp(pick(value, "listedAt", "listed_at", "startedAt", "started_at")),
+    daysToSell: nonnegativeNumber(pick(value, "daysToSell", "days_to_sell"), null),
+    condition: text(pick(value, "condition", "itemCondition", "item_condition")).slice(0, 120),
     source,
     modelKey: text(pick(value, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key")).slice(0, 200),
     matchReason: text(pick(value, "matchReason", "match_reason")).slice(0, 500),
@@ -302,6 +310,66 @@ function comparableRanges(comparableSales) {
   };
 }
 
+function liquidityLabelFor(scoreValue) {
+  if (!Number.isFinite(scoreValue)) return "unknown";
+  if (scoreValue >= 80) return "hot";
+  if (scoreValue >= 60) return "strong";
+  if (scoreValue >= 40) return "moderate";
+  return "slow";
+}
+
+function normalizeResaleMarket(value, comparableSales, observedAt, modelKey) {
+  const eligible = eligibleDatedComparables(comparableSales, observedAt, modelKey);
+  const ranges = comparableRanges(eligible);
+  const base = {
+    status: ranges ? "price-only" : "insufficient-data",
+    currency: "USD",
+    sampleSize: eligible.length,
+    priceLow: ranges?.low ?? null,
+    quickSalePrice: ranges?.low ?? null,
+    priceMedian: ranges?.median ?? null,
+    priceHigh: ranges?.high ?? null,
+    channel: text(pick(value, "channel", "marketplace", "source"), eligible[0]?.source || "Completed sales").slice(0, 120),
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return base;
+
+  const asOf = timestamp(pick(value, "asOf", "as_of", "observedAt", "observed_at"));
+  const asOfTime = Date.parse(asOf || "");
+  const observationTime = Date.parse(observedAt || "");
+  const lookbackDays = integer(pick(value, "lookbackDays", "lookback_days"), 0);
+  const soldListingCount = integer(pick(value, "soldListingCount", "sold_listing_count", "soldCount", "sold_count"), 0);
+  const activeListingCount = integer(pick(value, "activeListingCount", "active_listing_count", "activeCount", "active_count"), 0);
+  const medianDaysToSell = nonnegativeNumber(pick(value, "medianDaysToSell", "median_days_to_sell"), null);
+  const denominator = soldListingCount + activeListingCount;
+  const statsValid = Boolean(ranges)
+    && Number.isFinite(asOfTime)
+    && Number.isFinite(observationTime)
+    && asOfTime <= observationTime + 5 * 60_000
+    && observationTime - asOfTime <= 30 * 24 * 60 * 60_000
+    && lookbackDays >= 1
+    && lookbackDays <= 365
+    && soldListingCount >= eligible.length
+    && denominator > 0;
+  if (!statsValid) return { ...base, asOf, lookbackDays: lookbackDays || null };
+
+  const sellThroughRate = Math.round((soldListingCount / denominator) * 10_000) / 10_000;
+  const speedFactor = medianDaysToSell === null ? 0.5 : Math.max(0, Math.min(1, 1 - medianDaysToSell / 90));
+  const liquidityScore = Math.round(100 * (sellThroughRate * 0.75 + speedFactor * 0.25));
+  return {
+    ...base,
+    status: "available",
+    asOf,
+    lookbackDays,
+    soldListingCount,
+    activeListingCount,
+    sellThroughRate,
+    medianDaysToSell,
+    liquidityScore,
+    liquidityLabel: liquidityLabelFor(liquidityScore),
+    query: text(pick(value, "query", "searchQuery", "search_query")).slice(0, 500),
+  };
+}
+
 function supplied(value) {
   return value !== undefined && value !== null && value !== "";
 }
@@ -379,6 +447,126 @@ function normalizeValuationBasis(value, observedAt) {
     reference14kMeltPerGram,
     source: text(pick(value, "source", "sourceName", "source_name")).slice(0, 200),
     sourceUrl: httpUrl(pick(value, "sourceUrl", "source_url", "url")),
+  };
+}
+
+function normalizeMetalEstimate(value, observedAt) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const metal = text(value.metal).toLowerCase();
+  if (!["gold", "silver"].includes(metal)) return null;
+  const currency = text(value.currency).toUpperCase();
+  const quoteObservedAt = timestamp(pick(value, "quoteObservedAt", "quote_observed_at", "asOf", "as_of"));
+  const quoteTime = Date.parse(quoteObservedAt || "");
+  const observationTime = Date.parse(observedAt || "");
+  const grossWeightGrams = nonnegativeNumber(pick(value, "grossWeightGrams", "gross_weight_grams"), null);
+  const purityFraction = ratio(pick(value, "purityFraction", "purity_fraction"), null);
+  const spotPerTroyOunce = money(pick(value, "spotPerTroyOunce", "spot_per_troy_ounce"), null);
+  const meltCeiling = money(pick(value, "meltCeiling", "melt_ceiling"), null);
+  if (currency !== "USD"
+    || !Number.isFinite(quoteTime)
+    || !Number.isFinite(observationTime)
+    || quoteTime > observationTime + 5 * 60_000
+    || observationTime - quoteTime > 24 * 60 * 60_000
+    || !(grossWeightGrams > 0)
+    || !(purityFraction > 0 && purityFraction <= 1)
+    || !(spotPerTroyOunce > 0)
+    || !(meltCeiling > 0)) return null;
+  return {
+    metal,
+    currency: "USD",
+    quoteObservedAt,
+    quoteSource: text(pick(value, "quoteSource", "quote_source"), "Gold API").slice(0, 120),
+    quoteSourceUrl: httpUrl(pick(value, "quoteSourceUrl", "quote_source_url")),
+    grossWeightGrams,
+    purityLabel: text(pick(value, "purityLabel", "purity_label")).slice(0, 40),
+    purityFraction,
+    spotPerTroyOunce,
+    pureSpotPerGram: money(pick(value, "pureSpotPerGram", "pure_spot_per_gram"), null),
+    meltCeiling,
+    sourceDescriptionStatus: text(pick(value, "sourceDescriptionStatus", "source_description_status"), "source-described").slice(0, 80),
+    requiresIndependentTesting: boolean(pick(value, "requiresIndependentTesting", "requires_independent_testing"), true),
+    nonMetalWarning: text(pick(value, "nonMetalWarning", "non_metal_warning")).slice(0, 500),
+  };
+}
+
+async function fetchMetalQuotes() {
+  const entries = await Promise.all(Object.entries(METAL_QUOTE_ENDPOINTS).map(async ([metal, url]) => {
+    try {
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+        redirect: "error",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await readJsonResponse(response);
+      const price = money(payload?.price, null);
+      const updatedAt = timestamp(payload?.updatedAt);
+      if (text(payload?.currency).toUpperCase() !== "USD" || !(price > 0) || !updatedAt) {
+        throw new Error("invalid quote payload");
+      }
+      return [metal, { price, updatedAt }];
+    } catch (error) {
+      console.warn(`[refresh-feed] Live ${metal} quote unavailable: ${error.message}`);
+      return [metal, null];
+    }
+  }));
+  return Object.fromEntries(entries.filter(([, quote]) => quote));
+}
+
+function metalEstimateFor(record, quotes) {
+  const title = text(record?.title);
+  const normalized = title.toLowerCase();
+  const weightMatch = normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:g|grams?)\b/);
+  if (!weightMatch) return null;
+  const grossWeightGrams = Number(weightMatch[1]);
+  if (!(grossWeightGrams > 0) || grossWeightGrams > 100_000) return null;
+
+  let metal = null;
+  let purityLabel = "";
+  let purityFraction = null;
+  if (/\bgold\b/.test(normalized) && !/\b(?:gold[ -]?(?:plated|filled|tone)|vermeil|gp|g\.p\.|hge|rgep)\b/.test(normalized)) {
+    const karat = normalized.match(/\b(10|14|18|22|24)\s*k(?:t|arat)?\b/);
+    if (karat) {
+      metal = "gold";
+      purityLabel = `${karat[1]}k`;
+      purityFraction = Number(karat[1]) / 24;
+    }
+  } else if (/\bsilver\b/.test(normalized) && !/\b(?:silver[ -]?(?:plated|tone)|silverplate|epns)\b/.test(normalized)) {
+    if (/\b(?:sterling|925|\.925)\b/.test(normalized)) {
+      metal = "silver";
+      purityLabel = "sterling / .925";
+      purityFraction = 0.925;
+    } else if (/\b(?:999|\.999|fine silver)\b/.test(normalized)) {
+      metal = "silver";
+      purityLabel = ".999 fine";
+      purityFraction = 0.999;
+    }
+  }
+  const quote = metal ? quotes?.[metal] : null;
+  if (!metal || !quote || !(quote.price > 0) || !quote.updatedAt) return null;
+
+  const pureSpotPerGram = quote.price / TROY_OUNCE_GRAMS;
+  const meltCeiling = grossWeightGrams * purityFraction * pureSpotPerGram;
+  const containsNonMetalMaterial = /\b(?:diamond|gem|gemstone|stone|pearl|ruby|sapphire|emerald|opal|crystal|enamel|strap|band|movement)\b/.test(normalized);
+  return {
+    metal,
+    currency: "USD",
+    quoteObservedAt: quote.updatedAt,
+    quoteSource: "Gold API",
+    quoteSourceUrl: METAL_QUOTE_ENDPOINTS[metal],
+    grossWeightGrams,
+    purityLabel,
+    purityFraction,
+    spotPerTroyOunce: quote.price,
+    pureSpotPerGram: Math.round(pureSpotPerGram * 10000) / 10000,
+    meltCeiling: Math.round(meltCeiling * 100) / 100,
+    sourceDescriptionStatus: /\b(?:acid[ -]?tested|xrf|tested)\b/.test(normalized)
+      ? "source-stated-tested"
+      : "source-described",
+    requiresIndependentTesting: true,
+    nonMetalWarning: containsNonMetalMaterial
+      ? "The stated gross weight may include stones, a movement, a strap, or other non-metal material; melt value is an upper-bound scenario until independently weighed and tested."
+      : "Purity and gross weight come from the source title and require independent testing; melt value is a ceiling, not a guaranteed offer.",
   };
 }
 
@@ -721,7 +909,7 @@ function shopGoodwillExactTitleModelKey(title) {
   return normalizedTitle ? `shopgoodwill:title-exact-v1:${normalizedTitle}` : "";
 }
 
-function shopGoodwillRecord(record, capturedAt, detail = false) {
+function shopGoodwillRecord(record, capturedAt, detail = false, marketContext = {}) {
   const externalId = text(pick(record, "itemId", "id"));
   if (!externalId) return null;
   const title = text(record?.title);
@@ -736,6 +924,7 @@ function shopGoodwillRecord(record, capturedAt, detail = false) {
   const bids = integer(pick(record, "numBids", "numberOfBids", "bidCount"));
   const imageUrl = text(pick(record, "imageURL", "imageUrl", "thumbnailUrlString"))
     .replaceAll("\\", "/");
+  const metalEstimate = metalEstimateFor(record, marketContext.metalQuotes);
   return {
     externalId,
     source: "ShopGoodwill",
@@ -761,6 +950,7 @@ function shopGoodwillRecord(record, capturedAt, detail = false) {
     riskSummary: authentication.status === "source-stated"
       ? "Authentication wording was supplied by the source listing, not independently verified by BidAI Pro. Confirm the authenticator, item identifiers, condition, and return options."
       : "The catalog record does not supply authentication evidence. Confirm identity, condition, shipping, and return options before bidding.",
+    ...(metalEstimate ? { metalEstimate } : {}),
     observedAt: capturedAt,
   };
 }
@@ -786,7 +976,7 @@ function shopGoodwillIds(environment, name) {
     .filter((value) => /^\d{1,20}$/.test(value)))];
 }
 
-async function fetchShopGoodwillDetails(itemIds, capturedAt) {
+async function fetchShopGoodwillDetails(itemIds, capturedAt, metalQuotes = {}) {
   if (!itemIds.length) return [];
   const payloads = await mapWithConcurrency(
     itemIds,
@@ -794,7 +984,7 @@ async function fetchShopGoodwillDetails(itemIds, capturedAt) {
     (itemId) => fetchShopGoodwillJson(`${SHOPGOODWILL_ITEM_PATH}${encodeURIComponent(itemId)}`),
   );
   return payloads
-    .map((record) => shopGoodwillRecord(record, capturedAt, true))
+    .map((record) => shopGoodwillRecord(record, capturedAt, true, { metalQuotes }))
     .filter(Boolean);
 }
 
@@ -812,7 +1002,10 @@ async function fetchShopGoodwillCatalog(environment) {
     0,
     1_000,
   );
-  const first = await fetchShopGoodwillSearchPage(1);
+  const [first, metalQuotes] = await Promise.all([
+    fetchShopGoodwillSearchPage(1),
+    fetchMetalQuotes(),
+  ]);
   const sourceCap = boundedInteger(first?.maxTotalRecords, SHOPGOODWILL_MAX_CATALOG_ITEMS, 1, SHOPGOODWILL_MAX_CATALOG_ITEMS);
   const sourceCount = boundedInteger(first?.searchResults?.itemCount, catalogLimit, 0, Number.MAX_SAFE_INTEGER);
   const broadLimit = Math.min(catalogLimit, sourceCap, sourceCount || catalogLimit);
@@ -826,7 +1019,7 @@ async function fetchShopGoodwillCatalog(environment) {
   const broadRecords = broadPayloads
     .flatMap((payload) => payload.searchResults.items)
     .slice(0, broadLimit)
-    .map((record) => shopGoodwillRecord(record, capturedAt, false))
+    .map((record) => shopGoodwillRecord(record, capturedAt, false, { metalQuotes }))
     .filter(Boolean);
 
   const priorityRecords = [];
@@ -847,7 +1040,7 @@ async function fetchShopGoodwillCatalog(environment) {
         .flatMap((payload) => payload.searchResults.items)
         .slice(0, priorityLimit);
       priorityRecords.push(...records
-        .map((record) => shopGoodwillRecord(record, capturedAt, false))
+        .map((record) => shopGoodwillRecord(record, capturedAt, false, { metalQuotes }))
         .filter(Boolean));
     }
   }
@@ -855,6 +1048,7 @@ async function fetchShopGoodwillCatalog(environment) {
   const recoveryRecords = await fetchShopGoodwillDetails(
     shopGoodwillIds(environment, "BIDAI_SHOPGOODWILL_OUTCOME_IDS"),
     capturedAt,
+    metalQuotes,
   );
   const records = deduplicateShopGoodwillRecords([...broadRecords, ...priorityRecords, ...recoveryRecords]);
   if (!records.length) throw new Error("The ShopGoodwill public catalog contained no active bid listings.");
@@ -874,7 +1068,8 @@ async function fetchShopGoodwillItems(environment) {
   const itemIds = shopGoodwillIds(environment, "BIDAI_SHOPGOODWILL_ITEM_IDS");
   if (!itemIds.length) throw new Error("No valid ShopGoodwill item IDs were supplied for the adaptive close check.");
   const capturedAt = new Date().toISOString();
-  const records = await fetchShopGoodwillDetails(itemIds, capturedAt);
+  const metalQuotes = await fetchMetalQuotes();
+  const records = await fetchShopGoodwillDetails(itemIds, capturedAt, metalQuotes);
   if (!records.length) throw new Error("The ShopGoodwill adaptive close check returned no listing records.");
   return {
     generatedAt: capturedAt,
@@ -1411,6 +1606,8 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     outboundShipping: hasOwn(record, "outboundShipping", "outbound_shipping"),
     repairReserve: hasOwn(record, "repairReserve", "repair_reserve"),
     returnReserve: hasOwn(record, "returnReserve", "return_reserve"),
+    resaleMarket: comparableSalesSupplied || hasOwn(record, "resaleMarket", "resale_market"),
+    metalEstimate: hasOwn(record, "metalEstimate", "metal_estimate"),
   };
 
   const currentBid = money(pick(record, "currentBid", "current_bid", "currentPrice", "current_price", "price", "bidAmount", "bid_amount"));
@@ -1463,6 +1660,12 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   const modelKey = text(pick(record, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key"));
   const eligibleComparableSales = eligibleDatedComparables(comparableSales, observedAt, modelKey);
   const derivedResale = comparableRanges(eligibleComparableSales);
+  const resaleMarket = normalizeResaleMarket(
+    pick(record, "resaleMarket", "resale_market"),
+    comparableSales,
+    observedAt,
+    modelKey,
+  );
   const rawResaleLow = pick(record, "resaleLow", "resale_low");
   const rawResaleMedian = pick(record, "resaleMedian", "resale_median", "resaleValue", "resale_value");
   const rawResaleHigh = pick(record, "resaleHigh", "resale_high");
@@ -1481,6 +1684,10 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     rawIntrinsicValueEvidence,
     false,
   ) && Boolean(valuationBasis);
+  const metalEstimate = normalizeMetalEstimate(
+    pick(record, "metalEstimate", "metal_estimate"),
+    observedAt,
+  );
 
   return {
     id: identity.id,
@@ -1517,8 +1724,10 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     forecastBasis: text(pick(record, "forecastBasis", "forecast_basis", "predictionBasis", "prediction_basis")),
     comparableSales,
     auctionComparables,
+    ...(resaleMarket.sampleSize > 0 || hasOwn(record, "resaleMarket", "resale_market") ? { resaleMarket } : {}),
     ...(forecast ? { forecast } : {}),
     ...(intrinsicEvidenceSupplied ? { intrinsicValueEvidence, valuationBasis } : {}),
+    ...(metalEstimate ? { metalEstimate } : {}),
     identifiedAs: text(pick(record, "identifiedAs", "identified_as"), "Feed-provided identity; verify before bidding"),
     riskSummary: text(pick(record, "riskSummary", "risk_summary")),
     publishedResearch: true,
@@ -1762,6 +1971,7 @@ async function run() {
 
   const retainedItems = [...mergedById.values()]
     .map(({ feedOrder: _feedOrder, _fieldPresence: _fieldPresence, ...item }) => item)
+    .filter((item) => text(item?.source).toLowerCase() !== "shopgoodwill manual research snapshot")
     .map(reconcileRetainedStatus)
     .sort(retentionOrder)
     .slice(0, MAX_RETAINED_ITEMS);

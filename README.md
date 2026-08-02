@@ -28,7 +28,7 @@ Open `index.html` in a browser. There is no install or build step.
 You can:
 
 - review the checked-in point-in-time ShopGoodwill research pass, with each listing timestamped and linked back to its source;
-- open any record directly on its source site and inspect observation age, bid history, exact-model auction outcomes, completed resale evidence, and its full cost stack;
+- open any record directly on its source site and inspect observation age, bid history, exact-model auction outcomes, completed resale evidence, resale velocity, pawn scenarios, and its full cost stack;
 - record a single auction snapshot;
 - import repeated CSV or JSON snapshots to build price history;
 - mark ended auctions with an actual final price so calibration can improve;
@@ -53,9 +53,13 @@ When five or more same-model auction records include both the earlier bid and ma
 
 A source forecast must use the status `available`, `ready`, or `verified`; provide a non-empty `modelVersion`; include a positive, coherent interval where `low <= expected <= high`; and identify at least five exact-model auction-close outcomes within its sample. The app independently revalidates those outcomes before treating the forecast as available.
 
-When at least three qualifying exact-model resale sales exist, decision calculations use their empirical P20, median, and P80 values. Explicit source resale fields remain available for audit, but they do not override qualifying completed-sale evidence or promote an unsupported item.
+When at least three qualifying exact-model resale sales exist, decision calculations use their empirical P20, median, and P80 values. The interface also reports the arithmetic average, but the median remains the profit anchor because it is less sensitive to unusually high or low sales. The P20 value is the quick-sale target. Explicit source resale fields remain available for audit, but they do not override qualifying completed-sale evidence or promote an unsupported item.
 
-For tested 14K-gold lots, an authorized feed may instead attach `intrinsicValueEvidence: true` with a timestamped USD-per-gram `valuationBasis` and a positive conservative resale range. The quote must be no later than the listing snapshot and no more than 24 hours old; intrinsic evidence can support a resale floor but never substitutes for auction-close outcomes or creates a closing forecast. See [docs/AUTOMATION.md](docs/AUTOMATION.md#intrinsic-14k-gold-evidence) for the exact contract.
+Resale popularity is separate from auction popularity. When an authorized resale feed supplies a current sold count, active count, and optional median days to sell, BidAI Pro calculates `sell-through = sold / (sold + active)` and a disclosed 0–100 liquidity score. ShopGoodwill bid counts remain labeled auction activity and are never presented as eBay sell-through. Active asking prices are not completed sales and never become the resale median.
+
+The public [eBay Browse API](https://developer.ebay.com/api-docs/buy/api-browse.html) is useful for active listings, but eBay's sales-history [Marketplace Insights API is restricted and not open to new users](https://developer.ebay.com/api-docs/buy/ref-marketplace-supported.html). The repository therefore includes an authorized completed-sales enrichment hook instead of fabricating sold data. Connect a licensed provider or an eBay account with approved Marketplace Insights access using the secrets documented below.
+
+For source titles that explicitly provide gold/silver purity and gram weight, the ShopGoodwill collector attaches a live USD spot scenario from [Gold API](https://gold-api.com/docs). The dashboard shows gross melt as a ceiling, applies the user-controlled pawn cash percentage, and compares that modeled cash offer with landed cost. Source wording, stones, movements, straps, and gross weight remain unverified, so this scenario never becomes verified resale evidence or a guaranteed pawn offer. A separately authorized feed may still attach tested intrinsic evidence under the stricter contract in [docs/AUTOMATION.md](docs/AUTOMATION.md#intrinsic-14k-gold-evidence).
 
 Profit and safe-ceiling calculations expose inbound shipping, tax, buyer premium, marketplace fees, outbound shipping, repair/testing reserve, and return/loss reserve. Missing shipping or resale evidence blocks the bid ceiling instead of silently assuming zero. The Learning view uses one fixed-horizon sample per ended listing: the eligible immutable forecast nearest six hours before close, within a three-to-nine-hour window. Source estimates, post-close forecasts, and forecasts outside that window are excluded.
 
@@ -71,9 +75,15 @@ After pushing, open **Actions > Refresh authorized auction data > Run workflow**
 - `BIDAI_APIFY_TOKEN` — required when a configured private Dataset is read or an Apify Task is started;
 - `BIDAI_SOURCE_AUTHORIZED=true` — the exact permission-gate value required before collection or import is attempted.
 
+To populate real resale medians and velocity, configure an approved completed-sales provider:
+
+- `BIDAI_RESALE_SOURCE_AUTHORIZED=true` — permission gate for the resale request;
+- `BIDAI_RESALE_FEED_URL` — HTTPS batch endpoint that returns exact-model completed sales plus current sold/active counts;
+- `BIDAI_RESALE_FEED_TOKEN` — optional bearer token for that endpoint.
+
 Each configured Apify Task is a collector that you create and authorize in Apify. BidAI Pro can start that task when its marketplace is due, wait for a successful run, import the resulting Dataset, and retain unmatched records from every other market. The original single-source `BIDAI_APIFY_DATASET_ID` and `BIDAI_FEED_URL` secrets remain supported.
 
-Setup, the built-in ShopGoodwill source, the multi-source secret format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Apify Datasets are paged in 5,000-record batches and the normalized catalog retains up to 50,000 real listings. The checked-in four-item research pass is the pre-refresh baseline; the first successful cloud catalog run replaces that tiny visible sample with thousands of live records. The interface never fills an unconnected marketplace with fabricated listings.
+Setup, the built-in ShopGoodwill source, the completed-sales contract, the multi-source secret format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Apify Datasets are paged in 5,000-record batches and the normalized catalog retains up to 50,000 real listings. The interface never fills an unconnected marketplace or resale channel with fabricated listings or prices.
 
 ## Data-source boundary
 
