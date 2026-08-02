@@ -9,6 +9,7 @@ The supported source modes are:
 3. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
 4. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
 5. **Completed-sales enrichment:** after auction refreshes, BidAI Pro can send stale active listing identities to one explicitly authorized HTTPS resale provider and merge back exact-model completed sales and market counts.
+6. **eBay active-used enrichment:** an optional official eBay Browse API step searches active listings with `conditions:{USED}`, accepts only closely title-matched USD results, and stores asking-price statistics separately from sold evidence.
 
 BidAI Pro does not invent listing records. Every visible automated listing must arrive from the built-in ShopGoodwill public catalog or one of the configured sources and must retain its canonical source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
 
@@ -113,6 +114,21 @@ The response may be an array or `{ "items": [...] }`. Each result must identify 
 
 The pipeline derives P20, median, P80, average in the browser, sell-through, and liquidity from that evidence. It never treats an active asking price as a sold comparable. If no authorized feed is configured, the step is a byte-stable no-op and the interface says the resale evidence is unavailable.
 
+### eBay active-used asking-price fallback
+
+The included `scripts/enrich-ebay-used.mjs` step uses the official eBay Browse API when completed-sale evidence is absent. It answers “what are comparable used items listed for online?” and is never described as a sold-price feed.
+
+Create an eBay production application, complete eBay's required Buy API production-access process, then add these GitHub Actions secrets:
+
+| Secret | Requirement |
+| --- | --- |
+| `BIDAI_EBAY_CLIENT_ID` | Production eBay application client ID. |
+| `BIDAI_EBAY_CLIENT_SECRET` | Matching production client secret. |
+
+The hourly/manual workflow requests a client-credentials OAuth token only at runtime, processes at most 150 stale targets per run to stay within eBay's default Browse API call limit, and searches the US marketplace by default. It requires at least five unique results that are USD-priced, explicitly returned as used/pre-owned, have stable eBay IDs and URLs, and share at least 65% of the significant target-title tokens with at least three tokens in common. Price totals include the lowest stated USD shipping charge. The browser revalidates the records, requires an observation no more than 24 hours old, displays P20/median/average/P80, and applies a default 30% haircut before any planning value or safe ceiling is calculated.
+
+Active asking prices do not prove what an item will sell for and do not create a sell-through rate. Exact-model completed sales remain the preferred evidence tier. If credentials are missing, OAuth fails, fewer than five matches qualify, or eBay returns no usable result, the connector does not publish a value for that item. No credentials or access tokens are written to `data/live-snapshots.js`.
+
 The GitHub-hosted workflow has two schedules: one hourly discovery pass for every configured source, and one five-minute wake-up that runs only sources with a known auction inside the final 30 minutes. When a known auction enters its final five minutes, that workflow run remains active and polls the source every 30 seconds through close, with a one-minute final-result grace period. The next hourly ShopGoodwill pass also retries unresolved outcomes that ended within the prior 24 hours, up to 500 per run, so one delayed scheduled start does not automatically discard the final price. Up to four optional Tasks start concurrently; their Datasets are imported sequentially to keep history merges atomic. GitHub Actions scheduled starts can be delayed, so the 30-second interval is best effort and depends on the source responding within that interval.
 
 The snapshot rule is intentionally strict: the first observation is retained, and a later observation is appended only when its current bid is strictly higher than the highest stored bid. Unchanged or lower bids do not advance `observedAt`, do not add history, and produce a byte-identical published file when no other listing or outcome changed. A final status and final price may still be joined to the listing so the learning loop can score the auction outcome.
@@ -121,7 +137,7 @@ If authorization is absent or has any value other than lowercase `true`, optiona
 
 ## Flat item schema
 
-An Apify Dataset item must be a flat JSON object, and a generic feed must expose the same kind of objects. Do not place listing fields inside `data`, `item`, `auction`, or other nested objects; map the collector output before BidAI Pro reads it. Arrays are used only for optional observation history, comparable-sale evidence, and prior-auction evidence. `forecast`, `valuationBasis`, `resaleMarket`, and `metalEstimate` are the supported nested analysis objects.
+An Apify Dataset item must be a flat JSON object, and a generic feed must expose the same kind of objects. Do not place listing fields inside `data`, `item`, `auction`, or other nested objects; map the collector output before BidAI Pro reads it. Arrays are used only for optional observation history, comparable-sale evidence, and prior-auction evidence. `forecast`, `valuationBasis`, `resaleMarket`, `askingMarket`, and `metalEstimate` are the supported nested analysis objects.
 
 For Apify mode, `title` and a valid `observedAt` are required on every row. Generic feeds require `title` and may omit `observedAt`, though supplying it is strongly recommended. For stable, useful automated analysis, every collector result should provide these canonical fields:
 
@@ -146,6 +162,8 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | `valuationBasis` | object | Optional timestamped 14K-gold valuation basis. It supports a conservative resale floor; it is not auction-close evidence. |
 | `resaleMarket` | object | Validated completed-sales market window: channel, as-of, lookback, sold/active counts, sell-through, median days, and liquidity. |
 | `resaleMarketHistory` | array | Up to 365 timestamped validated market summaries retained for price and velocity learning. |
+| `askingMarket` | object | Current active-used asking-price evidence, kept separate from completed sales and validated again in the browser. |
+| `askingMarketHistory` | array | Up to 365 timestamped summaries of active-used asking prices for longitudinal learning. |
 | `metalEstimate` | object | Source-described purity/weight plus a fresh live spot quote and gross melt ceiling; informational until independently tested. |
 
 Useful optional flat fields are `shipping`, `status`, `finalPrice`, `expectedClose`, `resaleLow`, `resaleMedian`, `resaleHigh`, `demand`, `rarity`, `identityConfidence`, `conditionConfidence`, `imageUrl`, `resaleVertical`, `authenticationStatus`, `authenticationEvidence`, `riskSummary`, `compCount`, `compRecencyDays`, `marketplaceFee`, `taxRate`, `buyerPremium`, `outboundShipping`, `repairReserve`, and `returnReserve`. `shippingKnown` and `feeKnown` may be supplied explicitly; otherwise the importer marks them true only when the corresponding numeric field was actually present and valid. Missing shipping, fees, and material cost reserves remain `null`, not zero.

@@ -169,15 +169,16 @@
             <div class="metric-grid" aria-label="Opportunity summary">
               <article class="summary-metric">
                 <div class="metric-icon lime" aria-hidden="true">↗</div>
-                <div><span>Expected opportunity</span><strong data-stat-upside>$0</strong><small>Median profit after modeled costs</small></div>
+                <div><span>Top profit now</span><strong data-stat-upside>$0</strong><small>Best modeled exit at the observed bid</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon orange" aria-hidden="true">◷</div>
-                <div><span>Closing soon</span><strong data-stat-urgent>0</strong><small>Auctions ending within 12 hours</small></div>
+                <div><span>Closing soon</span><strong data-stat-urgent>0</strong><small>Auctions ending within 5 minutes</small></div>
+                <button class="summary-card-hitbox" type="button" data-quick-mode="closing" aria-label="Show auctions closing within five minutes"></button>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon blue" aria-hidden="true">◎</div>
-                <div><span>Forecast confidence</span><strong data-stat-confidence>0%</strong><small>Average verified close-model confidence</small></div>
+                <div><span>Evidence confidence</span><strong data-stat-confidence>0%</strong><small>Average confidence for modeled exits</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon neutral" aria-hidden="true">≋</div>
@@ -189,8 +190,13 @@
               <section class="queue-panel" aria-labelledby="queue-heading">
                 <div class="panel-head queue-head">
                   <div>
-                    <span class="section-kicker"><i></i> EVIDENCE-WEIGHTED RANKING</span>
-                    <h3 id="queue-heading">Opportunity intelligence</h3>
+                    <span class="section-kicker"><i></i> PROFIT + LIQUIDITY RANKING</span>
+                    <h3 id="queue-heading">Best exits first</h3>
+                    <div class="queue-mode-switch" role="group" aria-label="Opportunity view">
+                      <button class="is-active" type="button" data-quick-mode="profit" aria-pressed="true">Top profit</button>
+                      <button type="button" data-quick-mode="pawn" aria-pressed="false">Pawn-first metals</button>
+                      <button type="button" data-quick-mode="closing" aria-pressed="false">Closing ≤ 5 min</button>
+                    </div>
                   </div>
                   <div class="filter-row">
                     <label>
@@ -235,7 +241,7 @@
                   </div>
                 </div>
                 <div class="queue-labels" aria-hidden="true">
-                  <span>ITEM / SIGNAL</span><span>OBSERVED / CLOSE</span><span>SAFE CEILING</span><span>EXPECTED PROFIT</span><span>SOURCE</span>
+                  <span>ITEM / EXIT</span><span>OBSERVED / CLOSE</span><span>SAFE CEILING</span><span>LIKELY PROFIT NOW</span><span>SOURCE</span>
                 </div>
                 <div class="opportunity-list" data-opportunity-list></div>
                 <div class="queue-pagination" data-queue-pagination hidden>
@@ -446,7 +452,10 @@
                   <label><span>Return / loss reserve</span><span class="money-input"><b>$</b><input name="returnReserve" type="number" min="0" step="0.01" /></span><small>Buffer for returns, loss, or dispute costs.</small></label>
                   <label><span>Minimum profit target</span><span class="money-input"><b>$</b><input name="minimumProfit" type="number" min="0" step="1" /></span><small>The ceiling preserves at least this much downside profit.</small></label>
                   <label><span>Target margin</span><span class="suffix-input"><input name="targetMargin" type="number" min="0" max="90" step="1" /><b>%</b></span><small>Applied to conservative resale value.</small></label>
-                  <label><span>Pawn cash payout of melt</span><span class="suffix-input"><input name="pawnPayoutPercent" type="number" min="0" max="100" step="1" /><b>%</b></span><small>Scenario assumption for a tested precious-metal item; not a guaranteed shop offer.</small></label>
+                  <label><span>Assumed inbound shipping</span><span class="money-input"><b>$</b><input name="assumedInboundShipping" type="number" min="0" step="1" /></span><small>Conservative fallback so every evidence-backed item receives a ceiling.</small></label>
+                  <label><span>Online asking-price haircut</span><span class="suffix-input"><input name="askingPriceHaircut" type="number" min="0" max="80" step="1" /><b>%</b></span><small>Discount applied when used asking prices are the best available online evidence.</small></label>
+                  <label><span>Likely pawn payout of melt</span><span class="suffix-input"><input name="pawnPayoutPercent" type="number" min="20" max="70" step="1" /><b>%</b></span><small>Default 50%; actual shops vary and test the item before making an offer.</small></label>
+                  <label><span>Pawn testing reserve</span><span class="money-input"><b>$</b><input name="pawnTestingReserve" type="number" min="0" step="1" /></span><small>Deducted before setting a precious-metal bid ceiling.</small></label>
                   <div class="form-actions settings-actions"><button class="button button-primary" type="submit">Save assumptions</button><button class="button button-quiet" type="button" data-reset-settings>Restore defaults</button></div>
                 </form>
               </section>

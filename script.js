@@ -21,7 +21,10 @@
     returnReserve: 18,
     minimumProfit: 50,
     targetMargin: 22,
-    pawnPayoutPercent: 65,
+    assumedInboundShipping: 25,
+    askingPriceHaircut: 30,
+    pawnPayoutPercent: 50,
+    pawnTestingReserve: 10,
   };
 
   const AUCTION_MARKETS = [
@@ -257,6 +260,7 @@
   let selectedId = PUBLISHED_RESEARCH.items[0]?.id || workspace.userItems[0]?.id || "";
   let historicalIndexCache = null;
   let visibleQueueLimit = QUEUE_PAGE_SIZE;
+  let queueMode = "profit";
 
   function saveWorkspace() {
     try {
@@ -594,7 +598,9 @@
       && item.shippingAssumed !== undefined
       && item.shippingEstimateAccepted !== true;
     const shippingKnown = hasNumericShipping && item.shippingKnown !== false && !shippingIsUnacceptedEstimate;
-    const shipping = shippingKnown ? Math.max(0, Number(item.shipping)) : 0;
+    const assumedInboundShipping = Math.max(0, configuredNumber(null, s.assumedInboundShipping));
+    const shipping = shippingKnown ? Math.max(0, Number(item.shipping)) : assumedInboundShipping;
+    const shippingEstimated = !shippingKnown;
     const resaleModelKey = normalizedModelKey(item.modelKey);
     const listingEvidenceCutoff = Date.parse(observedAtFor(item) || "") || Date.now();
     const resaleMarketAsOf = Date.parse(item.resaleMarket?.asOf || "");
@@ -621,6 +627,29 @@
     const uniqueResaleEvidence = [...new Map(qualifyingResaleEvidence.map((entry) => [comparableKey(entry), entry])).values()];
     const resaleEvidenceCount = uniqueResaleEvidence.length;
     const comparableResalePrices = uniqueResaleEvidence.map((entry) => Number(entry.soldPrice ?? entry.finalPrice ?? entry.price));
+    const askingMarketAsOf = Date.parse(item.askingMarket?.asOf || "");
+    const qualifyingUsedListings = (Array.isArray(item.askingMarket?.listings) ? item.askingMarket.listings : [])
+      .filter((entry) => Number(entry?.totalPrice ?? entry?.price) > 0)
+      .filter((entry) => /used|pre-owned|preowned/i.test(String(entry?.condition || "")))
+      .filter((entry) => Boolean(entry?.id || entry?.externalId || safeHttpUrl(entry?.url)))
+      .filter((entry) => {
+        const rawScore = Number(entry?.matchScore);
+        const matchScore = Number.isFinite(rawScore) ? clamp(rawScore > 1 ? rawScore / 100 : rawScore) : null;
+        return matchScore !== null && matchScore >= 0.65;
+      });
+    const uniqueUsedListings = [...new Map(qualifyingUsedListings.map((entry) => [comparableKey(entry), entry])).values()];
+    const usedAskingPrices = uniqueUsedListings.map((entry) => Number(entry.totalPrice ?? entry.price));
+    const hasUsedAskingEvidence = item.askingMarket?.status === "available"
+      && uniqueUsedListings.length >= 5
+      && Number.isFinite(askingMarketAsOf)
+      && askingMarketAsOf <= Date.now() + 300000
+      && Date.now() - askingMarketAsOf <= 24 * 86400000;
+    const onlineUsedLow = hasUsedAskingEvidence ? quantile(usedAskingPrices, 0.2) : null;
+    const onlineUsedMedian = hasUsedAskingEvidence ? quantile(usedAskingPrices, 0.5) : null;
+    const onlineUsedHigh = hasUsedAskingEvidence ? quantile(usedAskingPrices, 0.8) : null;
+    const onlineUsedAverage = hasUsedAskingEvidence
+      ? usedAskingPrices.reduce((total, value) => total + value, 0) / usedAskingPrices.length
+      : null;
     const soldListingCount = Math.max(0, Math.round(Number(item.resaleMarket?.soldListingCount) || 0));
     const activeListingCount = Math.max(0, Math.round(Number(item.resaleMarket?.activeListingCount) || 0));
     const resaleLookbackDays = Math.max(0, Math.round(Number(item.resaleMarket?.lookbackDays) || 0));
@@ -657,18 +686,28 @@
     const sourceResaleLow = Math.max(0, Number(item.resaleLow) || 0);
     const sourceResaleMedian = Math.max(0, Number(item.resaleMedian) || 0);
     const sourceResaleHigh = Math.max(0, Number(item.resaleHigh) || 0);
-    const resaleLow = hasComparableResaleEvidence ? quantile(comparableResalePrices, 0.2) : sourceResaleLow;
-    const resaleMedian = hasComparableResaleEvidence ? quantile(comparableResalePrices, 0.5) : sourceResaleMedian;
-    const resaleHigh = hasComparableResaleEvidence ? quantile(comparableResalePrices, 0.8) : sourceResaleHigh;
+    const askingPriceHaircut = clamp(configuredNumber(null, s.askingPriceHaircut) / 100, 0, 0.8);
+    const askingPlanningFactor = 1 - askingPriceHaircut;
+    const resaleLow = hasComparableResaleEvidence
+      ? quantile(comparableResalePrices, 0.2)
+      : hasUsedAskingEvidence ? onlineUsedLow * askingPlanningFactor : sourceResaleLow;
+    const resaleMedian = hasComparableResaleEvidence
+      ? quantile(comparableResalePrices, 0.5)
+      : hasUsedAskingEvidence ? onlineUsedMedian * askingPlanningFactor : sourceResaleMedian;
+    const resaleHigh = hasComparableResaleEvidence
+      ? quantile(comparableResalePrices, 0.8)
+      : hasUsedAskingEvidence ? onlineUsedHigh * askingPlanningFactor : sourceResaleHigh;
     const resaleAverage = hasComparableResaleEvidence
       ? comparableResalePrices.reduce((total, value) => total + value, 0) / comparableResalePrices.length
-      : null;
+      : hasUsedAskingEvidence ? onlineUsedAverage * askingPlanningFactor : null;
     const landedAt = (bid) => ((Math.max(0, bid) * (1 + buyerPremium / 100) + shipping) * (1 + taxRate / 100));
     const buyerPremiumCost = modeledBid * buyerPremium / 100;
     const acquisitionSubtotal = modeledBid + buyerPremiumCost + shipping;
     const taxCost = acquisitionSubtotal * taxRate / 100;
     const acquisition = acquisitionSubtotal + taxCost;
     const currentAcquisition = landedAt(currentBid);
+    const currentBuyerPremiumCost = currentBid * buyerPremium / 100;
+    const currentTaxCost = (currentBid + currentBuyerPremiumCost + shipping) * taxRate / 100;
     const netResale = (sale) => sale * (1 - marketplaceFee / 100) - outboundShipping - repairReserve - returnReserve;
     const netLow = netResale(resaleLow);
     const netMedian = netResale(resaleMedian);
@@ -677,14 +716,15 @@
       && resaleLow > 0
       && resaleLow <= resaleMedian
       && resaleHigh >= resaleMedian
-      && (hasComparableResaleEvidence || hasIntrinsicEvidence);
+      && (hasComparableResaleEvidence || hasIntrinsicEvidence || hasUsedAskingEvidence);
     const hasForecast = forecast.status === "available";
-    const hasDecisionInputs = hasResaleEvidence && shippingKnown;
-    const profitLow = hasForecast && hasDecisionInputs ? netLow - landedAt(forecast.high) : null;
-    const profitExpected = hasForecast && hasDecisionInputs ? netMedian - acquisition : null;
-    const profitHigh = hasForecast && hasDecisionInputs ? netHigh - landedAt(forecast.low) : null;
-    const profitAtCurrentBid = hasDecisionInputs ? netMedian - currentAcquisition : null;
-    const pawnPayoutPercent = clamp(configuredNumber(null, s.pawnPayoutPercent) / 100, 0, 1) * 100;
+    const resaleDecisionAvailable = hasResaleEvidence;
+    const profitLow = hasForecast && resaleDecisionAvailable ? netLow - landedAt(forecast.high) : null;
+    const profitExpected = hasForecast && resaleDecisionAvailable ? netMedian - acquisition : null;
+    const profitHigh = hasForecast && resaleDecisionAvailable ? netHigh - landedAt(forecast.low) : null;
+    const profitAtCurrentBid = resaleDecisionAvailable ? netMedian - currentAcquisition : null;
+    const pawnPayoutPercent = clamp(configuredNumber(null, s.pawnPayoutPercent) / 100, 0.2, 0.7) * 100;
+    const pawnTestingReserve = Math.max(0, configuredNumber(null, s.pawnTestingReserve));
     const metalQuoteAt = Date.parse(item.metalEstimate?.quoteObservedAt || "");
     const quotedMeltCeiling = Number(item.metalEstimate?.meltCeiling);
     const recalculatedMeltCeiling = Number(item.metalEstimate?.grossWeightGrams)
@@ -695,14 +735,43 @@
       && Number.isFinite(metalQuoteAt)
       && metalQuoteAt <= Date.now() + 300000
       && Date.now() - metalQuoteAt <= 86400000;
-    const pawnCashEstimate = hasMetalEstimate ? quotedMeltCeiling * pawnPayoutPercent / 100 : null;
-    const pawnProfitAtCurrentBid = hasMetalEstimate && shippingKnown ? pawnCashEstimate - currentAcquisition : null;
+    const hasPossibleNonMetalWeight = /may include|stones?|movement|strap|band|pearl|gem/i.test(String(item.metalEstimate?.nonMetalWarning || ""));
+    const recoverableWeightFactor = hasPossibleNonMetalWeight ? 0.75 : 0.95;
+    const pawnMeltBasis = hasMetalEstimate ? quotedMeltCeiling * recoverableWeightFactor : null;
+    const pawnLowPercent = Math.max(20, pawnPayoutPercent - 15);
+    const pawnHighPercent = Math.min(75, pawnPayoutPercent + 15);
+    const pawnCashLow = hasMetalEstimate ? pawnMeltBasis * pawnLowPercent / 100 : null;
+    const pawnCashEstimate = hasMetalEstimate ? pawnMeltBasis * pawnPayoutPercent / 100 : null;
+    const pawnCashHigh = hasMetalEstimate ? pawnMeltBasis * pawnHighPercent / 100 : null;
+    const pawnProfitLow = hasMetalEstimate ? pawnCashLow - currentAcquisition - pawnTestingReserve : null;
+    const pawnProfitAtCurrentBid = hasMetalEstimate ? pawnCashEstimate - currentAcquisition - pawnTestingReserve : null;
+    const pawnProfitHigh = hasMetalEstimate ? pawnCashHigh - currentAcquisition - pawnTestingReserve : null;
     const conservativeResale = resaleLow + Math.max(0, resaleMedian - resaleLow) * 0.2;
     const desiredProfit = Math.max(Number(s.minimumProfit) || 0, conservativeResale * (Number(s.targetMargin) || 0) / 100);
     const maximumLanded = Math.max(0, netResale(conservativeResale) - desiredProfit);
-    const maxBid = hasDecisionInputs
+    const resaleMaxBid = resaleDecisionAvailable
       ? Math.max(0, (maximumLanded / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
-      : null;
+      : 0;
+    const pawnRequiredProfit = Math.max(Number(s.minimumProfit) || 0, Number(pawnCashLow || 0) * (Number(s.targetMargin) || 0) / 100);
+    const pawnMaximumLanded = Math.max(0, Number(pawnCashLow || 0) - pawnTestingReserve - pawnRequiredProfit);
+    const pawnMaxBid = hasMetalEstimate
+      ? Math.max(0, (pawnMaximumLanded / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
+      : 0;
+    const exitType = hasMetalEstimate ? "pawn" : resaleDecisionAvailable ? "online-resale" : "no-evidence";
+    const maxBid = exitType === "pawn" ? pawnMaxBid : exitType === "online-resale" ? resaleMaxBid : 0;
+    const safeCeilingBasis = exitType === "pawn"
+      ? `${pawnLowPercent.toFixed(0)}% low pawn case after recoverable-weight and testing reserves`
+      : hasComparableResaleEvidence
+        ? "Exact-model completed-sale P20 after all configured costs"
+        : hasUsedAskingEvidence
+          ? `Used online asking P20 after ${Math.round(askingPriceHaircut * 100)}% evidence haircut and all costs`
+          : hasIntrinsicEvidence
+            ? "Timestamped intrinsic floor after all configured costs"
+            : "No defensible online price evidence — do not bid";
+    const hasDecisionInputs = exitType !== "no-evidence";
+    const decisionProfitAtCurrentBid = exitType === "pawn" ? pawnProfitAtCurrentBid : profitAtCurrentBid;
+    const decisionProfitLow = exitType === "pawn" ? pawnProfitLow : (resaleDecisionAvailable ? netLow - currentAcquisition : null);
+    const decisionProfitHigh = exitType === "pawn" ? pawnProfitHigh : (resaleDecisionAvailable ? netHigh - currentAcquisition : null);
     const comparableCount = Math.max(Number(item.compCount) || 0, forecast.exactModelCount || 0);
     const compCoverage = clamp(Math.log2(comparableCount + 1) / 4);
     const suppliedRecencyDays = Number(item.compRecencyDays);
@@ -710,24 +779,36 @@
       ? suppliedRecencyDays
       : 365;
     const recency = clamp(1 - compRecencyDays / 365);
-    const confidence = clamp(
+    const evidenceConfidence = clamp(
       parseConfidence(item.identityConfidence, 0.35) * 0.28 +
       parseConfidence(item.conditionConfidence, 0.35) * 0.2 +
       compCoverage * 0.25 +
       recency * 0.12 +
-      clamp((liquidityScore ?? Number(item.demand) ?? 50) / 100) * 0.1 +
+      clamp((liquidityScore ?? 0) / 100) * 0.1 +
       forecast.confidence * 0.05,
     );
-    const roi = profitExpected === null ? null : profitExpected / Math.max(1, acquisition);
+    const metalConfidence = hasMetalEstimate
+      ? clamp((item.metalEstimate?.sourceDescriptionStatus === "source-stated-tested" ? 0.62 : 0.46)
+        - (hasPossibleNonMetalWeight ? 0.08 : 0)
+        - (shippingEstimated ? 0.04 : 0))
+      : 0;
+    const askingConfidence = hasUsedAskingEvidence ? clamp(0.42 + Math.min(0.18, uniqueUsedListings.length / 100)) : 0;
+    const confidence = exitType === "pawn" ? metalConfidence : hasComparableResaleEvidence ? evidenceConfidence : hasUsedAskingEvidence ? askingConfidence : evidenceConfidence;
+    const resalePopularityScore = exitType === "pawn"
+      ? 90
+      : hasLiquidityEvidence ? liquidityScore : hasUsedAskingEvidence ? 52 : hasComparableResaleEvidence ? 45 : 0;
+    const saleLikelihood = exitType === "pawn"
+      ? 0.9
+      : hasLiquidityEvidence ? clamp(0.35 + sellThroughRate * 0.65) : hasUsedAskingEvidence ? 0.52 : hasComparableResaleEvidence ? 0.45 : 0;
+    const roi = decisionProfitAtCurrentBid === null ? null : decisionProfitAtCurrentBid / Math.max(1, currentAcquisition);
     const marginComponent = clamp((roi + 0.15) / 1.15);
     const urgency = clamp(1 - hours / 72);
     const rawScore = 100 * clamp(
-      marginComponent * 0.34 +
-      clamp((liquidityScore ?? Number(item.demand) ?? 50) / 100) * 0.2 +
-      confidence * 0.2 +
-      clamp((Number(item.rarity) || 0) / 100) * 0.1 +
-      urgency * 0.06 +
-      forecast.confidence * 0.1,
+      marginComponent * 0.48 +
+      clamp(resalePopularityScore / 100) * 0.24 +
+      confidence * 0.18 +
+      saleLikelihood * 0.05 +
+      urgency * 0.05,
     );
     const freshness = freshnessFor(item);
     const endTimestamp = Date.parse(item.endsAt || "");
@@ -736,13 +817,20 @@
       && endTimestamp > Date.now()
       && currentBid > 0
       && (freshness.className === "is-fresh" || freshness.className === "is-aging");
-    const score = hasForecast && hasDecisionInputs && actionableSnapshot
-      ? Math.round(rawScore)
-      : Math.min(35, hasResaleEvidence ? Math.round(rawScore) : 15);
+    const score = hasDecisionInputs ? Math.round(rawScore) : 0;
+    const profitableNow = decisionProfitAtCurrentBid !== null
+      && decisionProfitAtCurrentBid >= Number(s.minimumProfit || 0)
+      && maxBid > currentBid;
+    const rankTier = profitableNow && exitType === "pawn"
+      ? 0
+      : profitableNow && resalePopularityScore >= 60 ? 1
+        : profitableNow ? 2
+          : exitType === "pawn" ? 3
+            : hasDecisionInputs ? 4 : 5;
     let signal = "research";
-    if (hasForecast && hasDecisionInputs && (profitExpected < 0 || maxBid < currentBid * 0.9)) signal = "avoid";
-    else if (hasForecast && hasDecisionInputs && actionableSnapshot && score >= 70 && maxBid > currentBid && profitLow >= Number(s.minimumProfit || 0)) signal = "candidate";
-    else if (hasForecast && hasDecisionInputs && actionableSnapshot && score >= 48 && profitExpected > 0) signal = "watch";
+    if (hasDecisionInputs && (decisionProfitAtCurrentBid < 0 || maxBid <= currentBid)) signal = "avoid";
+    else if (profitableNow && actionableSnapshot) signal = "candidate";
+    else if (hasDecisionInputs && decisionProfitAtCurrentBid > 0) signal = "watch";
     if (["research", "avoid"].includes(item.riskGate)) signal = item.riskGate;
     return {
       expectedClose,
@@ -754,13 +842,17 @@
       marketplaceFeeCost: resaleMedian * marketplaceFee / 100,
       taxRate,
       taxCost,
+      currentTaxCost,
       buyerPremium,
       buyerPremiumCost,
+      currentBuyerPremiumCost,
       outboundShipping,
       repairReserve,
       returnReserve,
       shipping,
       shippingKnown,
+      shippingEstimated,
+      assumedInboundShipping,
       resaleLow,
       resaleMedian,
       resaleHigh,
@@ -773,18 +865,53 @@
       profitHigh,
       profitAtCurrentBid,
       pawnPayoutPercent,
+      pawnLowPercent,
+      pawnHighPercent,
+      pawnTestingReserve,
+      recoverableWeightFactor,
+      pawnMeltBasis,
+      pawnCashLow,
       pawnCashEstimate,
+      pawnCashHigh,
+      pawnProfitLow,
       pawnProfitAtCurrentBid,
+      pawnProfitHigh,
       hasMetalEstimate,
-      confidence: hasResaleEvidence ? confidence : Math.min(confidence, 0.2),
+      confidence,
       score,
       signal,
       maxBid,
+      resaleMaxBid,
+      pawnMaxBid,
+      safeCeilingBasis,
+      exitType,
+      decisionProfitAtCurrentBid,
+      decisionProfitLow,
+      decisionProfitHigh,
+      profitableNow,
+      rankTier,
+      resalePopularityScore,
+      saleLikelihood,
       roi,
       hours,
       hasResaleEvidence,
       resaleEvidenceCount,
-      resaleEvidenceType: hasIntrinsicEvidence ? "intrinsic liquidation basis" : `${resaleEvidenceCount} exact-model sold comparable${resaleEvidenceCount === 1 ? "" : "s"}`,
+      resaleEvidenceType: hasIntrinsicEvidence
+        ? "intrinsic liquidation basis"
+        : hasComparableResaleEvidence
+          ? `${resaleEvidenceCount} exact-model sold comparable${resaleEvidenceCount === 1 ? "" : "s"}`
+          : hasUsedAskingEvidence
+            ? `${uniqueUsedListings.length} matched used online asking prices with a ${Math.round(askingPriceHaircut * 100)}% haircut`
+            : "no verified resale evidence",
+      hasComparableResaleEvidence,
+      hasUsedAskingEvidence,
+      onlineUsedLow,
+      onlineUsedMedian,
+      onlineUsedHigh,
+      onlineUsedAverage,
+      usedAskingCount: uniqueUsedListings.length,
+      askingPriceHaircut,
+      askingMarketAsOf: Number.isFinite(askingMarketAsOf) ? new Date(askingMarketAsOf).toISOString() : null,
       hasLiquidityEvidence,
       soldListingCount,
       activeListingCount,
@@ -838,8 +965,20 @@
     const authenticationBadge = item.authenticationStatus === "source-stated"
       ? '<span class="status-pill authentication-source">AUTH CLAIM</span>'
       : "";
-    const rowProfit = a.profitExpected ?? a.profitAtCurrentBid;
-    const rowProfitLabel = a.profitExpected !== null ? "Expected profit" : a.profitAtCurrentBid !== null ? "Profit if won now" : "Profit estimate";
+    const exitBadge = a.exitType === "pawn"
+      ? '<span class="status-pill pawn-exit">PAWN EXIT</span>'
+      : a.hasComparableResaleEvidence
+        ? '<span class="status-pill sold-exit">SOLD COMPS</span>'
+        : a.hasUsedAskingEvidence ? '<span class="status-pill asking-exit">USED ASKING</span>' : "";
+    const rowProfit = a.decisionProfitAtCurrentBid;
+    const rowProfitLabel = a.exitType === "pawn" ? "Likely pawn profit" : "Likely resale profit";
+    const exitSummary = a.exitType === "pawn"
+      ? `${money(a.pawnCashEstimate)} likely pawn cash · ${Math.round(a.saleLikelihood * 100)}% modeled liquidity`
+      : a.hasComparableResaleEvidence
+        ? `${money(a.resaleMedian)} sold median · ${a.hasLiquidityEvidence ? `${a.liquidityLabel} liquidity` : "velocity unknown"}`
+        : a.hasUsedAskingEvidence
+          ? `${money(a.onlineUsedAverage)} average used asking · ${Math.round(a.askingPriceHaircut * 100)}% haircut`
+          : "No defensible online price evidence";
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; ${sourceUrl ? `press Enter to open on ${escapeHtml(marketplace.name)}` : "source listing URL unavailable"}">
         <div class="item-cell">
@@ -847,13 +986,13 @@
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.score};--score-color:${scoreColor(a.signal)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
         <div class="money-cell"><span>Observed bid</span><strong>${money(item.currentBid)}</strong><small>${a.hasForecast ? `Expected ${money(a.expectedClose)} · ` : "No learned close · "}${Number(item.bidCount) || 0} bids</small></div>
-        <div class="money-cell"><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete"}</strong><small>${a.hasDecisionInputs ? "after all configured costs" : a.shippingKnown ? "add resale evidence" : "shipping required"}</small></div>
-        <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowProfit === null ? "" : rowProfit >= 0 ? "positive" : "negative"}">${rowProfit === null ? "Insufficient" : money(rowProfit)}</strong><small>${a.hasResaleEvidence ? `${money(a.resaleMedian)} sold median · ${a.hasLiquidityEvidence ? `${a.liquidityLabel} liquidity` : "velocity unknown"}` : "needs completed sales"}</small></div>
+        <div class="money-cell"><span>Safe ceiling</span><strong>${money(a.maxBid)}</strong><small>${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? " · shipping estimated" : ""}</small></div>
+        <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowProfit === null ? "" : rowProfit >= 0 ? "positive" : "negative"}">${rowProfit === null ? "No evidence" : money(rowProfit)}</strong><small>${escapeHtml(exitSummary)}</small></div>
         <div class="row-actions">
           <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
           ${sourceUrl ? `<a class="row-direct-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing title="Open source listing" aria-label="Open ${escapeHtml(item.title)} on its source site">↗</a>` : ""}
@@ -947,14 +1086,22 @@
     const snapshotPlan = snapshotPlanFor(item);
     const acquisitionComparables = a.forecast.comparables || [];
     const resaleComparables = resaleComparablesFor(item);
-    const displayedProfit = a.profitExpected ?? a.profitAtCurrentBid;
-    const displayedAcquisition = a.hasForecast ? a.acquisition : a.currentAcquisition;
-    const maxWaterfall = Math.max(a.resaleMedian, displayedAcquisition, a.sellingCosts, Math.abs(displayedProfit), 1);
+    const displayedProfit = a.decisionProfitAtCurrentBid;
+    const displayedAcquisition = a.currentAcquisition;
+    const displayedExitValue = a.exitType === "pawn" ? a.pawnCashEstimate : a.resaleMedian;
+    const displayedExitCosts = a.exitType === "pawn" ? a.pawnTestingReserve : a.sellingCosts;
+    const maxWaterfall = Math.max(displayedExitValue, displayedAcquisition, displayedExitCosts, Math.abs(displayedProfit), 1);
     const resaleMarketHistory = (Array.isArray(item.resaleMarketHistory) ? item.resaleMarketHistory : [])
       .filter((entry) => Number(entry?.priceMedian) > 0 && Number.isFinite(Date.parse(entry?.asOf || "")))
       .sort((left, right) => Date.parse(left.asOf) - Date.parse(right.asOf));
     const priorMarket = resaleMarketHistory.length > 1 ? resaleMarketHistory.at(-2) : null;
     const medianTrend = priorMarket ? a.resaleMedian / Number(priorMarket.priceMedian) - 1 : null;
+    const marketUsesAsking = a.hasUsedAskingEvidence && !a.hasComparableResaleEvidence;
+    const marketLow = marketUsesAsking ? a.onlineUsedLow : a.resaleLow;
+    const marketMedian = marketUsesAsking ? a.onlineUsedMedian : a.resaleMedian;
+    const marketAverage = marketUsesAsking ? a.onlineUsedAverage : a.resaleAverage;
+    const marketHigh = marketUsesAsking ? a.onlineUsedHigh : a.resaleHigh;
+    const marketSampleSize = marketUsesAsking ? a.usedAskingCount : a.resaleEvidenceCount;
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
       ? item.evidence
@@ -962,7 +1109,7 @@
           { label: "Identity", value: item.identifiedAs || "Identity not yet verified" },
           { label: "Authentication", value: item.authenticationEvidence || "No authentication evidence supplied" },
           { label: "Forecast", value: a.hasForecast ? `${a.forecast.exactModelCount} exact-model outcomes` : "Insufficient exact-model outcomes" },
-          { label: "Costs", value: a.shippingKnown ? "Inbound shipping recorded" : "Inbound shipping missing" },
+          { label: "Costs", value: a.shippingKnown ? "Inbound shipping recorded" : `${money(a.shipping)} conservative inbound estimate` },
         ];
     container.innerHTML = `
       <div class="detail-top">
@@ -978,7 +1125,7 @@
         <div class="bid-metrics">
           <div class="bid-metric"><span>${item.status === "ended" ? "Final recorded bid" : "Observed bid"}</span><strong>${money(item.status === "ended" && item.finalPrice ? item.finalPrice : item.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids · ${timeLabel(item)} · ${escapeHtml(freshness.short)}</small></div>
           <div class="bid-metric"><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient history"}</strong><small>${a.hasForecast ? `${money(a.forecast.low)}–${money(a.forecast.high)}` : `${a.forecast.exactModelCount}/5 exact-model outcomes`}</small></div>
-          <div class="bid-metric primary"><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete inputs"}</strong><small>${a.hasDecisionInputs ? "target profit preserved" : a.shippingKnown ? "resale evidence required" : "shipping cost required"}</small></div>
+          <div class="bid-metric primary"><span>Safe ceiling</span><strong>${money(a.maxBid)}</strong><small>${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? ` · includes ${money(a.shipping)} estimated inbound shipping` : ""}</small></div>
         </div>
         <section class="forecast-basis-panel ${a.hasForecast ? "is-available" : "is-insufficient"}">
           <div class="forecast-basis-head"><div><span>FORECAST BASIS</span><h4>${a.hasForecast ? escapeHtml(a.forecast.method) : "Insufficient similar completed auctions"}</h4></div><strong>${a.hasForecast ? `${Math.round(a.forecast.confidence * 100)}% model confidence` : "Not ranked"}</strong></div>
@@ -993,13 +1140,13 @@
           ${!a.hasForecast ? `<p class="no-history-copy">${escapeHtml(a.forecast.method)}. Category-wide outcomes are shown only as reference and are not used to estimate this item.</p>` : ""}
         </section>
         <section class="detail-section resale-liquidity-panel">
-          <div class="detail-section-heading"><h4>Resale market and velocity</h4><span>${a.hasLiquidityEvidence ? `${escapeHtml(a.resaleChannel)} · ${a.resaleLookbackDays}-day window` : "completed-sales evidence required"}</span></div>
+          <div class="detail-section-heading"><h4>${marketUsesAsking ? "Used online asking market" : "Resale market and velocity"}</h4><span>${marketUsesAsking ? `${marketSampleSize} matched active used listings · planning values receive a ${Math.round(a.askingPriceHaircut * 100)}% haircut` : a.hasLiquidityEvidence ? `${escapeHtml(a.resaleChannel)} · ${a.resaleLookbackDays}-day window` : "completed-sales evidence required"}</span></div>
           ${a.hasResaleEvidence ? `
             <div class="profit-scenarios">
-              <div class="downside"><span>Quick-sale target</span><strong>${money(a.resaleLow)}</strong><small>20th percentile of exact-model sold prices</small></div>
-              <div class="base"><span>Median sold price</span><strong>${money(a.resaleMedian)}</strong><small>${a.resaleEvidenceCount} completed exact-model sales</small></div>
-              <div><span>Average sold price</span><strong>${a.resaleAverage === null ? "—" : money(a.resaleAverage)}</strong><small>mean; median remains the profit anchor</small></div>
-              <div class="upside"><span>Upper sold range</span><strong>${money(a.resaleHigh)}</strong><small>80th percentile of exact-model sold prices</small></div>
+              <div class="downside"><span>20th percentile</span><strong>${money(marketLow)}</strong><small>${marketUsesAsking ? "active used asking prices" : "exact-model completed sales"}</small></div>
+              <div class="base"><span>Median ${marketUsesAsking ? "asking" : "sold"} price</span><strong>${money(marketMedian)}</strong><small>${marketSampleSize} matched ${marketUsesAsking ? "used listings" : "completed sales"}</small></div>
+              <div><span>Average ${marketUsesAsking ? "asking" : "sold"} price</span><strong>${marketAverage === null ? "—" : money(marketAverage)}</strong><small>observed market mean</small></div>
+              <div class="upside"><span>80th percentile</span><strong>${money(marketHigh)}</strong><small>${marketUsesAsking ? "active used asking prices" : "exact-model completed sales"}</small></div>
             </div>
             ${a.hasLiquidityEvidence ? `<div class="cost-risk-grid">
               <div><span>Sell-through</span><strong>${percent(a.sellThroughRate)}</strong><small>${a.soldListingCount} sold ÷ ${a.soldListingCount + a.activeListingCount} sold + active</small></div>
@@ -1007,45 +1154,52 @@
               <div><span>Median days to sell</span><strong>${a.medianDaysToSell === null ? "Not supplied" : `${a.medianDaysToSell.toFixed(1)} days`}</strong></div>
               <div><span>Market observed</span><strong>${escapeHtml(formatDateTime(a.resaleMarketAsOf))}</strong><small>asking prices excluded</small></div>
               <div><span>Median trend</span><strong>${medianTrend === null ? "Learning" : `${medianTrend >= 0 ? "+" : ""}${percent(medianTrend)}`}</strong><small>${resaleMarketHistory.length} validated market snapshot${resaleMarketHistory.length === 1 ? "" : "s"}</small></div>
-            </div>` : `<div class="no-history-state"><strong>Price range available; resale speed unknown</strong><p>The source supplied qualifying completed sales but not a current sold-versus-active count. Auction bid activity is not treated as eBay sell-through.</p></div>`}
-          ` : `<div class="no-history-state"><strong>No qualifying completed-sales evidence yet</strong><p>BidAI Pro does not substitute active asking prices. Connect an authorized completed-sales feed to calculate the quick-sale price, median, average, sell-through rate, and resale velocity.</p></div>`}
+            </div>` : marketUsesAsking
+              ? `<div class="no-history-state"><strong>Used asking-price range available; resale speed unknown</strong><p>These are active eBay used-listing totals, not completed sales. BidAI Pro applies the configured ${Math.round(a.askingPriceHaircut * 100)}% haircut before calculating profit or the safe ceiling.</p></div>`
+              : `<div class="no-history-state"><strong>Completed-sale range available; resale speed unknown</strong><p>The source supplied qualifying completed sales but not a current sold-versus-active count. Auction bid activity is not treated as eBay sell-through.</p></div>`}
+          ` : `<div class="no-history-state"><strong>No defensible online resale price yet</strong><p>Connect the eBay used-listing search or an authorized completed-sales feed. Until real matched evidence is available, the safe ceiling remains $0 and the item is not promoted.</p></div>`}
         </section>
         <section class="detail-section">
-          <div class="detail-section-heading"><h4>${a.hasForecast ? "Expected-close profit waterfall" : "Observed-bid cost position"}</h4><span>${a.hasForecast ? `${money(a.forecast.low)}–${money(a.forecast.high)} close range` : "forecast withheld until evidence threshold is met"}</span></div>
+          <div class="detail-section-heading"><h4>${a.exitType === "pawn" ? "Direct pawn-exit waterfall" : "Online-resale profit waterfall"}</h4><span>${escapeHtml(a.safeCeilingBasis)}</span></div>
           <div class="waterfall">
-            <div class="waterfall-row"><span>Median resale</span><span class="waterfall-track"><i style="--width:${width(a.resaleMedian)}"></i></span><strong>${money(a.resaleMedian)}</strong></div>
-            <div class="waterfall-row cost"><span>${a.hasForecast ? "Expected landed cost" : "Landed at observed bid"}</span><span class="waterfall-track"><i style="--width:${width(displayedAcquisition)}"></i></span><strong>−${a.shippingKnown ? money(displayedAcquisition) : "Shipping missing"}</strong></div>
-            <div class="waterfall-row cost"><span>Sell + risk costs</span><span class="waterfall-track"><i style="--width:${width(a.sellingCosts)}"></i></span><strong>−${money(a.sellingCosts)}</strong></div>
-            <div class="waterfall-row profit ${displayedProfit !== null && displayedProfit < 0 ? "negative" : ""}"><span>${a.hasForecast ? "Expected profit" : "Profit if won now"}</span><span class="waterfall-track"><i style="--width:${width(displayedProfit)}"></i></span><strong>${displayedProfit === null ? "Insufficient inputs" : money(displayedProfit)}</strong></div>
+            <div class="waterfall-row"><span>${a.exitType === "pawn" ? "Likely pawn cash" : "Planning resale value"}</span><span class="waterfall-track"><i style="--width:${width(displayedExitValue)}"></i></span><strong>${money(displayedExitValue)}</strong></div>
+            <div class="waterfall-row cost"><span>Landed at observed bid</span><span class="waterfall-track"><i style="--width:${width(displayedAcquisition)}"></i></span><strong>−${money(displayedAcquisition)}</strong></div>
+            <div class="waterfall-row cost"><span>${a.exitType === "pawn" ? "Testing reserve" : "Sell + risk costs"}</span><span class="waterfall-track"><i style="--width:${width(displayedExitCosts)}"></i></span><strong>−${money(displayedExitCosts)}</strong></div>
+            <div class="waterfall-row profit ${displayedProfit !== null && displayedProfit < 0 ? "negative" : ""}"><span>Likely profit if won now</span><span class="waterfall-track"><i style="--width:${width(displayedProfit)}"></i></span><strong>${displayedProfit === null ? "No market evidence" : money(displayedProfit)}</strong></div>
           </div>
-          ${a.profitExpected !== null ? `<div class="profit-scenarios">
-            <div class="downside"><span>Conservative case</span><strong>${money(a.profitLow)}</strong><small>${money(a.resaleLow)} resale · ${money(a.forecast.high)} close</small></div>
-            <div class="base"><span>Base case</span><strong>${money(a.profitExpected)}</strong><small>${money(a.resaleMedian)} resale · ${money(a.expectedClose)} close</small></div>
-            <div class="upside"><span>Upside case</span><strong>${money(a.profitHigh)}</strong><small>${money(a.resaleHigh)} resale · ${money(a.forecast.low)} close</small></div>
+          ${displayedProfit !== null ? `<div class="profit-scenarios">
+            <div class="downside"><span>Low cash case</span><strong>${money(a.decisionProfitLow)}</strong><small>${money(a.exitType === "pawn" ? a.pawnCashLow : a.resaleLow)} exit value</small></div>
+            <div class="base"><span>Likely case</span><strong>${money(a.decisionProfitAtCurrentBid)}</strong><small>${money(a.exitType === "pawn" ? a.pawnCashEstimate : a.resaleMedian)} exit value</small></div>
+            <div class="upside"><span>High cash case</span><strong>${money(a.decisionProfitHigh)}</strong><small>${money(a.exitType === "pawn" ? a.pawnCashHigh : a.resaleHigh)} exit value</small></div>
           </div>` : ""}
         </section>
         <section class="detail-section cost-risk-panel">
-          <div class="detail-section-heading"><h4>Full cost stack</h4><span>${a.shippingKnown ? "configured inputs" : "blocked by missing shipping"}</span></div>
+          <div class="detail-section-heading"><h4>Full cost stack at observed bid</h4><span>${a.shippingKnown ? "recorded inbound shipping" : `${money(a.shipping)} conservative shipping estimate`}</span></div>
           <div class="cost-risk-grid">
-            <div><span>${a.hasForecast ? "Expected acquisition bid" : "Observed bid basis"}</span><strong>${money(a.modeledBid)}</strong></div>
-            <div><span>Inbound shipping</span><strong>${a.shippingKnown ? money(a.shipping) : "Unknown"}</strong></div>
-            <div><span>Buyer premium (${a.buyerPremium.toFixed(2)}%)</span><strong>${money(a.buyerPremiumCost)}</strong></div>
-            <div><span>Purchase tax (${a.taxRate.toFixed(2)}%)</span><strong>${money(a.taxCost)}</strong></div>
-            <div><span>Marketplace fee (${a.marketplaceFee.toFixed(2)}%)</span><strong>${money(a.marketplaceFeeCost)}</strong></div>
-            <div><span>Outbound shipping</span><strong>${money(a.outboundShipping)}</strong></div>
-            <div><span>Repair / testing reserve</span><strong>${money(a.repairReserve)}</strong></div>
-            <div><span>Return / loss reserve</span><strong>${money(a.returnReserve)}</strong></div>
+            <div><span>Observed bid basis</span><strong>${money(a.currentBid)}</strong></div>
+            <div><span>Inbound shipping</span><strong>${money(a.shipping)}</strong><small>${a.shippingKnown ? "recorded by source" : "user-configured conservative estimate"}</small></div>
+            <div><span>Buyer premium (${a.buyerPremium.toFixed(2)}%)</span><strong>${money(a.currentBuyerPremiumCost)}</strong></div>
+            <div><span>Purchase tax (${a.taxRate.toFixed(2)}%)</span><strong>${money(a.currentTaxCost)}</strong></div>
+            <div><span>Landed acquisition now</span><strong>${money(a.currentAcquisition)}</strong></div>
+            ${a.exitType === "pawn" ? `<div><span>Pawn testing reserve</span><strong>${money(a.pawnTestingReserve)}</strong><small>deducted from every pawn scenario</small></div>` : `
+              <div><span>Marketplace fee (${a.marketplaceFee.toFixed(2)}%)</span><strong>${money(a.marketplaceFeeCost)}</strong><small>online exit only</small></div>
+              <div><span>Outbound shipping</span><strong>${money(a.outboundShipping)}</strong><small>online exit only</small></div>
+              <div><span>Repair / testing reserve</span><strong>${money(a.repairReserve)}</strong><small>online exit only</small></div>
+              <div><span>Return / loss reserve</span><strong>${money(a.returnReserve)}</strong><small>online exit only</small></div>`}
           </div>
         </section>
         ${item.metalEstimate ? `<section class="detail-section cost-risk-panel">
-          <div class="detail-section-heading"><h4>Pawn / precious-metal exit</h4><span>${a.hasMetalEstimate ? "live spot scenario" : "quote stale or invalid"}</span></div>
+          <div class="detail-section-heading"><h4>Pawn / precious-metal exit</h4><span>${a.hasMetalEstimate ? `${a.pawnLowPercent.toFixed(0)}%–${a.pawnHighPercent.toFixed(0)}% modeled offer range` : "quote stale or invalid"}</span></div>
           <div class="cost-risk-grid">
             <div><span>Source-described material</span><strong>${escapeHtml(`${item.metalEstimate.purityLabel || "Unknown purity"} ${item.metalEstimate.metal || "metal"}`)}</strong><small>${Number(item.metalEstimate.grossWeightGrams).toFixed(2)} g gross</small></div>
             <div><span>Gross melt ceiling</span><strong>${a.hasMetalEstimate ? money(item.metalEstimate.meltCeiling) : "Refresh required"}</strong><small>${escapeHtml(formatDateTime(item.metalEstimate.quoteObservedAt))} spot quote</small></div>
-            <div><span>Modeled pawn cash offer</span><strong>${a.pawnCashEstimate === null ? "Unavailable" : money(a.pawnCashEstimate)}</strong><small>${a.pawnPayoutPercent.toFixed(0)}% of melt; adjustable in Settings</small></div>
-            <div><span>Pawn spread if won now</span><strong>${a.pawnProfitAtCurrentBid === null ? "Shipping required" : money(a.pawnProfitAtCurrentBid)}</strong><small>cash offer less landed acquisition</small></div>
+            <div><span>Recoverable melt basis</span><strong>${a.pawnMeltBasis === null ? "Unavailable" : money(a.pawnMeltBasis)}</strong><small>${Math.round(a.recoverableWeightFactor * 100)}% of gross melt after non-metal / recovery allowance</small></div>
+            <div><span>Likely pawn cash</span><strong>${a.pawnCashEstimate === null ? "Unavailable" : money(a.pawnCashEstimate)}</strong><small>${a.pawnPayoutPercent.toFixed(0)}% working payout estimate; adjustable</small></div>
+            <div><span>Modeled pawn offer range</span><strong>${a.pawnCashLow === null ? "Unavailable" : `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)}`}</strong><small>low, likely, and high cases are estimates—not offers</small></div>
+            <div><span>Safe pawn bid ceiling</span><strong>${money(a.pawnMaxBid)}</strong><small>uses the low pawn case plus testing and profit reserves</small></div>
+            <div><span>Likely profit if won now</span><strong>${a.pawnProfitAtCurrentBid === null ? "Unavailable" : money(a.pawnProfitAtCurrentBid)}</strong><small>likely cash less landed acquisition and testing reserve</small></div>
           </div>
-          <div class="risk-summary-card"><span>TEST BEFORE BIDDING</span><p>${escapeHtml(item.metalEstimate.nonMetalWarning || "Purity and weight require independent verification.")}</p><small>A pawn shop chooses its own payout and may reject the item. This scenario is not an appraisal, bid recommendation, or guaranteed offer.</small></div>
+          <div class="risk-summary-card"><span>TEST BEFORE BIDDING</span><p>${escapeHtml(item.metalEstimate.nonMetalWarning || "Purity and weight require independent verification.")}</p><small>The likely case uses a ${a.pawnPayoutPercent.toFixed(0)}% working estimate; observed industry guidance varies widely. A pawn shop may test, discount, or reject the item. This is not an appraisal or guaranteed offer.</small></div>
         </section>` : ""}
         <section class="detail-section">
           <div class="detail-section-heading"><h4>Bid development</h4><span>timestamped observations${a.hasForecast ? " + evidence-based close" : ""}</span></div>
@@ -1058,12 +1212,13 @@
           <div class="detail-section-heading"><h4>Evidence check</h4><span>${percent(a.confidence)} confidence</span></div>
           <div class="evidence-grid">${evidence.slice(0, 4).map((entry) => `<div class="evidence-item"><span>${escapeHtml(entry.label)}</span><strong title="${escapeHtml(entry.value)}">${escapeHtml(entry.value)}</strong></div>`).join("")}</div>
           <div class="analysis-factors-grid">
-            <div><span>${a.hasLiquidityEvidence ? "Resale liquidity" : "Auction bid activity"}</span><strong>${a.hasLiquidityEvidence ? a.liquidityScore : Math.round(Number(item.demand) || 0)}/100</strong></div>
+            <div><span>${a.exitType === "pawn" ? "Pawn exit liquidity" : a.hasLiquidityEvidence ? "Resale liquidity" : a.hasUsedAskingEvidence ? "Used-market proxy" : "Resale popularity unknown"}</span><strong>${a.resalePopularityScore}/100</strong></div>
+            <div><span>Modeled sale likelihood</span><strong>${percent(a.saleLikelihood)}</strong></div>
             <div><span>Rarity signal</span><strong>${Math.round(Number(item.rarity) || 0)}/100</strong></div>
             <div><span>Identity confidence</span><strong>${percent(parseConfidence(item.identityConfidence, 0))}</strong></div>
             <div><span>Condition confidence</span><strong>${percent(parseConfidence(item.conditionConfidence, 0))}</strong></div>
           </div>
-          <div class="risk-summary-card"><span>LISTING-SPECIFIC RISK</span><p>${escapeHtml(item.riskSummary || "No source-specific risk summary was supplied; identity and condition still require independent verification.")}</p><small>Resale basis: ${escapeHtml(a.resaleEvidenceType)}. Inbound shipping: ${a.shippingKnown ? "recorded" : "missing"}.</small></div>
+          <div class="risk-summary-card"><span>LISTING-SPECIFIC RISK</span><p>${escapeHtml(item.riskSummary || "No source-specific risk summary was supplied; identity and condition still require independent verification.")}</p><small>Value basis: ${escapeHtml(a.exitType === "pawn" ? `pawn scenario at ${a.pawnPayoutPercent.toFixed(0)}% likely payout` : a.resaleEvidenceType)}. Inbound shipping: ${a.shippingKnown ? "recorded" : `${money(a.shipping)} estimated`}.</small></div>
         </section>
         <section class="detail-section comparable-sales">
           <div class="detail-section-heading"><h4>Auction-close comparables</h4><span>${acquisitionComparables.length} exact-model outcomes attached</span></div>
@@ -1083,7 +1238,7 @@
             <div><span>Scheduled end</span><strong>${escapeHtml(formatDateTime(item.endsAt))}</strong><small>${escapeHtml(timeLabel(item))}</small></div>
             <div><span>Snapshot policy</span><strong>${escapeHtml(snapshotPlan.label)}</strong><small>${snapshotPlan.nextDueAt ? `${snapshotPlan.due ? "Due now" : `Next ${escapeHtml(formatDateTime(snapshotPlan.nextDueAt))}`}` : "Outcome capture complete"}</small></div>
             <div><span>Bid count</span><strong>${Number(item.bidCount) || 0}</strong></div>
-            <div><span>Inbound shipping basis</span><strong>${a.shippingKnown ? money(a.shipping) : "Unknown"}</strong><small>${item.shippingQuoted === null && item.shippingAssumed ? "assumed, not quoted" : item.shippingKnown === false ? "not supplied" : "recorded input"}</small></div>
+            <div><span>Inbound shipping basis</span><strong>${money(a.shipping)}</strong><small>${a.shippingKnown ? "recorded input" : "conservative user-configured estimate; verify before bidding"}</small></div>
             <div><span>Normalized model key</span><strong title="${escapeHtml(item.modelKey || "Not supplied")}">${escapeHtml(item.modelKey || "Not supplied")}</strong><small>exact-match grouping key</small></div>
             <div><span>Forecast state</span><strong>${a.hasForecast ? "Verified evidence threshold met" : "Insufficient exact-model history"}</strong><small>${escapeHtml((a.forecast.reasonCodes || []).join(", ") || a.forecast.method)}</small></div>
           </div>
@@ -1093,7 +1248,7 @@
           <button class="button button-primary" type="button" data-watch-id="${escapeHtml(item.id)}">${item.watched ? "Remove watch" : "Watch item"}</button>
           <button class="button button-quiet" type="button" data-update-id="${escapeHtml(item.id)}">Record update</button>
         </div>
-        <p class="risk-note">A listing is never promoted from a source estimate alone. BidAI Pro requires real exact-model outcomes for a learned closing forecast and labels stale or incomplete inputs explicitly.</p>
+        <p class="risk-note">Every item receives a visible safe ceiling. It is $0 when no defensible real-price evidence exists. Pawn values, used asking prices, and completed sales are labeled separately; all are estimates that require verification before bidding.</p>
       </div>`;
   }
 
@@ -1105,19 +1260,32 @@
     const authentication = $("#authentication-filter")?.value || "all";
     const source = $("#source-filter")?.value || "all";
     return allItems()
-      .filter((item) => {
+      .map((item) => ({ item, assessment: assess(item) }))
+      .filter(({ item, assessment }) => {
         const haystack = [item.title, item.category, item.resaleVertical, item.authenticationEvidence, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
-        const assessment = assess(item);
+        const closingWithinFiveMinutes = assessment.hours >= 0 && assessment.hours <= 5 / 60;
+        const matchesMode = queueMode === "closing"
+          ? item.status === "active" && closingWithinFiveMinutes
+          : queueMode === "pawn" ? assessment.hasMetalEstimate : true;
         return (!query || haystack.includes(query)) &&
+          matchesMode &&
           (signal === "all" || assessment.signal === signal) &&
           (category === "all" || item.category === category) &&
           (vertical === "all" || (item.resaleVertical || "Other") === vertical) &&
           (authentication === "all" || (item.authenticationStatus || "not-supplied") === authentication) &&
           (source === "all" || item.sourceKey === source);
       })
-      .sort((a, b) => {
+      .sort((left, right) => {
+        const { item: a, assessment: assessmentA } = left;
+        const { item: b, assessment: assessmentB } = right;
         if (a.status !== b.status) return a.status === "active" ? -1 : 1;
-        const scoreDifference = assess(b).score - assess(a).score;
+        if (assessmentA.rankTier !== assessmentB.rankTier) return assessmentA.rankTier - assessmentB.rankTier;
+        const profitDifference = Number(assessmentB.decisionProfitAtCurrentBid ?? Number.NEGATIVE_INFINITY)
+          - Number(assessmentA.decisionProfitAtCurrentBid ?? Number.NEGATIVE_INFINITY);
+        if (Number.isFinite(profitDifference) && profitDifference) return profitDifference;
+        const popularityDifference = assessmentB.resalePopularityScore - assessmentA.resalePopularityScore;
+        if (popularityDifference) return popularityDifference;
+        const scoreDifference = assessmentB.score - assessmentA.score;
         if (scoreDifference) return scoreDifference;
         const aEnds = Date.parse(a.endsAt || "");
         const bEnds = Date.parse(b.endsAt || "");
@@ -1125,7 +1293,8 @@
         if (Number.isFinite(aEnds)) return -1;
         if (Number.isFinite(bEnds)) return 1;
         return String(a.title || "").localeCompare(String(b.title || ""));
-      });
+      })
+      .map(({ item }) => item);
   }
 
   function populateCategories() {
@@ -1185,10 +1354,10 @@ function renderMarketplaceCoverage() {
   function renderStats() {
     const active = allItems().filter((item) => item.status === "active");
     const assessments = active.map(assess);
-    const forecasted = assessments.filter((item) => item.hasForecast && item.profitExpected !== null);
-    const upside = forecasted.reduce((total, item) => total + Math.max(0, item.profitExpected), 0);
-    const urgent = active.filter((item) => hoursRemaining(item) <= 12).length;
-    const confidence = forecasted.length ? forecasted.reduce((total, item) => total + item.forecast.confidence, 0) / forecasted.length : 0;
+    const valued = assessments.filter((item) => item.decisionProfitAtCurrentBid !== null);
+    const upside = valued.length ? Math.max(0, ...valued.map((item) => item.decisionProfitAtCurrentBid)) : 0;
+    const urgent = active.filter((item) => hoursRemaining(item) >= 0 && hoursRemaining(item) <= 5 / 60).length;
+    const confidence = valued.length ? valued.reduce((total, item) => total + item.confidence, 0) / valued.length : 0;
     const observations = allItems().reduce((total, item) => total + (Array.isArray(item.observations) ? item.observations.length : 0), 0);
     const connectedMarkets = new Set(allItems().map((item) => item.sourceKey).filter(Boolean)).size;
     $("[data-stat-upside]").textContent = money(upside);
@@ -1231,6 +1400,15 @@ function renderMarketplaceCoverage() {
   function renderOpportunities() {
     populateCategories();
     populateSources();
+    const queueTitle = queueMode === "closing"
+      ? "Closing within five minutes"
+      : queueMode === "pawn" ? "Pawn-first precious metals" : "Best exits first";
+    if ($("#queue-heading")) $("#queue-heading").textContent = queueTitle;
+    $$('[data-quick-mode]').forEach((button) => {
+      const active = button.dataset.quickMode === queueMode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
     const items = filteredItems();
     const visibleItems = items.slice(0, visibleQueueLimit);
     const list = $("[data-opportunity-list]");
@@ -1254,6 +1432,15 @@ function renderMarketplaceCoverage() {
     renderOpportunities();
   }
 
+  function setQueueMode(mode) {
+    if (!["profit", "pawn", "closing"].includes(mode)) return;
+    queueMode = mode;
+    visibleQueueLimit = QUEUE_PAGE_SIZE;
+    if (activeView !== "opportunities") setView("opportunities");
+    else renderOpportunities();
+    $("#queue-heading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function renderWatchlist() {
     const watched = allItems().filter((item) => item.watched);
     const grid = $("[data-watchlist-grid]");
@@ -1264,7 +1451,7 @@ function renderMarketplaceCoverage() {
       const marketplace = marketplaceFor(item);
       return `<article class="watch-card">
         <div class="watch-card-top"><span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span><div><h4>${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</h4><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${timeLabel(item)}</p></div></div>
-        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient"}</strong></div><div><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete"}</strong></div></div>
+        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient"}</strong></div><div><span>Safe ceiling</span><strong>${money(a.maxBid)}</strong></div></div>
         <div class="watch-card-actions"><button class="button button-primary" type="button" data-open-id="${escapeHtml(item.id)}">Open analysis</button>${sourceUrl ? `<a class="button button-dark" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Source listing ↗</a>` : ""}<button class="button button-quiet" type="button" data-watch-id="${escapeHtml(item.id)}">Remove</button></div>
       </article>`;
     }).join("");
@@ -1775,6 +1962,11 @@ function renderMarketplaceCoverage() {
   }
 
   document.addEventListener("click", (event) => {
+    const quickModeButton = event.target.closest("[data-quick-mode]");
+    if (quickModeButton) {
+      setQueueMode(quickModeButton.dataset.quickMode);
+      return;
+    }
     const viewButton = event.target.closest("[data-view-target]");
     if (viewButton) {
       setView(viewButton.dataset.viewTarget);
