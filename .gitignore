@@ -1,0 +1,4 @@
+# Generated auction state is published by GitHub Actions on the auction-data branch.
+# Keep the local copy for development, but never merge it through main.
+data/live-snapshots.js
+data/.live-snapshots.*.tmp

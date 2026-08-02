@@ -1,6 +1,9 @@
 name: Refresh authorized auction data
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: "9 * * * *"
     - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
@@ -22,6 +25,31 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: main
+          fetch-depth: 0
+
+      - name: Restore the latest published snapshot
+        shell: bash
+        run: |
+          mkdir -p data
+          if git fetch origin auction-data:refs/remotes/origin/auction-data; then
+            git show origin/auction-data:data/live-snapshots.js > data/live-snapshots.js
+            echo "Restored the prior snapshot from the isolated auction-data branch."
+          else
+            bootstrap_commit=""
+            while read -r candidate; do
+              if git cat-file -e "$candidate:data/live-snapshots.js" 2>/dev/null; then
+                bootstrap_commit="$candidate"
+                break
+              fi
+            done < <(git rev-list --all -- data/live-snapshots.js)
+
+            if [[ -n "$bootstrap_commit" ]]; then
+              git show "$bootstrap_commit:data/live-snapshots.js" > data/live-snapshots.js
+              echo "Recovered the last main-branch snapshot for the first isolated refresh."
+            else
+              echo "No prior snapshot exists; the collectors will create the first snapshot."
+            fi
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -85,7 +113,7 @@ jobs:
           BIDAI_PRICECHARTING_BATCH_SIZE: "20"
         run: node scripts/enrich-market-prices.mjs
 
-      - name: Commit changed snapshot data
+      - name: Publish changed snapshot data outside main
         shell: bash
         run: |
           if [[ ! -f data/live-snapshots.js ]]; then
@@ -93,13 +121,29 @@ jobs:
             exit 0
           fi
 
-          git add -- data/live-snapshots.js
-          if git diff --cached --quiet; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin auction-data:refs/remotes/origin/auction-data || true
+          previous_commit="$(git rev-parse --verify origin/auction-data 2>/dev/null || true)"
+          previous_blob="$(git rev-parse --verify origin/auction-data:data/live-snapshots.js 2>/dev/null || true)"
+          snapshot_blob="$(git hash-object -w data/live-snapshots.js)"
+
+          if [[ -n "$previous_blob" && "$snapshot_blob" == "$previous_blob" ]]; then
             echo "Authorized feed data is unchanged."
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(data): refresh auction snapshots"
-          git push origin HEAD:main
+          export GIT_INDEX_FILE="$RUNNER_TEMP/auction-data-index"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree --empty
+          git update-index --add --cacheinfo 100644 "$snapshot_blob" data/live-snapshots.js
+          snapshot_tree="$(git write-tree)"
+
+          if [[ -n "$previous_commit" ]]; then
+            snapshot_commit="$(printf '%s\n' 'chore(data): refresh auction snapshots' | git commit-tree "$snapshot_tree" -p "$previous_commit")"
+          else
+            snapshot_commit="$(printf '%s\n' 'chore(data): initialize auction snapshots' | git commit-tree "$snapshot_tree")"
+          fi
+
+          git push origin "$snapshot_commit:refs/heads/auction-data"
