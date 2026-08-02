@@ -47,6 +47,15 @@ jobs:
           BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "200"
         run: node scripts/refresh-all-sources.mjs
 
+      - name: Refresh supported public auction marketplaces
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
+        env:
+          BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
+          BIDAI_EBAY_CLIENT_SECRET: ${{ secrets.BIDAI_EBAY_CLIENT_SECRET }}
+          BIDAI_PUBLIC_SOURCE_LIMIT: "40"
+          BIDAI_PUBLIC_DETAIL_LIMIT: "16"
+        run: node scripts/refresh-public-markets.mjs
+
       - name: Enrich with authorized completed-sale evidence
         env:
           BIDAI_RESALE_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_RESALE_SOURCE_AUTHORIZED }}

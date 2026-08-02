@@ -212,6 +212,7 @@ function normalizeComparable(value, kind, fallbackSource) {
     condition: text(pick(value, "condition", "itemCondition", "item_condition")).slice(0, 120),
     source,
     modelKey: text(pick(value, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key")).slice(0, 200),
+    matchType: text(pick(value, "matchType", "match_type", "evidenceTier", "evidence_tier")).toLowerCase().slice(0, 80),
     matchReason: text(pick(value, "matchReason", "match_reason")).slice(0, 500),
     matchScore: percentage(pick(value, "matchScore", "match_score", "similarityScore", "similarity_score"), null),
     bidAtComparableTime: money(pick(value, "bidAtComparableTime", "bid_at_comparable_time"), null),
@@ -492,6 +493,7 @@ function normalizeMetalEstimate(value, observedAt) {
     pureSpotPerGram: money(pick(value, "pureSpotPerGram", "pure_spot_per_gram"), null),
     meltCeiling,
     sourceDescriptionStatus: text(pick(value, "sourceDescriptionStatus", "source_description_status"), "source-described").slice(0, 80),
+    singleMetalOnly: boolean(pick(value, "singleMetalOnly", "single_metal_only"), false),
     requiresIndependentTesting: boolean(pick(value, "requiresIndependentTesting", "requires_independent_testing"), true),
     nonMetalWarning: text(pick(value, "nonMetalWarning", "non_metal_warning")).slice(0, 500),
   };
@@ -521,9 +523,25 @@ async function fetchMetalQuotes() {
   return Object.fromEntries(entries.filter(([, quote]) => quote));
 }
 
+function strictMetalRejectionReason(record) {
+  const normalized = `${text(record?.title)} ${text(record?.description)}`.toLowerCase();
+  const hasGold = /\bgold\b|\b(?:10|14|18|22|24)\s*k(?:t|arat)?\b/.test(normalized);
+  const hasSilver = /\bsilver\b|\bsterling\b|\b(?:925|999|\.925|\.999)\b/.test(normalized);
+  if (hasGold && hasSilver) return "The listing describes both gold and silver.";
+  const otherMetal = normalized.match(/\b(palladium|platinum|rhodium|tungsten|titanium|copper|bronze|brass|stainless steel|steel|pewter|nickel|base metal)\b/);
+  if (otherMetal) return `The listing also describes ${otherMetal[1]}.`;
+  if (/\b(?:mixed[ -]?metal|multi[ -]?metal|two[ -]?tone|tri[ -]?(?:color|tone)|bi[ -]?metal|gold\s*(?:and|&)\s*silver|silver\s*(?:and|&)\s*gold)\b/.test(normalized)) {
+    return "The listing explicitly describes a mixed-metal item.";
+  }
+  const nonMetal = normalized.match(/\b(diamond|gem|gemstone|pearl|ruby|sapphire|emerald|opal|crystal|enamel|cz|cubic zirconia|moissanite|movement|leather|resin)\b/);
+  if (nonMetal) return `The stated weight may include ${nonMetal[1]} or another non-metal material.`;
+  return null;
+}
+
 function metalEstimateFor(record, quotes) {
   const title = text(record?.title);
   const normalized = title.toLowerCase();
+  if (strictMetalRejectionReason(record)) return null;
   const weightMatch = normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:g|grams?)\b/);
   if (!weightMatch) return null;
   const grossWeightGrams = Number(weightMatch[1]);
@@ -555,7 +573,6 @@ function metalEstimateFor(record, quotes) {
 
   const pureSpotPerGram = quote.price / TROY_OUNCE_GRAMS;
   const meltCeiling = grossWeightGrams * purityFraction * pureSpotPerGram;
-  const containsNonMetalMaterial = /\b(?:diamond|gem|gemstone|stone|pearl|ruby|sapphire|emerald|opal|crystal|enamel|strap|band|movement)\b/.test(normalized);
   return {
     metal,
     currency: "USD",
@@ -572,9 +589,8 @@ function metalEstimateFor(record, quotes) {
       ? "source-stated-tested"
       : "source-described",
     requiresIndependentTesting: true,
-    nonMetalWarning: containsNonMetalMaterial
-      ? "The stated gross weight may include stones, a movement, a strap, or other non-metal material; melt value is an upper-bound scenario until independently weighed and tested."
-      : "Purity and gross weight come from the source title and require independent testing; melt value is a ceiling, not a guaranteed offer.",
+    singleMetalOnly: true,
+    nonMetalWarning: "The source describes one precious-metal material only. Purity and gross weight still require independent testing; melt value is a ceiling, not a guaranteed offer.",
   };
 }
 
@@ -1161,6 +1177,17 @@ async function fetchShopGoodwillItems(environment) {
 }
 
 async function fetchPayload(requestConfiguration) {
+  if (requestConfiguration.sourceMode === "local-collected-feed") {
+    const source = await readFile(requestConfiguration.feedFile, "utf8");
+    if (Buffer.byteLength(source) > MAX_RESPONSE_BYTES) {
+      throw new Error("The collected feed exceeds the 20 MB limit.");
+    }
+    try {
+      return JSON.parse(source);
+    } catch {
+      throw new Error("The collected feed did not contain valid JSON.");
+    }
+  }
   if (requestConfiguration.sourceMode === "shopgoodwill-public-catalog") {
     return requestConfiguration.shopGoodwillMode === "items"
       ? fetchShopGoodwillItems(requestConfiguration.environment)
@@ -1196,6 +1223,17 @@ function feedRequestConfiguration(environment) {
   const sourceKeyOverride = normalizeSourceKey(environment.BIDAI_SOURCE_KEY_OVERRIDE);
   const apifyDatasetId = text(environment.BIDAI_APIFY_DATASET_ID);
   const shopGoodwillMode = text(environment.BIDAI_SHOPGOODWILL_MODE).toLowerCase();
+  const collectedFeedFile = text(environment.BIDAI_FEED_FILE);
+  if (collectedFeedFile) {
+    return {
+      feedFile: collectedFeedFile,
+      feedUrl: null,
+      headers: { accept: "application/json" },
+      sourceMode: "local-collected-feed",
+      sourceLabel: sourceLabelOverride || "Public marketplace snapshot",
+      sourceKey: sourceKeyOverride || "public-marketplace",
+    };
+  }
   if (["catalog", "items"].includes(shopGoodwillMode)) {
     return {
       feedUrl: null,

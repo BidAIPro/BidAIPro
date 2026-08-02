@@ -117,12 +117,27 @@ function targetPriority(item) {
 
 function selectTargets(items) {
   const limit = Math.min(500, positiveInteger(process.env.BIDAI_EBAY_USED_BATCH_SIZE, 150));
-  return items
+  const candidates = items
     .filter((item) => item?.status === "active" && cleanText(item?.title) && !hasFreshAskingMarket(item))
     .filter((item) => !item?.metalEstimate)
     .filter((item) => queryFor(item).split(" ").length >= 3)
-    .sort((left, right) => targetPriority(right) - targetPriority(left))
-    .slice(0, limit);
+    .sort((left, right) => targetPriority(right) - targetPriority(left));
+  const buckets = new Map();
+  for (const item of candidates) {
+    const key = cleanText(item?.resaleVertical, "Other");
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(item);
+  }
+  const selected = [];
+  const groups = [...buckets.values()];
+  while (selected.length < limit && groups.some((group) => group.length)) {
+    for (const group of groups) {
+      if (selected.length >= limit) break;
+      const next = group.shift();
+      if (next) selected.push(next);
+    }
+  }
+  return selected;
 }
 
 async function obtainAccessToken(clientId, clientSecret) {

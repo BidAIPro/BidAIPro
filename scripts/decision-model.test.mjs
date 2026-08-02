@@ -175,7 +175,8 @@ test("plated-metal wording rejects a stored solid-gold pawn estimate", () => {
   assert.equal(result.hasMetalEstimate, false);
   assert.equal(result.hasPawnEstimate, false);
   assert.equal(result.pawnCashEstimate, null);
-  assert.equal(result.recommendationState, "no-evidence");
+  assert.equal(result.recommendationState, "mixed-material");
+  assert.equal(result.maxBid, 0);
 });
 
 test("a matched specialty guide supplies retail price and yearly demand without becoming a pawn quote", () => {
@@ -382,4 +383,55 @@ test("published snapshot refresh parses data without evaluating executable scrip
   assert.equal(parsed.sourceMode, "test-refresh");
   assert.equal(parsed.items.length, 1);
   assert.equal(parsed.items[0].id, "real-1");
+});
+
+test("near-match completed sales form a separately discounted analog valuation tier", () => {
+  const model = loadModel();
+  const soldAt = (daysAgo) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  const item = baseItem({
+    title: "Brand Model 123 Camera Body",
+    category: "Cameras & Camcorders",
+    resaleMarket: null,
+    comparableSales: Array.from({ length: 8 }, (_, index) => ({
+      id: `analog-${index}`,
+      externalId: `analog-${index}`,
+      title: `Brand Model 124 Camera Body ${index}`,
+      soldPrice: 500 + index * 20,
+      soldAt: soldAt(index + 1),
+      endedAt: soldAt(index + 1),
+      outcomeObservedAt: soldAt(index + 1),
+      modelKey: "brand:model-124",
+      matchType: "analog",
+      matchScore: 82,
+      source: "Licensed completed-sales test feed",
+    })),
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasComparableResaleEvidence, false);
+  assert.equal(result.hasAnalogResaleEvidence, true);
+  assert.equal(result.resaleEvidenceKind, "analog-completed");
+  assert.equal(result.analogCompHaircut, 0.4);
+  assert.equal(result.resaleMedian, result.rawMarketMedian * 0.6);
+  assert.match(result.resaleEvidenceType, /near-match completed sales/);
+});
+
+test("mixed-metal precious-metal listings are hard rejected with a zero ceiling", () => {
+  const model = loadModel();
+  const item = baseItem({ title: "14K Gold and Palladium Ring 10g", category: "Jewelry & Gemstones" });
+  const result = model.assess(item);
+  assert.equal(result.strictMetalPurityReject, true);
+  assert.match(result.metalPurityRejectionReason, /palladium|gold and silver/i);
+  assert.equal(result.recommendationState, "mixed-material");
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.hasPawnEstimate, false);
+  assert.equal(result.maxBid, 0);
+});
+
+test("single-metal gold listings remain eligible for conservative melt analysis", () => {
+  const model = loadModel();
+  const item = baseItem({ title: "14K Gold Band 10g", category: "Jewelry & Gemstones" });
+  const result = model.assess(item);
+  assert.equal(result.strictMetalPurityReject, false);
+  assert.equal(result.hasPawnEstimate, true);
 });

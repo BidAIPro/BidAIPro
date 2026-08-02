@@ -24,6 +24,7 @@
     minimumProfit: 50,
     targetMargin: 22,
     assumedInboundShipping: 25,
+    analogCompHaircut: 40,
     askingPriceHaircut: 30,
     retailReplacementHaircut: 45,
     specialtyGuideHaircut: 15,
@@ -56,12 +57,13 @@
 
   function normalizePublishedResearch(payload) {
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
-      return { observedAt: null, lastCheckedAt: null, sourceMode: "unavailable", items: [] };
+      return { observedAt: null, lastCheckedAt: null, sourceMode: "unavailable", sourceHealth: {}, items: [] };
     }
     return {
       observedAt: payload.observedAt || null,
       lastCheckedAt: payload.lastCheckedAt || payload.observedAt || null,
       sourceMode: payload.sourceMode || "published-research",
+      sourceHealth: payload.sourceHealth && typeof payload.sourceHealth === "object" ? payload.sourceHealth : {},
       items: payload.items.filter((item) => item && item.id && item.title),
     };
   }
@@ -123,6 +125,15 @@
     .toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/\s*([:|/])\s*/g, "$1");
+  const analogTitleSimilarity = (left, right) => {
+    const ignored = new Set(["and", "the", "with", "for", "from", "lot", "new", "used", "vintage", "item", "set", "pair"]);
+    const tokens = (value) => new Set(String(value || "").toLowerCase().match(/[a-z0-9]+/g)?.filter((token) => token.length > 2 && !ignored.has(token)) || []);
+    const leftTokens = tokens(left);
+    const rightTokens = tokens(right);
+    if (!leftTokens.size || !rightTokens.size) return 0;
+    const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+    return shared / new Set([...leftTokens, ...rightTokens]).size;
+  };
   const escapeHtml = (value) => String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -742,7 +753,8 @@
       && Date.now() - resaleMarketAsOf <= 30 * 86400000
       ? Math.max(listingEvidenceCutoff, resaleMarketAsOf)
       : listingEvidenceCutoff;
-    const qualifyingResaleEvidence = (Array.isArray(item.comparableSales) ? item.comparableSales : [])
+    const allCompletedSaleEvidence = Array.isArray(item.comparableSales) ? item.comparableSales : [];
+    const qualifyingResaleEvidence = allCompletedSaleEvidence
       .filter((entry) => Number(entry?.soldPrice ?? entry?.finalPrice ?? entry?.price) > 0)
       .filter((entry) => resaleModelKey && normalizedModelKey(entry?.modelKey || entry?.compGroup || entry?.similarItemKey) === resaleModelKey)
       .filter((entry) => {
@@ -760,6 +772,29 @@
     const uniqueResaleEvidence = [...new Map(qualifyingResaleEvidence.map((entry) => [comparableKey(entry), entry])).values()];
     const resaleEvidenceCount = uniqueResaleEvidence.length;
     const comparableResalePrices = uniqueResaleEvidence.map((entry) => Number(entry.soldPrice ?? entry.finalPrice ?? entry.price));
+    const preciousMetalListing = Boolean(item.metalEstimate) || /\b(?:gold|silver|sterling|palladium|platinum)\b/i.test(String(item.title || ""));
+    const qualifyingAnalogEvidence = allCompletedSaleEvidence
+      .filter((entry) => Number(entry?.soldPrice ?? entry?.finalPrice ?? entry?.price) > 0)
+      .filter((entry) => !resaleModelKey || normalizedModelKey(entry?.modelKey || entry?.compGroup || entry?.similarItemKey) !== resaleModelKey)
+      .filter((entry) => {
+        const rawScore = Number(entry?.matchScore);
+        const matchScore = Number.isFinite(rawScore) ? clamp(rawScore > 1 ? rawScore / 100 : rawScore) : null;
+        const explicitlyAnalog = /analog|near|similar|category/i.test(String(entry?.matchType || entry?.evidenceTier || ""));
+        return matchScore !== null
+          && matchScore >= 0.65
+          && (explicitlyAnalog || analogTitleSimilarity(item.title, entry?.title) >= 0.45);
+      })
+      .filter((entry) => Boolean(entry?.id || entry?.externalId || safeHttpUrl(entry?.url || entry?.sourceUrl)))
+      .filter((entry) => {
+        const ended = Date.parse(entry?.soldAt || entry?.endedAt || "");
+        const knownAt = Date.parse(entry?.outcomeObservedAt || entry?.finalObservedAt || entry?.capturedAt || entry?.observedAt || observedAtFor(item) || "");
+        return Number.isFinite(ended) && ended <= evidenceCutoff && Number.isFinite(knownAt) && knownAt <= evidenceCutoff;
+      });
+    const uniqueAnalogEvidence = preciousMetalListing
+      ? []
+      : [...new Map(qualifyingAnalogEvidence.map((entry) => [comparableKey(entry), entry])).values()];
+    const analogEvidenceCount = uniqueAnalogEvidence.length;
+    const analogResalePrices = uniqueAnalogEvidence.map((entry) => Number(entry.soldPrice ?? entry.finalPrice ?? entry.price));
     const askingMarketAsOf = Date.parse(item.askingMarket?.asOf || "");
     const qualifyingUsedListings = (Array.isArray(item.askingMarket?.listings) ? item.askingMarket.listings : [])
       .filter((entry) => Number(entry?.totalPrice ?? entry?.price) > 0)
@@ -857,39 +892,48 @@
       ? "unknown"
       : liquidityScore >= 80 ? "hot" : liquidityScore >= 60 ? "strong" : liquidityScore >= 40 ? "moderate" : "slow";
     const hasComparableResaleEvidence = resaleEvidenceCount >= 3;
+    const hasAnalogResaleEvidence = !hasComparableResaleEvidence && analogEvidenceCount >= 5;
+    const analogCompHaircut = clamp(configuredNumber(null, s.analogCompHaircut) / 100, 0.2, 0.7);
     const askingPriceHaircut = clamp(configuredNumber(null, s.askingPriceHaircut) / 100, 0, 0.8);
     const retailReplacementHaircut = clamp(configuredNumber(null, s.retailReplacementHaircut) / 100, 0.2, 0.8);
     const specialtyGuideHaircut = clamp(configuredNumber(null, s.specialtyGuideHaircut) / 100, 0, 0.5);
     const resaleEvidenceKind = hasComparableResaleEvidence
       ? "completed"
-      : hasSpecialtyEvidence ? "specialty-guide"
-        : hasUsedAskingEvidence ? "used-market"
-          : hasRetailNewEvidence ? "retail-replacement" : "none";
-    const evidencePlanningFactor = resaleEvidenceKind === "specialty-guide"
+      : hasAnalogResaleEvidence ? "analog-completed"
+        : hasSpecialtyEvidence ? "specialty-guide"
+          : hasUsedAskingEvidence ? "used-market"
+            : hasRetailNewEvidence ? "retail-replacement" : "none";
+    const evidencePlanningFactor = resaleEvidenceKind === "analog-completed"
+      ? 1 - analogCompHaircut
+      : resaleEvidenceKind === "specialty-guide"
       ? 1 - specialtyGuideHaircut
       : resaleEvidenceKind === "used-market"
         ? 1 - askingPriceHaircut
         : resaleEvidenceKind === "retail-replacement" ? 1 - retailReplacementHaircut : 1;
     const rawMarketLow = resaleEvidenceKind === "completed"
       ? quantile(comparableResalePrices, 0.2)
-      : resaleEvidenceKind === "specialty-guide" ? specialtyRawLow
-        : resaleEvidenceKind === "used-market" ? onlineUsedLow
-          : resaleEvidenceKind === "retail-replacement" ? retailNewLow : null;
+      : resaleEvidenceKind === "analog-completed" ? quantile(analogResalePrices, 0.2)
+        : resaleEvidenceKind === "specialty-guide" ? specialtyRawLow
+          : resaleEvidenceKind === "used-market" ? onlineUsedLow
+            : resaleEvidenceKind === "retail-replacement" ? retailNewLow : null;
     const rawMarketMedian = resaleEvidenceKind === "completed"
       ? quantile(comparableResalePrices, 0.5)
-      : resaleEvidenceKind === "specialty-guide" ? specialtyRawMedian
-        : resaleEvidenceKind === "used-market" ? onlineUsedMedian
-          : resaleEvidenceKind === "retail-replacement" ? retailNewMedian : null;
+      : resaleEvidenceKind === "analog-completed" ? quantile(analogResalePrices, 0.5)
+        : resaleEvidenceKind === "specialty-guide" ? specialtyRawMedian
+          : resaleEvidenceKind === "used-market" ? onlineUsedMedian
+            : resaleEvidenceKind === "retail-replacement" ? retailNewMedian : null;
     const rawMarketHigh = resaleEvidenceKind === "completed"
       ? quantile(comparableResalePrices, 0.8)
-      : resaleEvidenceKind === "specialty-guide" ? specialtyRawHigh
-        : resaleEvidenceKind === "used-market" ? onlineUsedHigh
-          : resaleEvidenceKind === "retail-replacement" ? retailNewHigh : null;
+      : resaleEvidenceKind === "analog-completed" ? quantile(analogResalePrices, 0.8)
+        : resaleEvidenceKind === "specialty-guide" ? specialtyRawHigh
+          : resaleEvidenceKind === "used-market" ? onlineUsedHigh
+            : resaleEvidenceKind === "retail-replacement" ? retailNewHigh : null;
     const rawMarketAverage = resaleEvidenceKind === "completed"
       ? comparableResalePrices.reduce((total, value) => total + value, 0) / comparableResalePrices.length
-      : resaleEvidenceKind === "specialty-guide" ? specialtyRawMedian
-        : resaleEvidenceKind === "used-market" ? onlineUsedAverage
-          : resaleEvidenceKind === "retail-replacement" ? retailNewAverage : null;
+      : resaleEvidenceKind === "analog-completed" ? analogResalePrices.reduce((total, value) => total + value, 0) / analogResalePrices.length
+        : resaleEvidenceKind === "specialty-guide" ? specialtyRawMedian
+          : resaleEvidenceKind === "used-market" ? onlineUsedAverage
+            : resaleEvidenceKind === "retail-replacement" ? retailNewAverage : null;
     const resaleLow = Number(rawMarketLow || 0) * evidencePlanningFactor;
     const resaleMedian = Number(rawMarketMedian || 0) * evidencePlanningFactor;
     const resaleHigh = Number(rawMarketHigh || 0) * evidencePlanningFactor;
@@ -913,12 +957,14 @@
       && resaleEvidenceKind !== "none";
     const demandLookbackDays = 90;
     const demandAsOf = Math.min(Date.now(), evidenceCutoff);
-    const recentCompletedSales = uniqueResaleEvidence.filter((entry) => {
+    const selectedCompletedEvidence = resaleEvidenceKind === "analog-completed" ? uniqueAnalogEvidence : uniqueResaleEvidence;
+    const recentCompletedSales = selectedCompletedEvidence.filter((entry) => {
       const ended = Date.parse(entry?.soldAt || entry?.endedAt || "");
       return Number.isFinite(ended) && ended >= demandAsOf - demandLookbackDays * 86400000 && ended <= demandAsOf;
     });
     const recentCompletedSalesPer30Days = recentCompletedSales.length / demandLookbackDays * 30;
-    const completedSalesDemandScore = recentCompletedSales.length >= 3
+    const requiredRecentCompletedSales = resaleEvidenceKind === "analog-completed" ? 5 : 3;
+    const completedSalesDemandScore = recentCompletedSales.length >= requiredRecentCompletedSales
       ? Math.round(clamp((25 + 25 * Math.log2(recentCompletedSalesPer30Days + 1)) / 100) * 100)
       : 0;
     const specialtyAnnualSalesVolume = hasSpecialtyEvidence ? Math.max(0, Math.round(Number(item.specialtyMarket?.annualSalesVolume) || 0)) : 0;
@@ -926,7 +972,7 @@
     const specialtyDemandScore = hasSpecialtyDemandEvidence
       ? Math.round(clamp(Math.log10(specialtyAnnualSalesVolume + 1) / 4) * 100)
       : 0;
-    const hasRecentCompletedDemand = recentCompletedSales.length >= 3;
+    const hasRecentCompletedDemand = recentCompletedSales.length >= requiredRecentCompletedSales;
     const retailDemandScore = hasLiquidityEvidence
       ? liquidityScore
       : hasSpecialtyDemandEvidence ? specialtyDemandScore
@@ -939,22 +985,39 @@
       : hasSpecialtyDemandEvidence
         ? `${specialtyAnnualSalesVolume.toLocaleString()} reported units sold per year`
         : hasRecentCompletedDemand
-          ? `${recentCompletedSales.length} exact-model completed sales in the last ${demandLookbackDays} days`
+          ? `${recentCompletedSales.length} ${resaleEvidenceKind === "analog-completed" ? "near-match" : "exact-model"} completed sales in the last ${demandLookbackDays} days`
           : "No completed-sale frequency, sell-through, or annual unit-volume evidence";
-    const comparableRetailSources = [...new Set(uniqueResaleEvidence.map((entry) => String(entry.source || "").trim()).filter(Boolean))];
+    const comparableRetailSources = [...new Set(selectedCompletedEvidence.map((entry) => String(entry.source || "").trim()).filter(Boolean))];
     const usedRetailSources = [...new Set(uniqueUsedListings.map((entry) => String(entry.source || "").trim()).filter(Boolean))];
     const newRetailSources = [...new Set(retailNewOffers.map((entry) => String(entry.source || "").trim()).filter(Boolean))];
     const retailChannel = resaleEvidenceKind === "completed"
       ? String(item.resaleMarket?.channel || comparableRetailSources.slice(0, 2).join(" + ") || "Completed-sales marketplace")
-      : resaleEvidenceKind === "specialty-guide"
+      : resaleEvidenceKind === "analog-completed"
+        ? String(comparableRetailSources.slice(0, 2).join(" + ") || "Completed-sales marketplace")
+        : resaleEvidenceKind === "specialty-guide"
         ? "PriceCharting Marketplace or a comparable collectible marketplace"
         : resaleEvidenceKind === "used-market"
           ? (usedRetailSources.slice(0, 3).join(" + ") || "Used fixed-price marketplace")
           : resaleEvidenceKind === "retail-replacement"
             ? (newRetailSources.slice(0, 3).join(" + ") || "General retail marketplace")
             : "No proven resale channel";
+    const listingMaterialText = `${String(item.title || "")} ${String(item.category || "")} ${String(item.metalEstimate?.nonMetalWarning || "")}`.toLowerCase();
+    const preciousMetalIntent = Boolean(item.metalEstimate) || /\b(?:gold|silver|sterling|palladium|platinum)\b/.test(listingMaterialText);
+    let metalPurityRejectionReason = null;
+    if (preciousMetalIntent) {
+      const hasGoldMaterial = /\bgold\b|\b(?:10|14|18|22|24)\s*k(?:t|arat)?\b/.test(listingMaterialText);
+      const hasSilverMaterial = /\bsilver\b|\bsterling\b|\b(?:925|999|\.925|\.999)\b/.test(listingMaterialText);
+      const otherMetal = listingMaterialText.match(/\b(palladium|platinum|rhodium|tungsten|titanium|copper|bronze|brass|stainless steel|steel|pewter|nickel|base metal)\b/);
+      const nonMetalMaterial = listingMaterialText.match(/\b(diamond|gem|gemstone|pearl|ruby|sapphire|emerald|opal|crystal|enamel|cz|cubic zirconia|moissanite|movement|leather|resin)\b/);
+      if (hasGoldMaterial && hasSilverMaterial) metalPurityRejectionReason = "Rejected: the listing describes both gold and silver.";
+      else if (otherMetal) metalPurityRejectionReason = `Rejected: the listing also describes ${otherMetal[1]}.`;
+      else if (/\b(?:mixed[ -]?metal|multi[ -]?metal|two[ -]?tone|tri[ -]?(?:color|tone)|bi[ -]?metal)\b/.test(listingMaterialText)) metalPurityRejectionReason = "Rejected: the listing explicitly describes a mixed-metal item.";
+      else if (nonMetalMaterial) metalPurityRejectionReason = `Rejected: the stated weight may include ${nonMetalMaterial[1]} or another non-metal material.`;
+      else if (/\b(?:plate(?:d)?|filled|overlay|bonded|clad|electroplate(?:d)?|vermeil|gold tone|silver tone)\b/.test(listingMaterialText)) metalPurityRejectionReason = "Rejected: plated, filled, bonded, vermeil, or tone material is not a single-metal pawn candidate.";
+    }
+    const strictMetalPurityReject = Boolean(metalPurityRejectionReason);
     const hasForecast = forecast.status === "available";
-    const resaleDecisionAvailable = hasResaleEvidence && retailDemandPass;
+    const resaleDecisionAvailable = hasResaleEvidence && retailDemandPass && !strictMetalPurityReject;
     const profitLow = hasForecast && resaleDecisionAvailable ? netLow - landedAt(forecast.high) : null;
     const profitExpected = hasForecast && resaleDecisionAvailable ? netMedian - acquisition : null;
     const profitHigh = hasForecast && resaleDecisionAvailable ? netHigh - landedAt(forecast.low) : null;
@@ -979,7 +1042,8 @@
       && Number.isFinite(metalQuoteAt)
       && metalQuoteAt <= Date.now() + 300000
       && Date.now() - metalQuoteAt <= 86400000
-      && !metalEvidenceTitleConflict;
+      && !metalEvidenceTitleConflict
+      && !strictMetalPurityReject;
     const hasPossibleNonMetalWeight = /may include|stones?|movement|strap|band|pearl|gem/i.test(String(item.metalEstimate?.nonMetalWarning || ""));
     const recoverableWeightFactor = hasPossibleNonMetalWeight ? 0.75 : 0.95;
     const pawnMeltBasis = hasMetalEstimate ? quotedMeltCeiling * recoverableWeightFactor : null;
@@ -1022,10 +1086,15 @@
     const pawnLikelyProfitable = hasPawnEstimate && pawnProfitAtCurrentBid > 0;
     const retailLikelyProfitable = resaleDecisionAvailable && profitAtCurrentBid > 0;
     const onlineLikelyProfitable = retailLikelyProfitable;
-    const highestEligibleCeiling = Math.max(hasPawnEstimate ? pawnMaxBid : 0, resaleDecisionAvailable ? resaleMaxBid : 0);
+    const highestEligibleCeiling = strictMetalPurityReject
+      ? 0
+      : Math.max(hasPawnEstimate ? pawnMaxBid : 0, resaleDecisionAvailable ? resaleMaxBid : 0);
     let exitType = "no-evidence";
     let recommendationState = "no-evidence";
-    if (pawnSafeNow) {
+    if (strictMetalPurityReject) {
+      exitType = "rejected";
+      recommendationState = "mixed-material";
+    } else if (pawnSafeNow) {
       exitType = "pawn";
       recommendationState = "pawn-safe";
     } else if (retailSafeNow) {
@@ -1043,30 +1112,40 @@
     const breakEvenBid = selectedCeilingRoute === "pawn" ? pawnBreakEvenBid : resaleBreakEvenBid;
     const retailCeilingBasis = hasComparableResaleEvidence
       ? "Exact-model completed-sale P20 after all costs and the retail demand gate"
-      : hasSpecialtyEvidence
+      : hasAnalogResaleEvidence
+        ? `Near-match completed-sale P20 after a ${Math.round(analogCompHaircut * 100)}% uncertainty reserve, all costs, and the retail demand gate`
+        : hasSpecialtyEvidence
         ? `Specialty guide after a ${Math.round(specialtyGuideHaircut * 100)}% reserve, all costs, and the retail demand gate`
         : hasUsedAskingEvidence
           ? `Matched used-market P20 after a ${Math.round(askingPriceHaircut * 100)}% haircut, all costs, and the retail demand gate`
           : hasRetailNewEvidence
             ? `New-retail P20 after a ${Math.round(retailReplacementHaircut * 100)}% condition/resale haircut, all costs, and the retail demand gate`
             : "No defensible retail price evidence";
-    const safeCeilingBasis = recommendationState === "no-demand"
+    const safeCeilingBasis = recommendationState === "mixed-material"
+      ? metalPurityRejectionReason
+      : recommendationState === "no-demand"
       ? "No bid: a price was found, but independent retail demand did not clear the required threshold"
       : maxBid <= 0
         ? "No defensible profitable exit — do not bid"
         : selectedCeilingRoute === "pawn"
           ? `${pawnBasisLabel}; conservative pawn case after testing and profit reserves`
           : retailCeilingBasis;
-    const decisionApproved = pawnSafeNow || retailSafeNow;
+    const decisionApproved = !strictMetalPurityReject && (pawnSafeNow || retailSafeNow);
     const decisionVerdict = decisionApproved ? "YES" : "NO";
     const hasDecisionInputs = hasPawnEstimate || resaleDecisionAvailable;
-    const decisionProfitAtCurrentBid = exitType === "pawn"
+    const decisionProfitAtCurrentBid = strictMetalPurityReject
+      ? null
+      : exitType === "pawn"
       ? pawnProfitAtCurrentBid
       : resaleDecisionAvailable ? profitAtCurrentBid : null;
-    const decisionProfitLow = exitType === "pawn"
+    const decisionProfitLow = strictMetalPurityReject
+      ? null
+      : exitType === "pawn"
       ? pawnProfitLow
       : resaleDecisionAvailable ? onlineProfitLowAtCurrentBid : null;
-    const decisionProfitHigh = exitType === "pawn"
+    const decisionProfitHigh = strictMetalPurityReject
+      ? null
+      : exitType === "pawn"
       ? pawnProfitHigh
       : resaleDecisionAvailable ? onlineProfitHighAtCurrentBid : null;
     const comparableCount = Math.max(Number(item.compCount) || 0, forecast.exactModelCount || 0);
@@ -1198,15 +1277,18 @@
       resaleEvidenceKind,
       marketSampleSize: resaleEvidenceKind === "completed"
         ? resaleEvidenceCount
-        : resaleEvidenceKind === "specialty-guide" ? 1
-          : resaleEvidenceKind === "used-market" ? uniqueUsedListings.length
-            : resaleEvidenceKind === "retail-replacement" ? retailNewOffers.length : 0,
+        : resaleEvidenceKind === "analog-completed" ? analogEvidenceCount
+          : resaleEvidenceKind === "specialty-guide" ? 1
+            : resaleEvidenceKind === "used-market" ? uniqueUsedListings.length
+              : resaleEvidenceKind === "retail-replacement" ? retailNewOffers.length : 0,
       marketSourceCount: resaleEvidenceKind === "completed"
         ? new Set(uniqueResaleEvidence.map((entry) => String(entry.source || "").toLowerCase()).filter(Boolean)).size
-        : resaleEvidenceKind === "specialty-guide" ? 1
-          : resaleEvidenceKind === "used-market"
-            ? new Set(uniqueUsedListings.map((entry) => String(entry.source || "").toLowerCase()).filter(Boolean)).size
-            : resaleEvidenceKind === "retail-replacement" ? retailNewSourceCount : 0,
+        : resaleEvidenceKind === "analog-completed"
+          ? new Set(uniqueAnalogEvidence.map((entry) => String(entry.source || "").toLowerCase()).filter(Boolean)).size
+          : resaleEvidenceKind === "specialty-guide" ? 1
+            : resaleEvidenceKind === "used-market"
+              ? new Set(uniqueUsedListings.map((entry) => String(entry.source || "").toLowerCase()).filter(Boolean)).size
+              : resaleEvidenceKind === "retail-replacement" ? retailNewSourceCount : 0,
       marketPlanningHaircut: 1 - evidencePlanningFactor,
       acquisition,
       currentAcquisition,
@@ -1231,6 +1313,8 @@
       pawnProfitHigh,
       hasMetalEstimate,
       metalEvidenceTitleConflict,
+      strictMetalPurityReject,
+      metalPurityRejectionReason,
       hasPawnEstimate,
       hasDirectRetailerBuy,
       pawnBasisType,
@@ -1292,7 +1376,9 @@
       resaleEvidenceCount,
       resaleEvidenceType: hasComparableResaleEvidence
           ? `${resaleEvidenceCount} exact-model sold comparable${resaleEvidenceCount === 1 ? "" : "s"}`
-          : hasSpecialtyEvidence
+          : hasAnalogResaleEvidence
+            ? `${analogEvidenceCount} near-match completed sales with a ${Math.round(analogCompHaircut * 100)}% uncertainty reserve`
+            : hasSpecialtyEvidence
             ? `matched ${String(item.specialtyMarket?.channel || "specialty market")} value with a ${Math.round(specialtyGuideHaircut * 100)}% reserve`
             : hasUsedAskingEvidence
               ? `${uniqueUsedListings.length} matched used-market offers with a ${Math.round(askingPriceHaircut * 100)}% haircut`
@@ -1300,6 +1386,9 @@
                 ? `${retailNewOffers.length} matched new-retail offers with a ${Math.round(retailReplacementHaircut * 100)}% condition/resale haircut`
                 : "no verified resale evidence",
       hasComparableResaleEvidence,
+      hasAnalogResaleEvidence,
+      analogEvidenceCount,
+      analogCompHaircut,
       hasUsedAskingEvidence,
       hasRetailUsedEvidence,
       hasRetailNewEvidence,
@@ -1344,6 +1433,7 @@
 
   function recommendationLabel(state) {
     return {
+      "mixed-material": "NO · Mixed material",
       "pawn-safe": "YES · Pawn profit",
       "retail-safe": "YES · Retail profit",
       "no-demand": "NO · Demand unproven",
@@ -1354,7 +1444,7 @@
 
   function recommendationClass(state) {
     if (["pawn-safe", "retail-safe"].includes(state)) return "is-safe";
-    if (["no-demand", "no-margin"].includes(state)) return "is-unsafe";
+    if (["mixed-material", "no-demand", "no-margin"].includes(state)) return "is-unsafe";
     return "is-unknown";
   }
 
@@ -1573,6 +1663,7 @@
     const marketSampleSize = a.marketSampleSize;
     const marketDescriptor = {
       completed: { title: "Completed-sale price consensus", unit: "completed sales", price: "sold", basis: "real completed exact-model transactions" },
+      "analog-completed": { title: "Near-match completed-sale range", unit: "analog completed sales", price: "sold", basis: "materially similar completed sales; discounted for mismatch risk" },
       "specialty-guide": { title: "Specialty market price guide", unit: "specialty product", price: "guide", basis: "current specialty guide values" },
       "used-market": { title: "Used-market price consensus", unit: "active used offers", price: "asking", basis: "matched active used-market offers" },
       "retail-replacement": { title: "New-retail replacement market", unit: "new retail offers", price: "retail", basis: "matched new-retail offers; not used-condition sales" },
@@ -1582,7 +1673,9 @@
       .filter((entry) => safeHttpUrl(entry?.url) && Number(entry?.matchScore) >= 65)
       .slice(0, 8);
     const specialtySourceUrl = a.hasSpecialtyEvidence ? safeHttpUrl(item.specialtyMarket?.sourceUrl) : "";
-    const pawnRouteLabel = !a.hasPawnEstimate
+    const pawnRouteLabel = a.strictMetalPurityReject
+      ? "FAIL · Mixed metal/material rejected"
+      : !a.hasPawnEstimate
       ? "FAIL · No precious-metal liquidation evidence"
       : a.pawnSafeNow ? "PASS · Pawn profit clears target"
         : "FAIL · Pawn profit does not clear target";
@@ -1595,7 +1688,9 @@
     const verdictHeadline = a.decisionApproved ? `YES — BID UP TO ${money(a.maxBid)}` : "NO — DO NOT BID";
     const recommendationExplanation = a.recommendationState === "pawn-safe"
       ? `YES. The precious-metal pawn route clears the profit target. The conservative maximum bid is ${money(a.pawnMaxBid)}; verify purity, weight, and the buyer before bidding.`
-      : a.recommendationState === "retail-safe"
+      : a.recommendationState === "mixed-material"
+        ? `NO. ${a.metalPurityRejectionReason} BidAI Pro assigns a $0 ceiling and does not route this listing to pawn or online resale.`
+        : a.recommendationState === "retail-safe"
         ? `YES. The pawn gate did not qualify, but retail does: sell through ${a.retailChannel}, supported by ${a.retailDemandEvidenceType}. Do not exceed ${money(a.resaleMaxBid)}.`
         : a.recommendationState === "no-demand"
           ? `NO. A market price was found, but there is not enough proof that the item can be resold reliably. Active listings and product reviews alone do not justify a bid ceiling.`
@@ -1638,7 +1733,8 @@
     if (item.authenticationStatus !== "source-stated") missingIntelligence.push("No source-stated authentication claim is present; authenticity remains unverified.");
     if (a.shippingEstimated) missingIntelligence.push(`Inbound shipping is an assumption of ${money(a.shipping)}, not a source-confirmed charge.`);
     if (!a.hasForecast) missingIntelligence.push(`Expected closing price is withheld because only ${a.forecast.exactModelCount} of 5 required exact-model outcomes are available.`);
-    if (a.metalEvidenceTitleConflict) missingIntelligence.push("A stored metal estimate was rejected because the title describes plated, filled, vermeil, overlay, bonded, clad, or electroplated material rather than solid precious metal.");
+    if (a.strictMetalPurityReject) missingIntelligence.push(a.metalPurityRejectionReason);
+    else if (a.metalEvidenceTitleConflict) missingIntelligence.push("A stored metal estimate was rejected because the title describes plated, filled, vermeil, overlay, bonded, clad, or electroplated material rather than solid precious metal.");
     else if (!a.hasPawnEstimate) missingIntelligence.push("Pawn value is withheld because fresh precious-metal spot, purity, and weight evidence is incomplete or inapplicable.");
     if (!a.hasResaleEvidence) missingIntelligence.push("Online resale price is withheld until enough closely matched real market observations are connected.");
     if (a.hasResaleEvidence && !a.retailDemandPass) missingIntelligence.push(`Retail demand does not clear the required ${a.minimumRetailDemandScore.toFixed(0)}/100 threshold.`);
@@ -2007,7 +2103,11 @@
     const items = allItems();
     const itemCounts = new Map();
     for (const item of items) itemCounts.set(item.sourceKey, (itemCounts.get(item.sourceKey) || 0) + 1);
-    const known = AUCTION_MARKETS.map((market) => ({ ...market, count: itemCounts.get(market.key) || 0 }));
+    const known = AUCTION_MARKETS.map((market) => ({
+      ...market,
+      count: itemCounts.get(market.key) || 0,
+      sourceStatus: PUBLISHED_RESEARCH.sourceHealth?.[market.key]?.status || null,
+    }));
     const other = [...new Set(items.map((item) => item.sourceKey).filter((key) => key && !AUCTION_MARKETS.some((market) => market.key === key)))]
       .map((key) => {
         const item = items.find((entry) => entry.sourceKey === key);
@@ -2015,7 +2115,7 @@
       });
     const sources = [...known, ...other];
     select.innerHTML = '<option value="all">All connected marketplaces</option>' + sources
-      .map((market) => `<option value="${escapeHtml(market.key)}"${market.count ? "" : " disabled"}>${escapeHtml(market.name)} — ${market.count ? `${market.count.toLocaleString("en-US")} records` : "feed not connected"}</option>`)
+      .map((market) => `<option value="${escapeHtml(market.key)}"${market.count ? "" : " disabled"}>${escapeHtml(market.name)} — ${market.count ? `${market.count.toLocaleString("en-US")} records` : market.sourceStatus === "authorization-required" ? "authorization required" : market.sourceStatus ? "collector checked; no current records" : "feed not connected"}</option>`)
       .join("");
     select.value = sources.some((market) => market.key === current && market.count > 0) ? current : "all";
   }
@@ -2053,11 +2153,25 @@ function renderMarketplaceCoverage() {
       const plans = monitored.map(snapshotPlanFor).filter((plan) => plan.intervalMinutes);
       const fastest = plans.length ? Math.min(...plans.map((plan) => plan.intervalMinutes)) : null;
       const connected = marketItems.length > 0;
+      const health = PUBLISHED_RESEARCH.sourceHealth?.[market.key] || null;
+      const healthCheckedAt = Date.parse(health?.checkedAt || "");
+      const checkedAt = latest || (Number.isFinite(healthCheckedAt) ? healthCheckedAt : null);
+      const authorizationRequired = health?.status === "authorization-required" || (!health && !connected);
+      const sourceStatusLabel = connected
+        ? "REAL RECORDS CONNECTED"
+          : authorizationRequired ? "AUTHORIZATION REQUIRED"
+          : health?.status === "temporarily-unavailable" ? "PUBLIC COLLECTOR TEMPORARILY UNAVAILABLE"
+            : "PUBLIC COLLECTOR READY";
+      const footerStatus = connected
+        ? `Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))}`
+        : health?.message ? escapeHtml(health.message)
+          : checkedAt ? `Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))} · no current records`
+            : "0 ingested · feed not configured";
       return `<article class="marketplace-card ${connected ? "is-connected" : "is-awaiting"}">
-        <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${connected ? "REAL RECORDS CONNECTED" : "AWAITING AUTHORIZED FEED"}</small></div></div>
+        <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${escapeHtml(sourceStatusLabel)}</small></div></div>
         <p>${escapeHtml(market.focus)}</p>
         <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Bid changes</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest <= 1 / 12 ? "5s" : fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : `${fastest / 60}h`) : "—"}</dd></div></dl>
-        <div class="marketplace-card-footer"><span>${latest ? `Checked ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "0 ingested · feed not configured"}</span><div>${!connected ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Add authorized feed</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
+        <div class="marketplace-card-footer"><span>${footerStatus}</span><div>${!connected && authorizationRequired && market.key !== "ebay" ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Add authorized feed</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
       </article>`;
     }).join("");
   }

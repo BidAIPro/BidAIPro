@@ -125,6 +125,14 @@ The response may be an array or `{ "items": [...] }`. Each result must identify 
 
 The pipeline derives P20, median, P80, average in the browser, sell-through, and liquidity from that evidence. It never treats an active asking price as a sold comparable. If no authorized feed is configured, the step is a byte-stable no-op and the interface says the resale evidence is unavailable.
 
+For unique merchandise, a provider may label a completed sale with `"matchType": "analog"` and a match score of at least 65. The browser requires five unique, dated analog sales plus explicit analog labeling or strong title-token overlap, applies the configurable near-match reserve (40% by default), and labels the result separately from exact-model evidence. Analog sales cannot price precious-metal melt and need more recent completed-sale volume before retail demand passes.
+
+### Built-in public marketplace snapshots
+
+`scripts/refresh-public-markets.mjs` runs on the hourly/manual workflow pass. It uses the official eBay Browse API when eBay credentials exist, and bounded public pages or published sitemaps for HiBid, LiveAuctioneers, GovDeals, Public Surplus, PropertyRoom, Proxibid, and BidSpotter. Each source is isolated: a timeout or access block records an honest source-health state without stopping successful sources or deleting their retained history. Invaluable requires an authorized partner feed because its published API is a catalog-upload interface rather than a public listing-read API.
+
+These collectors ingest listing identity, direct URL, observed price, bid count, image, category, and end time only when the source exposes them. Missing price or close metadata remains missing. Public auction listings do not become resale comparables merely because they were discovered.
+
 ### eBay active-used asking-price fallback
 
 The included `scripts/enrich-ebay-used.mjs` step uses the official eBay Browse API when completed-sale evidence is absent. It answers “what are comparable used items listed for online?” and is never described as a sold-price feed.

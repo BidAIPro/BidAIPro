@@ -421,7 +421,7 @@ test("source-described gold weight receives a live melt ceiling without becoming
       if (String(url) === "https://buyerapi.shopgoodwill.com/api/ItemDetail/GetItemDetailModelByItemId/272052013") {
         return new Response(JSON.stringify({
           itemId: 272052013,
-          title: "14K Yellow Gold Ring 10 Grams with Diamond",
+          title: "14K Yellow Gold Band 10 Grams",
           currentPrice: 250,
           numberOfBids: 5,
           endTime: "2099-08-02T04:08:05",
@@ -453,14 +453,15 @@ test("source-described gold weight receives a live melt ceiling without becoming
   assert.equal(item.metalEstimate.purityLabel, "14k");
   assert.equal(item.metalEstimate.grossWeightGrams, 10);
   assert.ok(item.metalEstimate.meltCeiling > 580 && item.metalEstimate.meltCeiling < 582);
-  assert.match(item.metalEstimate.nonMetalWarning, /non-metal material/i);
+  assert.equal(item.metalEstimate.singleMetalOnly, true);
+  assert.match(item.metalEstimate.nonMetalWarning, /one precious-metal material/i);
   assert.equal(item.metalEstimate.requiresIndependentTesting, true);
   assert.equal(item.resaleMarket, undefined);
   assert.equal(item.resaleMedian, undefined);
   assert.equal(item.intrinsicValueEvidence, undefined);
 });
 
-test("gold plate wording cannot create solid-gold melt value and separately stated sterling remains silver", async (t) => {
+test("mixed, plated, rhodium, gold, silver, and CZ wording cannot create a pawn melt estimate", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   const preloadPath = join(fixture.root, "shopgoodwill-plated-metal-fetch.mjs");
@@ -503,10 +504,7 @@ test("gold plate wording cannot create solid-gold melt value and separately stat
 
   assert.equal(result.code, 0, result.stderr);
   const item = (await readEnvelope(join(fixture.data, "live-snapshots.js"))).items[0];
-  assert.equal(item.metalEstimate.metal, "silver");
-  assert.equal(item.metalEstimate.purityLabel, "sterling / .925");
-  assert.equal(item.metalEstimate.grossWeightGrams, 6.4);
-  assert.ok(item.metalEstimate.meltCeiling > 6.6 && item.metalEstimate.meltCeiling < 6.7);
+  assert.equal(item.metalEstimate, undefined);
 });
 
 test("authorization guard makes no request and leaves published data unchanged", async (t) => {
