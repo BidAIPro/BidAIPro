@@ -140,20 +140,23 @@ The included `scripts/enrich-market-prices.mjs` step adds two independent option
 
 SerpApi results must be USD-priced, have a stable public offer or product link, share at least 65% of significant target-title tokens with at least three tokens in common, and produce at least five qualifying offers from at least two merchants in the same condition group. Used/refurbished and new/unspecified offers are stored separately. New-retail prices never masquerade as used prices and receive a default 45% condition/resale haircut. Product rating and review counts are stored only as interest evidence; they do not create sell-through or modeled resale speed.
 
-PriceCharting is queried only for eligible games, consoles, cards, comics, Funko, LEGO, coins, currency, and similar titles. Its best product result must clear the same 65% title-coverage gate. Penny-denominated values are converted to USD. The app keeps current guide value, retailer buy, retailer sell, condition basis, raw annual unit volume, match score, observation time, and a public provider-search link separate. A default 15% reserve applies to the guide value used for an online ceiling. The direct retailer-buy value may support a cash-buyer route, but it is not labeled as a pawn-shop quote.
+PriceCharting is queried only for eligible games, consoles, cards, comics, Funko, LEGO, coins, currency, and similar titles. Its best product result must clear the same 65% title-coverage gate. Penny-denominated values are converted to USD. The app keeps current guide value, retailer buy, retailer sell, condition basis, raw annual unit volume, match score, observation time, and a public provider-search link separate. A default 15% reserve applies to the guide value used for an online ceiling. Retailer buy/sell values are dealer references and never create a pawn estimate; reported annual sales volume can independently support the retail demand gate.
 
 The default batch limits are 40 broad-market targets and 20 specialty targets. Broad results refresh after 23 hours; specialty values refresh after 47 hours. Missing credentials are a byte-stable no-op. Weak and empty results store only an `insufficient` state, never a guessed price. Provider tokens are used only by GitHub Actions and are never added to the published snapshot file.
 
 ### Pawn-first exit decision
 
-The browser independently evaluates an immediate pawn/cash-buyer exit and an online resale exit for every item. An immediate cash route can use valid fresh metal evidence, a matched specialty retailer-buy value, or a disclosed percentage of real matched used-market value for pawn-friendly non-metal categories. An online route can use at least three qualifying exact-model completed sales, a matched specialty guide, five sufficiently matched used offers, or five multi-merchant new-retail offers after the stronger replacement-cost haircut.
+The browser independently evaluates two strict gates for every item. The pawn gate exists only when valid fresh precious-metal evidence supplies spot price, source-stated purity, and source-stated weight. Used-retail prices, active listings, and dealer buy guides cannot become pawn estimates. The retail gate first establishes price from qualifying completed sales, a matched specialty guide, five sufficiently matched used offers, or five multi-merchant new-retail offers after the stronger replacement-cost haircut. It then requires a separate demand score of at least 55/100 by default.
+
+Retail demand evidence can be: validated sold-versus-active counts and optional time-to-sale; reported specialty-market annual unit volume; or sufficient recent exact-model completed-sale frequency. Three completed sales within 90 days establish a demand signal but score only 50/100 by default, so they do not pass alone. Five recent sales score above the default threshold. Active listings, merchant count, auction bids, product ratings, and reviews never count as completed-sale demand.
 
 The recommendation hierarchy is:
 
-1. Recommend the immediate pawn/cash-buyer route when its conservative ceiling remains above the observed bid and therefore preserves the configured minimum profit and target margin.
-2. Otherwise recommend online resale when its conservative ceiling remains above the observed bid.
-3. If neither route clears the safety target but one likely case is still positive, label it as a thin margin instead of a candidate.
-4. If neither route is positive, label the item as having no safe exit; if neither route has evidence, keep the ceiling at `$0`.
+1. Return **YES · Pawn profit** when the precious-metal pawn ceiling remains above the observed bid and preserves the configured profit and margin.
+2. Otherwise return **YES · Retail profit** only when both the retail price gate and retail demand gate pass and the conservative retail ceiling remains above the observed bid.
+3. Return **NO · Demand unproven** when price exists but the independent demand gate fails; the retail ceiling remains `$0`.
+4. Return **NO · Margin too low** when an evidence-qualified route exists but the observed bid is already above its target-safe ceiling.
+5. Return **NO · Evidence missing** when neither route qualifies.
 
 Each route exposes its own likely cash or sale value, profit at the observed bid, target-safe ceiling, and modeled break-even bid. Pawn liquidity and online resale popularity remain separate signals. The selected route controls ranking, but the alternative route remains visible for comparison.
 

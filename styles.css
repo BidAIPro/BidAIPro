@@ -2691,9 +2691,12 @@ select {
 
 .exit-decision-head h4 {
   margin: 3px 0 0;
-  font-size: 14px;
+  font-size: 18px;
   letter-spacing: -0.035em;
 }
+
+.exit-decision-panel.is-safe .exit-decision-head h4 { color: #365117; }
+.exit-decision-panel.is-unsafe .exit-decision-head h4 { color: #8a3028; }
 
 .exit-decision-panel > p {
   margin: 9px 0 12px;

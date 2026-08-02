@@ -111,7 +111,8 @@ test("a target-safe pawn route is recommended before an also-profitable online r
   assert.equal(result.recommendationState, "pawn-safe");
   assert.ok(result.pawnBreakEvenBid > result.pawnMaxBid);
   assert.ok(result.pawnProfitAtCurrentBid > 0);
-  assert.equal(model.recommendationLabel(result.recommendationState), "Immediate cash profit");
+  assert.equal(result.decisionVerdict, "YES");
+  assert.equal(model.recommendationLabel(result.recommendationState), "YES · Pawn profit");
 });
 
 test("online resale becomes the recommendation when pawn misses the target-safe ceiling", () => {
@@ -121,7 +122,8 @@ test("online resale becomes the recommendation when pawn misses the target-safe 
   assert.equal(result.pawnLikelyProfitable, false);
   assert.equal(result.onlineSafeNow, true);
   assert.equal(result.exitType, "online-resale");
-  assert.equal(result.recommendationState, "online-safe");
+  assert.equal(result.recommendationState, "retail-safe");
+  assert.equal(result.decisionVerdict, "YES");
   assert.ok(result.resaleBreakEvenBid > result.resaleMaxBid);
   assert.ok(result.profitAtCurrentBid > 0);
 });
@@ -132,6 +134,7 @@ test("a popular non-metal item can use the online route without a metal estimate
   delete item.metalEstimate;
   const result = model.assess(item);
   assert.equal(result.hasMetalEstimate, false);
+  assert.equal(result.hasPawnEstimate, false);
   assert.equal(result.onlineSafeNow, true);
   assert.equal(result.exitType, "online-resale");
   assert.equal(result.onlinePopularityKnown, true);
@@ -139,7 +142,7 @@ test("a popular non-metal item can use the online route without a metal estimate
   assert.ok(result.onlineSaleLikelihood > 0);
 });
 
-test("a matched specialty guide supplies retail, cash-buy, and yearly demand evidence", () => {
+test("a matched specialty guide supplies retail price and yearly demand without becoming a pawn quote", () => {
   const model = loadModel();
   const now = new Date().toISOString();
   const item = baseItem({
@@ -165,14 +168,17 @@ test("a matched specialty guide supplies retail, cash-buy, and yearly demand evi
   const result = model.assess(item);
   assert.equal(result.hasSpecialtyEvidence, true);
   assert.equal(result.hasDirectRetailerBuy, true);
-  assert.equal(result.pawnCashEstimate, 250);
-  assert.equal(result.pawnRetailEstimate, 420);
+  assert.equal(result.hasPawnEstimate, false);
+  assert.equal(result.pawnCashEstimate, null);
   assert.equal(result.rawMarketMedian, 400);
   assert.equal(result.resaleMedian, 340);
   assert.equal(result.specialtyAnnualSalesVolume, 1_840);
+  assert.equal(result.retailDemandPass, true);
   assert.equal(result.onlinePopularityKnown, true);
   assert.ok(result.onlinePopularityScore > 0);
-  assert.equal(result.exitType, "pawn");
+  assert.equal(result.exitType, "online-resale");
+  assert.equal(result.recommendationState, "retail-safe");
+  assert.match(result.retailChannel, /PriceCharting/);
 });
 
 test("matched used offers provide raw average and median without inventing sell-through", () => {
@@ -213,6 +219,11 @@ test("matched used offers provide raw average and median without inventing sell-
   assert.equal(result.productInterestKnown, true);
   assert.equal(result.onlinePopularityKnown, false);
   assert.equal(result.onlinePopularityScore, 0);
+  assert.equal(result.retailDemandPass, false);
+  assert.equal(result.recommendationState, "no-demand");
+  assert.equal(result.decisionVerdict, "NO");
+  assert.equal(result.resaleMaxBid, 0);
+  assert.equal(result.profitAtCurrentBid, null);
 });
 
 test("new-retail offers remain a separately labeled and deeply discounted fallback", () => {
@@ -248,8 +259,46 @@ test("new-retail offers remain a separately labeled and deeply discounted fallba
   assert.equal(result.retailReplacementHaircut, 0.45);
   assert.equal(result.resaleMedian, 269.5);
   assert.equal(result.hasPawnEstimate, false);
+  assert.equal(result.retailDemandPass, false);
+  assert.equal(result.recommendationState, "no-demand");
+  assert.equal(result.maxBid, 0);
   assert.match(result.resaleEvidenceType, /new-retail offers/);
-  assert.match(result.safeCeilingBasis, /condition\/resale haircut/);
+  assert.match(result.safeCeilingBasis, /demand did not clear/);
+});
+
+test("three recent completed sales can establish price but still fail the popularity threshold", () => {
+  const model = loadModel();
+  const item = baseItem({ resaleMarket: null });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasComparableResaleEvidence, true);
+  assert.equal(result.recentCompletedSalesCount, 3);
+  assert.equal(result.completedSalesDemandScore, 50);
+  assert.equal(result.retailDemandPass, false);
+  assert.equal(result.recommendationState, "no-demand");
+  assert.equal(result.maxBid, 0);
+});
+
+test("five recent completed sales pass retail demand and create a defensible ceiling", () => {
+  const model = loadModel();
+  const item = baseItem({
+    resaleMarket: null,
+    comparableSales: [
+      comparable("sale-1", 780, "brand:model-123", 5),
+      comparable("sale-2", 820, "brand:model-123", 4),
+      comparable("sale-3", 860, "brand:model-123", 3),
+      comparable("sale-4", 900, "brand:model-123", 2),
+      comparable("sale-5", 940, "brand:model-123", 1),
+    ],
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.recentCompletedSalesCount, 5);
+  assert.ok(result.completedSalesDemandScore >= result.minimumRetailDemandScore);
+  assert.equal(result.retailDemandPass, true);
+  assert.equal(result.recommendationState, "retail-safe");
+  assert.ok(result.resaleMaxBid > result.currentBid);
+  assert.match(result.retailDemandEvidenceType, /5 exact-model completed sales/);
 });
 
 test("an unsupported item receives zero ceilings instead of an invented exit", () => {

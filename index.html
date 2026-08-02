@@ -126,7 +126,7 @@
               <div>
                 <span class="section-kicker"><i></i> AUCTION COMMAND CENTER</span>
                 <h2 id="opportunities-heading">Know the exit before you place the bid.</h2>
-                <p>Check immediate pawn profit first, then evaluate online or auction resale using real price evidence, popularity, shipping, fees, and a hard break-even limit.</p>
+                <p>Get a direct YES or NO: test precious-metal pawn profit first, then allow retail resale only when both real price evidence and independent demand proof clear the target.</p>
               </div>
               <div class="snapshot-mode" role="status">
                 <span class="mode-dot" aria-hidden="true"></span>
@@ -140,7 +140,7 @@
                 <div>
                   <span class="section-kicker"><i></i> LATEST PUBLISHED SOURCE PASS</span>
                   <h3 id="research-pass-heading" data-source-status>Awaiting research data</h3>
-                  <p>Each listing is timestamped and evaluated across pawn and online resale routes; unsupported values remain unavailable instead of being guessed.</p>
+                  <p>Each listing must pass either the precious-metal pawn gate or the price-plus-demand retail gate. Otherwise BidAI Pro says NO and shows why.</p>
                 </div>
               </div>
               <dl class="research-pass-stats">
@@ -388,11 +388,11 @@
               </div>
               <div class="valuation-source-grid">
                 <article><span>01 · STRONGEST</span><strong>Completed sold comps</strong><p>Exact-model P20, median, average, P80, sell-through, and days to sell from an authorized feed.</p></article>
-                <article><span>02 · SPECIALTY</span><strong>Price guide + retailer buy</strong><p>Current collectible guide, retailer cash/trade value, retailer sell value, and raw yearly units.</p></article>
+                <article><span>02 · SPECIALTY</span><strong>Price guide + yearly demand</strong><p>Current collectible value, dealer buy/sell references, and reported annual units. Dealer values are not called pawn quotes.</p></article>
                 <article><span>03 · USED MARKET</span><strong>eBay + Google Shopping</strong><p>Closely matched used offers combined across channels, then discounted before planning.</p></article>
                 <article><span>04 · FALLBACK</span><strong>New-retail replacement</strong><p>A multi-merchant new-price reference with a larger condition and resale haircut.</p></article>
               </div>
-              <p class="fine-print"><strong>Popularity rule:</strong> sold-versus-active data and reported annual unit volume can support demand. Product reviews show interest only; auction bids show auction activity only.</p>
+              <p class="fine-print"><strong>Decision rule:</strong> pawn requires precious-metal liquidation evidence. Retail requires a price plus sell-through, sufficient recent completed sales, or reported annual unit volume. Product reviews and active listings cannot pass demand by themselves.</p>
             </section>
 
             <section class="marketplace-network" aria-labelledby="marketplace-network-heading">
@@ -470,8 +470,8 @@
                   <label><span>Online asking-price haircut</span><span class="suffix-input"><input name="askingPriceHaircut" type="number" min="0" max="80" step="1" /><b>%</b></span><small>Discount applied when used asking prices are the best available online evidence.</small></label>
                   <label><span>New-retail replacement haircut</span><span class="suffix-input"><input name="retailReplacementHaircut" type="number" min="20" max="80" step="1" /><b>%</b></span><small>Condition and resale discount when only matched new-retail offers exist.</small></label>
                   <label><span>Specialty guide reserve</span><span class="suffix-input"><input name="specialtyGuideHaircut" type="number" min="0" max="50" step="1" /><b>%</b></span><small>Safety reserve applied to a matched specialty-market price guide.</small></label>
+                  <label><span>Minimum retail demand score</span><span class="suffix-input"><input name="minimumRetailDemandScore" type="number" min="20" max="90" step="1" /><b>/100</b></span><small>Retail cannot receive a bid ceiling unless independent demand evidence clears this threshold.</small></label>
                   <label><span>Likely pawn payout of melt</span><span class="suffix-input"><input name="pawnPayoutPercent" type="number" min="20" max="70" step="1" /><b>%</b></span><small>Default 50%; actual shops vary and test the item before making an offer.</small></label>
-                  <label><span>Likely pawn payout of used retail</span><span class="suffix-input"><input name="pawnResalePayoutPercent" type="number" min="15" max="60" step="1" /><b>%</b></span><small>Used only for pawn-friendly non-metal categories with matched real market evidence.</small></label>
                   <label><span>Pawn testing reserve</span><span class="money-input"><b>$</b><input name="pawnTestingReserve" type="number" min="0" step="1" /></span><small>Deducted before setting a precious-metal bid ceiling.</small></label>
                   <div class="form-actions settings-actions"><button class="button button-primary" type="submit">Save assumptions</button><button class="button button-quiet" type="button" data-reset-settings>Restore defaults</button></div>
                 </form>
@@ -483,7 +483,7 @@
                   <div class="formula">
                     <span>Conservative resale</span><b>−</b><span>Selling costs</span><b>−</b><span>Target profit</span><b>=</b><strong>Maximum landed cost</strong>
                   </div>
-                  <p>BidAI Pro checks a direct pawn or cash-buyer sale first, then an evidence-backed online resale. It shows the target-safe ceiling that preserves your profit goal and the higher modeled break-even bid where estimated profit reaches zero.</p>
+                  <p>BidAI Pro checks precious-metal pawn liquidation first. Retail is considered only when a real market price and a separate demand signal both pass. The final answer is YES with a maximum bid, or NO with the failed gate.</p>
                 </div>
                 <div class="content-card danger-card">
                   <span class="section-kicker"><i></i> LOCAL DATA</span>
