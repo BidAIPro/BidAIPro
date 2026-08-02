@@ -1471,6 +1471,7 @@
 
   function renderOpportunityRow(item, rank = null) {
     const a = assess(item);
+    const publicResearch = publicWebResearchFor(item);
     const selected = selectedId === item.id ? " is-selected" : "";
     const watched = item.watched ? " is-watched" : "";
     const statusText = item.status === "ended" ? "Ended" : timeLabel(item);
@@ -1492,14 +1493,19 @@
             ? '<span class="status-pill asking-exit">ONLINE · USED MARKET</span>'
             : a.hasRetailNewEvidence ? '<span class="status-pill asking-exit">ONLINE · RETAIL PROXY</span>' : "";
     const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(recommendationLabel(a.recommendationState))}</span>`;
+    const researchRead = publicResearch ? publicResearchMarketRead(publicResearch, a.currentAcquisition) : null;
     const rowProfit = a.decisionProfitAtCurrentBid;
     const rowProfitLabel = a.decisionApproved
       ? (a.exitType === "pawn" ? "Likely pawn profit" : "Likely retail profit")
-      : "Final decision";
+      : researchRead ? "Internet market read" : "Final decision";
     const rowDecisionValue = a.decisionApproved
       ? money(rowProfit)
       : a.recommendationState === "no-margin" ? `OVER BY ${money(Math.max(0, -a.bidHeadroom))}`
-        : a.recommendationState === "no-demand" ? "DEMAND FAIL" : "RESEARCH";
+        : a.recommendationState === "no-demand" ? "DEMAND FAIL"
+          : researchRead ? researchRead.value : "RESEARCH";
+    const rowDecisionClass = a.decisionApproved
+      ? "positive"
+      : researchRead?.tone === "reference" ? "research" : "negative";
     const exitSummary = a.exitType === "pawn"
       ? `${money(a.pawnCashEstimate)} likely cash offer · ${escapeHtml(a.pawnBasisLabel)}`
       : a.hasComparableResaleEvidence
@@ -1510,7 +1516,9 @@
             ? `${money(a.rawMarketAverage)} average used asking · ${Math.round(a.askingPriceHaircut * 100)}% haircut${a.hasPawnEstimate ? " · cash exit did not clear target" : ""}`
             : a.hasRetailNewEvidence
               ? `${money(a.rawMarketMedian)} new-retail median · ${Math.round(a.retailReplacementHaircut * 100)}% resale haircut`
-              : "No defensible online price evidence";
+              : researchRead
+                ? researchRead.detail
+                : "Internet research pending · no defensible online price evidence";
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open the profitability analysis${sourceUrl ? `; use the source link to visit ${escapeHtml(marketplace.name)}` : "; source listing URL unavailable"}">
         <div class="item-cell">
@@ -1525,7 +1533,7 @@
         </div>
         <div class="money-cell"><span>Observed / landed</span><strong>${money(item.currentBid)}</strong><small>${money(a.currentAcquisition)} landed · ${a.hasForecast ? `expected ${money(a.expectedClose)}` : "close unmodeled"} · ${Number(item.bidCount) || 0} bids</small></div>
         <div class="money-cell"><span>Target-safe / break-even</span><strong>${money(a.maxBid)}</strong><small>${money(a.breakEvenBid)} break-even · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}${a.shippingEstimated ? " · shipping estimated" : ""}</small></div>
-        <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${a.decisionApproved ? "positive" : "negative"}">${rowDecisionValue}</strong><small>${escapeHtml(exitSummary)}</small></div>
+        <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowDecisionClass}">${rowDecisionValue}</strong><small>${escapeHtml(exitSummary)}</small></div>
         <div class="row-actions">
           <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
           ${sourceUrl ? `<a class="row-direct-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing title="Open source listing" aria-label="Open ${escapeHtml(item.title)} on its source site">↗</a>` : ""}
@@ -1604,6 +1612,91 @@
     </table></div>`;
   }
 
+  function publicWebResearchFor(item) {
+    const market = item?.researchMarket;
+    if (!market || typeof market !== "object") return null;
+    const researchedAt = Number.isFinite(Date.parse(market.researchedAt || "")) ? market.researchedAt : null;
+    const results = (Array.isArray(market.results) ? market.results : [])
+      .map((entry) => {
+        const price = Number(entry?.price);
+        return {
+          title: String(entry?.title || "Public market result"),
+          url: safeHttpUrl(entry?.url || entry?.sourceUrl),
+          source: String(entry?.source || "Public web"),
+          price: Number.isFinite(price) && price > 0 ? price : null,
+          listingState: String(entry?.listingState || "observed").toLowerCase(),
+          matchType: String(entry?.matchType || "lead").toLowerCase(),
+          dateLabel: String(entry?.dateLabel || "Date not exposed"),
+          note: String(entry?.note || ""),
+        };
+      })
+      .filter((entry) => entry.url)
+      .slice(0, 20);
+    if (!researchedAt || !results.length) return null;
+    const summary = market.priceSummary && typeof market.priceSummary === "object" ? market.priceSummary : {};
+    const referenceMedian = Number(summary.median);
+    return {
+      researchedAt,
+      method: String(market.method || "Agent-assisted public web research"),
+      query: String(market.query || item.title || ""),
+      summary: String(market.summary || "Public web results were reviewed."),
+      limitation: String(market.limitation || "Reference-only research does not create a bid ceiling."),
+      soldCount: results.filter((entry) => ["sold", "completed", "ended-auction"].includes(entry.listingState)).length,
+      askingCount: results.filter((entry) => ["active", "asking"].includes(entry.listingState)).length,
+      referenceMedian: Number.isFinite(referenceMedian) && referenceMedian > 0 ? referenceMedian : null,
+      results,
+    };
+  }
+
+  function publicResearchMarketRead(research, landedCost) {
+    const resultCount = research.results.length;
+    const evidenceLabel = `${resultCount} internet result${resultCount === 1 ? "" : "s"} reviewed`;
+    if (!research.referenceMedian) {
+      return {
+        value: "RESEARCHED",
+        tone: "reference",
+        detail: `${evidenceLabel} · no defensible median · not bid-safe`,
+      };
+    }
+    const referenceSpread = research.referenceMedian - Math.max(0, Number(landedCost) || 0);
+    if (referenceSpread <= 0) {
+      return {
+        value: "ABOVE REFERENCE",
+        tone: "negative",
+        detail: `${money(Math.abs(referenceSpread))} above ${money(research.referenceMedian)} reference median before resale fees`,
+      };
+    }
+    return {
+      value: `VERIFY +${money(referenceSpread)}`,
+      tone: "reference",
+      detail: `${money(referenceSpread)} gross spread to ${money(research.referenceMedian)} reference median · seller fees and risk not cleared`,
+    };
+  }
+
+  function renderPublicWebResearch(item) {
+    const research = publicWebResearchFor(item);
+    if (!research) return "";
+    return `<section class="detail-section comparable-sales public-web-research">
+      <div class="detail-section-heading"><h4>Internet research ledger</h4><span>reference only · researched ${escapeHtml(formatDateTime(research.researchedAt))}</span></div>
+      <div class="research-ledger-summary">
+        <div><span>Results reviewed</span><strong>${research.results.length}</strong><small>${research.soldCount} sold/ended · ${research.askingCount} active asks</small></div>
+        <div><span>Reference median</span><strong>${research.referenceMedian ? money(research.referenceMedian) : "Unavailable"}</strong><small>never used as a safe ceiling by itself</small></div>
+        <div><span>Research method</span><strong>${escapeHtml(research.method)}</strong><small>${escapeHtml(research.query)}</small></div>
+      </div>
+      <p class="research-ledger-note"><strong>Finding:</strong> ${escapeHtml(research.summary)} <strong>Limitation:</strong> ${escapeHtml(research.limitation)}</p>
+      <div class="comparable-sales-list"><table class="comparable-sales-table">
+        <thead><tr><th scope="col">Internet result</th><th scope="col">State</th><th scope="col">Date</th><th scope="col">Price</th><th scope="col">Proof</th></tr></thead>
+        <tbody>${research.results.map((entry) => `<tr>
+          <td><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.matchType)}${entry.note ? ` · ${escapeHtml(entry.note)}` : ""}</small></td>
+          <td>${escapeHtml(entry.listingState)}</td>
+          <td>${escapeHtml(entry.dateLabel)}</td>
+          <td><strong>${entry.price ? money(entry.price) : "—"}</strong></td>
+          <td><a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">Open evidence ↗</a></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </section>`;
+  }
+
   function renderObservationLedger(item) {
     const endsAt = Date.parse(item.endsAt || "");
     const observations = (Array.isArray(item.observations) ? item.observations : [])
@@ -1643,6 +1736,7 @@
     const imageUrl = safeHttpUrl(item.imageUrl);
     const freshness = freshnessFor(item);
     const marketplace = marketplaceFor(item);
+    const publicResearch = publicWebResearchFor(item);
     const snapshotPlan = snapshotPlanFor(item);
     const acquisitionComparables = a.forecast.comparables || [];
     const resaleComparables = resaleComparablesFor(item);
@@ -1725,6 +1819,7 @@
       { label: "Pawn valuation", pass: a.hasPawnEstimate, detail: a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled cash` : a.metalEvidenceTitleConflict ? "Rejected: plated or non-solid metal wording" : "No verified metal valuation" },
       { label: "Retail pricing", pass: a.hasResaleEvidence, detail: a.hasResaleEvidence ? a.resaleEvidenceType : "No defensible price evidence" },
       { label: "Retail demand", pass: a.retailDemandPass, detail: a.hasRetailDemandEvidence ? `${a.retailDemandScore}/100 · ${a.retailDemandEvidenceType}` : "No sell-through or sales-volume proof" },
+      { label: "Internet research", pass: Boolean(publicResearch), detail: publicResearch ? `${publicResearch.results.length} public results reviewed; reference-only until evidence gates pass` : "No public web research stored yet" },
     ];
     const missingIntelligence = [];
     if (!sourceUrl) missingIntelligence.push("The canonical auction URL is missing, so source photos and description cannot be audited from this record.");
@@ -1736,7 +1831,9 @@
     if (a.strictMetalPurityReject) missingIntelligence.push(a.metalPurityRejectionReason);
     else if (a.metalEvidenceTitleConflict) missingIntelligence.push("A stored metal estimate was rejected because the title describes plated, filled, vermeil, overlay, bonded, clad, or electroplated material rather than solid precious metal.");
     else if (!a.hasPawnEstimate) missingIntelligence.push("Pawn value is withheld because fresh precious-metal spot, purity, and weight evidence is incomplete or inapplicable.");
-    if (!a.hasResaleEvidence) missingIntelligence.push("Online resale price is withheld until enough closely matched real market observations are connected.");
+    if (!a.hasResaleEvidence) missingIntelligence.push(publicResearch
+      ? `Internet research reviewed ${publicResearch.results.length} result${publicResearch.results.length === 1 ? "" : "s"}, but the online resale price is withheld because the dated identity, condition, or demand evidence is not strong enough for a safe ceiling.`
+      : "Online resale price is withheld until enough closely matched real market observations are connected.");
     if (a.hasResaleEvidence && !a.retailDemandPass) missingIntelligence.push(`Retail demand does not clear the required ${a.minimumRetailDemandScore.toFixed(0)}/100 threshold.`);
     if (["is-stale", "is-invalid", "is-unknown"].includes(freshness.className)) missingIntelligence.push(`The auction was last checked ${freshness.short}; refresh it before relying on the observed bid.`);
     const dueDiligence = [
@@ -2003,6 +2100,7 @@
           <div class="detail-section-heading"><h4>Resale sold comparables</h4><span>${resaleComparables.length} completed sales attached</span></div>
           ${renderComparableTable(resaleComparables, "resale sold")}
         </section>
+        ${renderPublicWebResearch(item)}
         ${a.forecast.categoryReferences.length ? `<section class="detail-section comparable-sales category-reference"><div class="detail-section-heading"><h4>Broader category reference</h4><span>not used in this forecast</span></div>${renderComparableTable(a.forecast.categoryReferences, "category reference")}</section>` : ""}
         <section class="detail-section detail-source-ledger">
           <div class="detail-section-heading"><h4>Source and timing</h4><span>audit trail</span></div>
@@ -2043,7 +2141,9 @@
         const matchesMode = queueMode === "closing"
           ? item.status === "active" && closingWithinFiveMinutes
           : queueMode === "pawn" ? assessment.hasPawnEstimate
-            : queueMode === "thin" ? !assessment.decisionApproved && (assessment.pawnLikelyProfitable || assessment.retailLikelyProfitable) : true;
+            : queueMode === "thin" ? !assessment.decisionApproved && (assessment.pawnLikelyProfitable || assessment.retailLikelyProfitable)
+              : queueMode === "research" ? assessment.rankTier === 5
+                : assessment.rankTier < 5;
         return (!query || haystack.includes(query)) &&
           matchesMode &&
           (signal === "all" || assessment.signal === signal) &&
@@ -2249,7 +2349,8 @@ function renderMarketplaceCoverage() {
     const queueTitle = queueMode === "closing"
       ? "Closing within five minutes"
       : queueMode === "pawn" ? "Pawn-first precious metals"
-        : queueMode === "thin" ? "Likely positive, but below the safety target" : "Highest profit likelihood first";
+        : queueMode === "thin" ? "Likely positive, but below the safety target"
+          : queueMode === "research" ? "Research gaps — no bid until evidence improves" : "Highest profit likelihood first";
     if ($("#queue-heading")) $("#queue-heading").textContent = queueTitle;
     $$('[data-quick-mode]').forEach((button) => {
       const active = button.dataset.quickMode === queueMode;
@@ -2263,6 +2364,14 @@ function renderMarketplaceCoverage() {
     if (!items.some((item) => item.id === selectedId)) selectedId = items[0]?.id || "";
     list.innerHTML = visibleItems.map((item, index) => renderOpportunityRow(item, index + 1)).join("");
     empty.hidden = items.length > 0;
+    const emptyHeading = $("h4", empty);
+    const emptyCopy = $("p", empty);
+    if (emptyHeading) emptyHeading.textContent = "No listings match";
+    if (emptyCopy) emptyCopy.textContent = "Broaden the filters or connect a source to ingest current auction records.";
+    if (!items.length && queueMode === "profit") {
+      if (emptyHeading) emptyHeading.textContent = "No evidence-backed profit opportunities match";
+      if (emptyCopy) emptyCopy.textContent = "BidAI Pro will not place unresearched listings in Top profit. Change the filters or inspect an item's internet-research ledger after evidence is collected.";
+    }
     list.hidden = items.length === 0;
     const pagination = $("[data-queue-pagination]");
     const count = $("[data-queue-visible-count]");
@@ -2283,7 +2392,7 @@ function renderMarketplaceCoverage() {
   }
 
   function setQueueMode(mode) {
-    if (!["profit", "pawn", "thin", "closing"].includes(mode)) return;
+    if (!["profit", "pawn", "thin", "closing", "research"].includes(mode)) return;
     queueMode = mode;
     selectedId = "";
     visibleQueueLimit = QUEUE_PAGE_SIZE;

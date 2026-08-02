@@ -1,0 +1,622 @@
+{
+  "generatedAt": "2026-08-02T22:16:03.292Z",
+  "method": "Codex agent-assisted public web research",
+  "findings": [
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272082372",
+      "query": "Sergio Valente black rabbit fur jacket waistcoat small sold",
+      "summary": "Seven sold Sergio Valente rabbit-fur analogs cluster from $55 to $100 with a $65 reference median. The closest dated eBay result sold for $59.99; another local auction ended at $19.",
+      "limitation": "Most marketplace pages expose sold status but not a complete sale date, and several are coats or jackets rather than the exact waistcoat. These results are useful reference research but cannot independently create a safe bid ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 7,
+        "soldSampleSize": 7,
+        "askingSampleSize": 0,
+        "low": 55,
+        "median": 65,
+        "average": 71.71,
+        "high": 100,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "VTG Sergio Valente Rabbit Fur Jacket w Pockets Womens Small",
+          "url": "https://www.ebay.com/itm/366086147354",
+          "source": "eBay",
+          "price": 59.99,
+          "listingState": "sold",
+          "matchType": "close analog",
+          "dateLabel": "Sold Jan 22, 2026",
+          "note": "Same brand, rabbit fur, pockets, and women's small"
+        },
+        {
+          "title": "Vintage Sergio Valente genuine rabbit fur",
+          "url": "https://poshmark.com/listing/Vintage-Sergio-Valente-genuine-rabbit-fur-5c5c8ea1c89e1d56cae4b9b6",
+          "source": "Poshmark",
+          "price": 84,
+          "listingState": "sold",
+          "matchType": "close analog",
+          "dateLabel": "Sold status verified; year not exposed",
+          "note": "Black, genuine rabbit fur, size small, pockets"
+        },
+        {
+          "title": "Vintage 80s Sergio Valente Black Rabbit Fur Jacket Size Medium Pockets",
+          "url": "https://poshmark.com/listing/Vintage-80s-Sergio-Valente-Black-Rabbit-Fur-Jacket-Size-Medium-Pockets-691e1ced7ac62994781e0f6a",
+          "source": "Poshmark",
+          "price": 100,
+          "listingState": "sold",
+          "matchType": "analog",
+          "dateLabel": "Sold status verified; year not exposed",
+          "note": "Same brand, black color, pockets; different size"
+        },
+        {
+          "title": "Sergio Valente Rabbit Fur Coat Medium",
+          "url": "https://poshmark.com/listing/Sergio-Valente-Rabbit-Fur-Coat-Medium-61db174be107bbe962c6fe98",
+          "source": "Poshmark",
+          "price": 75,
+          "listingState": "sold",
+          "matchType": "analog",
+          "dateLabel": "Sold status verified; year not exposed",
+          "note": "Same brand and black rabbit fur; coat and different size"
+        },
+        {
+          "title": "Vintage Sergio Valente Classy and Timeless Iconic Black Rabbit Fur Coat",
+          "url": "https://poshmark.com/listing/Vintage-Sergio-Valente-Classy-and-Timeless-Iconic-Black-Rabbit-Fur-Coat-67f2aadf24b20b5a357ddc19",
+          "source": "Poshmark",
+          "price": 65,
+          "listingState": "sold",
+          "matchType": "analog",
+          "dateLabel": "Sold status verified; year not exposed",
+          "note": "Same brand and material; coat and different size"
+        },
+        {
+          "title": "Vintage Sergio Valente rabbit fur coat",
+          "url": "https://poshmark.com/listing/Vintage-Sergio-Valente-rabbit-fur-coat-65ee51664bf9ffe42aebd42f",
+          "source": "Poshmark",
+          "price": 55,
+          "listingState": "sold",
+          "matchType": "analog",
+          "dateLabel": "Sold status verified; year not exposed",
+          "note": "Same brand and material; exact color and size not established"
+        },
+        {
+          "title": "Sergio Valente Rabbit fur coat",
+          "url": "https://poshmark.com/listing/Sergio-Valente-Rabbit-fur-coat-67c896e5b9db3a31368f2c6e",
+          "source": "Poshmark",
+          "price": 63,
+          "listingState": "sold",
+          "matchType": "analog",
+          "dateLabel": "Sold status verified; year not exposed",
+          "note": "Same brand and rabbit fur; white and size large"
+        },
+        {
+          "title": "Sergio Valente Black Rabbit Fur Jacket",
+          "url": "https://rainiernewera.net/auctions/1504",
+          "source": "Rainier New Era auction",
+          "price": 19,
+          "listingState": "ended-auction",
+          "matchType": "auction analog",
+          "dateLabel": "Ended Mar 19, 2025",
+          "note": "Auction outcome, not an online retail sale"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "271874935",
+      "query": "Backstreet Boys DNA World Tour black satin bomber jacket resale",
+      "summary": "Three closely related active asks were found from $99.99 to $180, including two eBay jackets and one Etsy DNA World Tour jacket. No sufficiently dated completed jacket sale was located in this pass.",
+      "limitation": "Active asking prices and watcher counts do not establish a sold value or sell-through rate. Size was unavailable on the auction record, so the app withholds a ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 3,
+        "soldSampleSize": 0,
+        "askingSampleSize": 3,
+        "low": 99.99,
+        "median": 179.99,
+        "average": 153.33,
+        "high": 180,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "RARE Backstreet Boys DNA World Tour Satin Jacket Photo Lined Size S/M",
+          "url": "https://www.ebay.com/itm/167639967227",
+          "source": "eBay",
+          "price": 179.99,
+          "listingState": "active",
+          "matchType": "close match",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$19 shipping and six watchers were visible"
+        },
+        {
+          "title": "Backstreet Boys DNA World Tour Black Jacket Size Large XL",
+          "url": "https://www.ebay.com/itm/226728791637",
+          "source": "eBay",
+          "price": 99.99,
+          "listingState": "active",
+          "matchType": "close match",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$33.43 shipping; size differs or is unknown"
+        },
+        {
+          "title": "Backstreet Boys DNA World Tour Black Varsity Jacket XL With Graphic Lining",
+          "url": "https://www.etsy.com/market/backstreet_boys_bomber_jacket",
+          "source": "Etsy market results",
+          "price": 180,
+          "listingState": "active",
+          "matchType": "market analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Marketplace search result; not a completed sale"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272083657",
+      "query": "Sugar Street Weavers Noah's Ark tapestry cardigan sold",
+      "summary": "One closely matching eBay sweater sold for $110 on Dec 29, 2025. Current Noah's Ark jacket asks span roughly $22.50 to $149.95, showing a wide condition/design spread.",
+      "limitation": "One dated sale is not enough to establish a reliable median or demand. The auction title says cardigan while several live results are jackets, so the app keeps the ceiling at zero.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 5,
+        "soldSampleSize": 1,
+        "askingSampleSize": 4,
+        "soldReference": 110,
+        "askingLow": 22.5,
+        "askingMedian": 46.98,
+        "askingHigh": 149.95,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "VTG Sugar Street Weavers Noah's Ark and Animals Tapestry Art Sweater 80s 90s",
+          "url": "https://www.ebay.com/itm/267416954908",
+          "source": "eBay",
+          "price": 110,
+          "listingState": "sold",
+          "matchType": "close match",
+          "dateLabel": "Sold Dec 29, 2025",
+          "note": "Same maker and Noah's Ark theme; size XL rather than one size"
+        },
+        {
+          "title": "Sugar Street Weavers Noah's Ark Women's Tapestry Jacket Coat Vintage Animals",
+          "url": "https://www.ebay.com/b/Sugar-Street-Weavers-Regular-Size-Coats-Jackets-Vests-for-Women/63862/bn_80155145",
+          "source": "eBay market results",
+          "price": 22.5,
+          "listingState": "active",
+          "matchType": "market analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Active ask; individual condition not verified"
+        },
+        {
+          "title": "Sugar Street Weavers Noah's Ark Women's Tapestry Jacket Coat Vintage Animals",
+          "url": "https://www.ebay.com/b/Sugar-Street-Weavers-Regular-Size-Coats-Jackets-Vests-for-Women/63862/bn_80155145",
+          "source": "eBay market results",
+          "price": 43.95,
+          "listingState": "active",
+          "matchType": "market analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Active ask plus shipping"
+        },
+        {
+          "title": "Sugar Street Weavers Noah's Ark Women's Tapestry Jacket Coat Vintage Animals",
+          "url": "https://www.ebay.com/b/Sugar-Street-Weavers-Animal-Print-Coats-Jackets-Vests-for-Women/63862/bn_107991244",
+          "source": "eBay market results",
+          "price": 50,
+          "listingState": "active",
+          "matchType": "market analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Active ask; individual condition not verified"
+        },
+        {
+          "title": "VTG Sugar Street Weavers Noah's Ark Tapestry Jacket Promises Kept Animals USA OS",
+          "url": "https://www.etsy.com/market/noahs_ark_woven_blanket",
+          "source": "Etsy market results",
+          "price": 149.95,
+          "listingState": "active",
+          "matchType": "market analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Active ask; marketplace search result"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272092205",
+      "query": "5SOS Black Veil Brides concert tour shirt merchandise resale",
+      "summary": "Current Black Veil Brides shirts appear around $14 to $32, and the official store lists a tour tee at $32 sale/$45 regular. That does not value the mixed bulk lot because its item count, bands, sizes, dates, authenticity, and condition are not established from the title.",
+      "limitation": "Per-shirt asking prices cannot be multiplied across an unidentified lot. Photos and an exact inventory are required before researching each piece and estimating sell-through.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 2,
+        "soldSampleSize": 0,
+        "askingSampleSize": 2,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Black Veil Brides Scales of Justice Tour Tee",
+          "url": "https://www.blackveilbrides.net/products/scales-of-justice-tour-tee",
+          "source": "Official Black Veil Brides store",
+          "price": 32,
+          "listingState": "active",
+          "matchType": "category reference",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$45 regular price; not identified in the auction lot"
+        },
+        {
+          "title": "Black Veil Brides shirt market results",
+          "url": "https://www.ebay.com/b/black-veil-brides-shirt/null/bn_7024830316",
+          "source": "eBay market results",
+          "price": 19.99,
+          "listingState": "active",
+          "matchType": "category reference",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Representative active ask within a roughly $14-$31 range"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "271704513",
+      "query": "GoPro HERO10 Black used sold bundle price",
+      "summary": "A dated Swappa sale for a working HERO10 with two batteries, charger, and cable closed at $123 on May 2, 2026. A current marketplace-based price guide shows used or open-box examples from $115 to $229.99, with a $180 reference median across the reviewed values.",
+      "limitation": "Only one directly verifiable completed sale was found in this pass. Accessory count, battery health, camera testing, marketplace fees, and ShopGoodwill shipping still need to be confirmed before a safe ceiling can be issued.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 5,
+        "soldSampleSize": 1,
+        "askingSampleSize": 4,
+        "low": 115,
+        "median": 180,
+        "average": 169.59,
+        "high": 229.99,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "GoPro HERO10 Black with two batteries, charger, and cable",
+          "url": "https://swappa.com/listing/view/LAER22886",
+          "source": "Swappa",
+          "price": 123,
+          "listingState": "sold",
+          "matchType": "close completed sale",
+          "dateLabel": "Sold May 2, 2026",
+          "note": "Working camera in good condition with two batteries and charging accessories"
+        },
+        {
+          "title": "GoPro HERO10 Black value and price guide",
+          "url": "https://www.herostuff.com/price-guide/gopro-hero10-black?id=lnHUSazPriQseHHhrsbj9",
+          "source": "Hero Stuff",
+          "price": 180,
+          "listingState": "market-observed",
+          "matchType": "exact-model price guide",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Reviewed marketplace examples include $115, $180, $199.94, and $229.99 for used/open-box units"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272086157",
+      "query": "TAG Heuer WK1120 completed auction and secondary market archive",
+      "summary": "The EveryWatch WK1120 archive exposes 26 priced historical records from $375 to $1,250, with a $515.50 reference median. At least two entries are explicitly identified as auction sales, including $648 in April 2026 and $559 in June 2024.",
+      "limitation": "Most archive entries are labeled 'sold / removed,' which does not prove that a buyer paid the displayed price. Authentication, operation, bracelet length, service history, condition, and exact reference suffix materially affect value, so the archive remains reference-only.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 26,
+        "soldSampleSize": 2,
+        "askingSampleSize": 24,
+        "low": 375,
+        "median": 515.5,
+        "average": 628.04,
+        "high": 1250,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "TAG Heuer WK1120 historical market archive",
+          "url": "https://everywatch.com/tag-heuer/wk1120?auctionType=historical",
+          "source": "EveryWatch",
+          "price": 515.5,
+          "listingState": "market-archive",
+          "matchType": "exact-reference aggregate",
+          "dateLabel": "Records reviewed through Jun 2026",
+          "note": "26 priced records; median calculated from the displayed archive"
+        },
+        {
+          "title": "TAG Heuer 2000 WK1120 auction sale",
+          "url": "https://everywatch.com/tag-heuer/wk1120?auctionType=historical",
+          "source": "EveryWatch / Denhams",
+          "price": 648,
+          "listingState": "sold",
+          "matchType": "exact-reference auction sale",
+          "dateLabel": "Sold Apr 23, 2026",
+          "note": "Archive explicitly labels this Denhams result sold"
+        },
+        {
+          "title": "TAG Heuer 2000 WK1120 auction sale",
+          "url": "https://everywatch.com/tag-heuer/wk1120?auctionType=historical",
+          "source": "EveryWatch / Fellows",
+          "price": 559,
+          "listingState": "sold",
+          "matchType": "exact-reference auction sale",
+          "dateLabel": "Sold Jun 13, 2024",
+          "note": "Archive reports the result beat estimate by 9%"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272475337",
+      "query": "Apple AirPods Max pink A2096 used completed sale price",
+      "summary": "A dated eBay AirPods Max excellent-condition listing that offered all colors sold for $399 on March 21, 2026. Current pink A2096 listings visible on eBay begin near $249.99, while a marketplace-based price guide shows pre-owned or refurbished examples from $105 to $359 with a $289.99 median.",
+      "limitation": "AirPods Max are heavily counterfeited, the $399 completed listing was a multi-color seller listing rather than proof of the exact pink unit sold, and the auction record does not establish serial/authenticity or battery health. No ceiling is defensible until authenticity and model generation are verified.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 6,
+        "soldSampleSize": 1,
+        "askingSampleSize": 5,
+        "low": 105,
+        "median": 294.99,
+        "average": 280.83,
+        "high": 399,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Apple AirPods Max All Colors - Excellent",
+          "url": "https://www.ebay.com/itm/144820632259",
+          "source": "eBay",
+          "price": 399,
+          "listingState": "sold",
+          "matchType": "model-level completed sale",
+          "dateLabel": "Sold Mar 21, 2026",
+          "note": "Excellent-condition multi-color listing; pink was one offered variation"
+        },
+        {
+          "title": "Apple AirPods Max Pink used market listings",
+          "url": "https://www.ebay.com/p/24043023307",
+          "source": "eBay",
+          "price": 249.99,
+          "listingState": "active",
+          "matchType": "exact-color market",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Current pink listings begin near $249.99; asking prices are not sale proof"
+        },
+        {
+          "title": "Apple AirPods Max value and price guide",
+          "url": "https://www.herostuff.com/price-guide/apple-airpods-max?id=ZkU_zSiUp2OLP8h901pLh",
+          "source": "Hero Stuff",
+          "price": 289.99,
+          "listingState": "market-observed",
+          "matchType": "model-level price guide",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Five pre-owned/refurbished examples span $105 to $359; one pink example is $299.99"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "271698812",
+      "query": "Adidas Jeremy Scott Wings rainbow used completed sales",
+      "summary": "Four verifiable sold or last-sale references for Jeremy Scott rainbow Wings variants are $80, $150, $225, and $250, producing a $187.50 reference median. The auction's current $445 bid is already $257.50 above that median before buyer premium, tax, shipping, and resale fees.",
+      "limitation": "The auction title's G17454 identifier could not be reconciled to a consistent Adidas style code, and the sold references vary by rainbow material, size, and condition. The evidence supports an avoid/research conclusion, not a positive ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 4,
+        "soldSampleSize": 4,
+        "askingSampleSize": 0,
+        "low": 80,
+        "median": 187.5,
+        "average": 176.25,
+        "high": 250,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Jeremy Scott x Adidas JS Wings Rainbow Wings Sneakers",
+          "url": "https://www.therealreal.com/products/men/shoes/sneakers/jeremy-scott-x-adidas-colorblock-wings-sneakers",
+          "source": "The RealReal",
+          "price": 80,
+          "listingState": "sold",
+          "matchType": "close variant",
+          "dateLabel": "Sold status verified; sale date not exposed",
+          "note": "Size 6.5, very good condition, authenticated reseller"
+        },
+        {
+          "title": "Adidas x Jeremy Scott Winged Wings Rainbow Fleece Sneakers",
+          "url": "https://www.grailed.com/listings/89166141-adidas-x-jeremy-scott-adidas-x-jeremy-scott-winged-wings-rainbow-fleece-sneakers",
+          "source": "Grailed",
+          "price": 150,
+          "listingState": "sold",
+          "matchType": "close variant",
+          "dateLabel": "Listed 4 months before Aug 2, 2026",
+          "note": "Size 7.5, gently used"
+        },
+        {
+          "title": "adidas JS Wings Jeremy Scott Rainbow Foil",
+          "url": "https://stockx.com/adidas-js-wings-jeremy-scott-rainbow-foil",
+          "source": "StockX",
+          "price": 225,
+          "listingState": "sold",
+          "matchType": "close variant last sale",
+          "dateLabel": "Last sale visible Aug 2, 2026",
+          "note": "Style Q23650; new-condition marketplace, size not exposed"
+        },
+        {
+          "title": "Adidas JS Wings Jeremy Scott Rainbow Size 9",
+          "url": "https://poshmark.com/listing/Adidas-Js-Wings-Jeremy-Scott-Rainbow-Size-9-6940844b24d2e7b4436a8ba0",
+          "source": "Poshmark",
+          "price": 250,
+          "listingState": "sold",
+          "matchType": "close size and colorway",
+          "dateLabel": "Sold status verified; updated Jan 3, year not exposed",
+          "note": "Size 9 versus auction size 9.5"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272247086",
+      "query": "New Nintendo 3DS XL Red completed sales 2026 bundle games",
+      "summary": "PriceCharting's completed-sale model currently values the red New Nintendo 3DS XL at $274.99 loose and $406.94 complete. Recent dated eBay sales include $299.95 and $319.99 for tested console packages and $344.95 for a console with games. The auction's $277 bid is already near the loose console value before acquisition and selling costs.",
+      "limitation": "The ten bundled games must be identified and valued individually, and console testing, screens, region, charger, stylus, shell condition, and account/download claims must be verified. The lot may contain incremental value, but the current evidence cannot support a profit ceiling for the whole bundle.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 4,
+        "soldSampleSize": 4,
+        "askingSampleSize": 0,
+        "low": 274.99,
+        "median": 309.97,
+        "average": 309.97,
+        "high": 344.95,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "New Nintendo 3DS XL Red completed-sales price guide",
+          "url": "https://www.pricecharting.com/game/nintendo-3ds/new-nintendo-3ds-xl-red",
+          "source": "PriceCharting",
+          "price": 274.99,
+          "listingState": "completed-sales-guide",
+          "matchType": "exact-model aggregate",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$274.99 loose, $309.98 item and box, $406.94 complete; unsold items excluded"
+        },
+        {
+          "title": "New Nintendo 3DS XL Red tested near-mint with charger",
+          "url": "https://www.ebay.com/itm/117197388779",
+          "source": "eBay",
+          "price": 299.95,
+          "listingState": "sold",
+          "matchType": "exact-model completed sale",
+          "dateLabel": "Sold May 15, 2026",
+          "note": "Tested console with charger"
+        },
+        {
+          "title": "New Nintendo 3DS XL Red USA top IPS mint/unused",
+          "url": "https://www.ebay.com/itm/336637907402",
+          "source": "eBay",
+          "price": 319.99,
+          "listingState": "sold",
+          "matchType": "exact-model completed sale",
+          "dateLabel": "Sold Jun 14, 2026",
+          "note": "Top IPS, unusually strong condition"
+        },
+        {
+          "title": "New Nintendo 3DS XL Metallic Red console with games",
+          "url": "https://www.ebay.com/itm/117123049984",
+          "source": "eBay",
+          "price": 344.95,
+          "listingState": "sold",
+          "matchType": "close bundle completed sale",
+          "dateLabel": "Sold Jun 1, 2026",
+          "note": "Console with games; game count and titles differ or are not fully exposed"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "271869480",
+      "query": "pair Shure SM58 microphones used sold price hard case",
+      "summary": "Two directly comparable Reverb pairs sold for $139.99 and $165, while an older pair with a hard case sold for $105. Current Guitar Center used individual SM58 listings cluster around $64.99 to $79.99. At a $112 auction bid, buyer costs and resale fees leave little or no defensible margin.",
+      "limitation": "The microphones must be tested and authenticated because counterfeit SM58s exist; the Peavey cases add limited uncertain value. Two recent-ish sold pairs and one old sale are useful but insufficient for a safe automated ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 3,
+        "soldSampleSize": 3,
+        "askingSampleSize": 0,
+        "low": 105,
+        "median": 139.99,
+        "average": 136.66,
+        "high": 165,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Shure SM58 Pair",
+          "url": "https://reverb.com/item/75886556-shure-sm58-pair-san-antonio-tx",
+          "source": "Reverb",
+          "price": 139.99,
+          "listingState": "sold",
+          "matchType": "exact pair",
+          "dateLabel": "Listed about one year before Aug 2, 2026",
+          "note": "Used very good, fully tested; $9.50 shipping"
+        },
+        {
+          "title": "Two Shure SM58 microphones with cases and XLR cables",
+          "url": "https://reverb.com/item/76699683-2-shure-sm58-dynamic-microphones-w-cases-xlr-cables-51741",
+          "source": "Reverb",
+          "price": 165,
+          "listingState": "sold",
+          "matchType": "close pair",
+          "dateLabel": "Listed about two years before Aug 2, 2026",
+          "note": "Used excellent, tested, with two cables; $15 shipping"
+        },
+        {
+          "title": "Two Shure SM58 microphones with hard case",
+          "url": "https://reverb.com/item/14148665-2-shure-sm58-w-hard-case",
+          "source": "Reverb",
+          "price": 105,
+          "listingState": "sold",
+          "matchType": "close pair",
+          "dateLabel": "Listed about seven years before Aug 2, 2026",
+          "note": "Used good; one microphone showed wear"
+        },
+        {
+          "title": "Used Shure SM58 listings",
+          "url": "https://www.guitarcenter.com/Shure-SM58.gc?page=2",
+          "source": "Guitar Center",
+          "price": 74.99,
+          "listingState": "active",
+          "matchType": "single-unit used market",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Individual used SM58LC/SM58S listings visible from $64.99 to $79.99"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "271876914",
+      "query": "Sony DSC-RX100 original used market price",
+      "summary": "MPB currently displays 14 used original-generation RX100 units from $184 to $719, but the spread is unusually wide and no completed-sale median was available from Swappa. The auction's $306 bid cannot be called profitable from asking inventory alone.",
+      "limitation": "The exact RX100 generation, operational condition, lens/sensor health, and included accessories must be verified. MPB dealer asks include warranty and are not completed consumer sales, so they cannot create a safe ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 14,
+        "soldSampleSize": 0,
+        "askingSampleSize": 14,
+        "low": 184,
+        "median": null,
+        "average": null,
+        "high": 719,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Used Sony Cyber-shot RX100 inventory",
+          "url": "https://www.mpb.com/en-us/product/sony-cyber-shot-rx100",
+          "source": "MPB",
+          "price": 184,
+          "listingState": "active",
+          "matchType": "exact-name dealer market",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "14 used units displayed from $184 to $719 with a six-month dealer warranty"
+        },
+        {
+          "title": "Sony Cyber-shot RX100 market page",
+          "url": "https://swappa.com/prices/sony-cyber-shot-rx100",
+          "source": "Swappa",
+          "price": null,
+          "listingState": "no-data",
+          "matchType": "exact-model market check",
+          "dateLabel": "Updated Jul 24, 2026",
+          "note": "No current pricing data displayed"
+        }
+      ]
+    }
+  ]
+}

@@ -56,6 +56,9 @@ jobs:
           BIDAI_PUBLIC_DETAIL_LIMIT: "16"
         run: node scripts/refresh-public-markets.mjs
 
+      - name: Apply agent-researched public web evidence
+        run: node scripts/apply-web-research.mjs
+
       - name: Enrich with authorized completed-sale evidence
         env:
           BIDAI_RESALE_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_RESALE_SOURCE_AUTHORIZED }}
