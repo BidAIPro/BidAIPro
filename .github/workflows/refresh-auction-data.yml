@@ -145,13 +145,12 @@ jobs:
           git update-index --add --cacheinfo 100644 "$snapshot_blob" data/live-snapshots.js
           snapshot_tree="$(git write-tree)"
 
+          snapshot_commit="$(printf '%s\n' 'chore(data): publish latest auction snapshots' | git commit-tree "$snapshot_tree")"
           if [[ -n "$previous_commit" ]]; then
-            snapshot_commit="$(printf '%s\n' 'chore(data): refresh auction snapshots' | git commit-tree "$snapshot_tree" -p "$previous_commit")"
+            git push --force-with-lease="refs/heads/auction-data:$previous_commit" origin "$snapshot_commit:refs/heads/auction-data"
           else
-            snapshot_commit="$(printf '%s\n' 'chore(data): initialize auction snapshots' | git commit-tree "$snapshot_tree")"
+            git push origin "$snapshot_commit:refs/heads/auction-data"
           fi
-
-          git push origin "$snapshot_commit:refs/heads/auction-data"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
