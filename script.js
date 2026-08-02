@@ -22,6 +22,19 @@
     targetMargin: 22,
   };
 
+  const AUCTION_MARKETS = [
+    { key: "shopgoodwill", name: "ShopGoodwill", domain: "shopgoodwill.com", homeUrl: "https://shopgoodwill.com/", focus: "Donated goods, jewelry, collectibles, electronics" },
+    { key: "ebay", name: "eBay Auctions", domain: "ebay.com", homeUrl: "https://www.ebay.com/", focus: "General merchandise and worldwide collectibles" },
+    { key: "hibid", name: "HiBid", domain: "hibid.com", homeUrl: "https://hibid.com/", focus: "Estate, equipment, vehicles, jewelry, local auctions" },
+    { key: "liveauctioneers", name: "LiveAuctioneers", domain: "liveauctioneers.com", homeUrl: "https://www.liveauctioneers.com/", focus: "Art, antiques, coins, jewelry, collectibles" },
+    { key: "invaluable", name: "Invaluable", domain: "invaluable.com", homeUrl: "https://www.invaluable.com/", focus: "Fine art, decorative art, jewelry, auction houses" },
+    { key: "govdeals", name: "GovDeals", domain: "govdeals.com", homeUrl: "https://www.govdeals.com/", focus: "Government surplus, vehicles, equipment, real estate" },
+    { key: "publicsurplus", name: "Public Surplus", domain: "publicsurplus.com", homeUrl: "https://www.publicsurplus.com/", focus: "Government and educational surplus" },
+    { key: "propertyroom", name: "PropertyRoom", domain: "propertyroom.com", homeUrl: "https://www.propertyroom.com/", focus: "Police surplus, jewelry, electronics, vehicles" },
+    { key: "proxibid", name: "Proxibid", domain: "proxibid.com", homeUrl: "https://www.proxibid.com/", focus: "Equipment, vehicles, estate and specialty auctions" },
+    { key: "bidspotter", name: "BidSpotter", domain: "bidspotter.com", homeUrl: "https://www.bidspotter.com/en-us", focus: "Industrial, commercial, plant and machinery" },
+  ];
+
   const PUBLISHED_RESEARCH = (() => {
     const payload = window.BIDAI_LIVE_SNAPSHOTS;
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
@@ -50,6 +63,7 @@
     finalPrice: ["finalprice", "finalbid", "endingprice", "soldprice", "actualfinal"],
     status: ["status", "auctionstatus"],
     source: ["source", "datasource"],
+    sourceKey: ["sourcekey", "marketplacekey", "marketplace"],
     url: ["url", "itemurl", "listingurl", "link"],
     observedAt: ["observedat", "snapshotat", "capturedat", "timestamp"],
     demand: ["demand", "demandscore", "popularity", "liquidityscore"],
@@ -91,6 +105,39 @@
     } catch (_error) {
       return "";
     }
+  };
+  const normalizeMarketKey = (value) => String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const marketplaceFor = (item = {}) => {
+    const explicitKey = normalizeMarketKey(item.sourceKey || item.marketplaceKey || item.marketplace);
+    const explicitMarket = AUCTION_MARKETS.find((market) => market.key === explicitKey);
+    if (explicitMarket) return explicitMarket;
+    const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
+    const hostname = (() => {
+      try { return new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, ""); } catch (_error) { return ""; }
+    })();
+    const domainMarket = AUCTION_MARKETS.find((market) => hostname === market.domain || hostname.endsWith(`.${market.domain}`));
+    if (domainMarket) return domainMarket;
+    const sourceName = String(item.source || item.marketplace || "").trim();
+    const namedMarket = AUCTION_MARKETS.find((market) => sourceName.toLowerCase().includes(market.name.toLowerCase().replace(" auctions", "")));
+    if (namedMarket) return namedMarket;
+    const fallbackKey = explicitKey || normalizeMarketKey(hostname || sourceName) || "other-source";
+    return {
+      key: fallbackKey,
+      name: sourceName || hostname || "Other source",
+      domain: hostname,
+      homeUrl: sourceUrl ? new URL(sourceUrl).origin : "",
+      focus: "Feed-provided auction source",
+    };
+  };
+  const openSourceListing = (value) => {
+    const sourceUrl = safeHttpUrl(value);
+    if (!sourceUrl) return false;
+    window.location.assign(sourceUrl);
+    return true;
   };
   const money = (value, digits = 0) => new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -219,11 +266,16 @@
   }
 
   function allItems() {
-    return [...PUBLISHED_RESEARCH.items, ...workspace.userItems].map((item) => ({
-      ...item,
-      status: item.status === "active" && item.endsAt && Date.parse(item.endsAt) <= Date.now() ? "ended" : item.status,
-      watched: workspace.watchIds.includes(item.id),
-    }));
+    return [...PUBLISHED_RESEARCH.items, ...workspace.userItems].map((item) => {
+      const marketplace = marketplaceFor(item);
+      return {
+        ...item,
+        sourceKey: marketplace.key,
+        marketplaceName: marketplace.name,
+        status: item.status === "active" && item.endsAt && Date.parse(item.endsAt) <= Date.now() ? "ended" : item.status,
+        watched: workspace.watchIds.includes(item.id),
+      };
+    });
   }
 
   function invalidateHistoricalIndex() {
@@ -487,6 +539,33 @@
     return Number.isFinite(value) ? Math.max(0, (value - Date.now()) / 3600000) : Number.POSITIVE_INFINITY;
   }
 
+  function snapshotPlanFor(item) {
+    const endTime = Date.parse(item?.endsAt || "");
+    const finalRecorded = Number(item?.finalPrice) > 0;
+    if (item?.status === "ended" && finalRecorded) {
+      return { intervalMinutes: null, label: "Final outcome", urgency: "complete", nextDueAt: null, due: false };
+    }
+    const afterCloseHours = Number.isFinite(endTime) && endTime <= Date.now() ? (Date.now() - endTime) / 3600000 : null;
+    const hours = hoursRemaining(item);
+    const intervalMinutes = afterCloseHours !== null
+      ? (afterCloseHours <= 1 ? 5 : afterCloseHours <= 24 ? 60 : 360)
+      : hours <= 1 ? 5 : hours <= 6 ? 15 : hours <= 24 ? 60 : 360;
+    const urgency = afterCloseHours !== null
+      ? (afterCloseHours <= 1 ? "critical" : "elevated")
+      : hours <= 1 ? "critical" : hours <= 6 ? "high" : hours <= 24 ? "elevated" : "standard";
+    const observedAt = Date.parse(observedAtFor(item) || "");
+    const nextDueAt = Number.isFinite(observedAt) ? new Date(observedAt + intervalMinutes * 60000).toISOString() : null;
+    return {
+      intervalMinutes,
+      label: afterCloseHours !== null
+        ? (intervalMinutes < 60 ? "Final check every 5 min" : intervalMinutes === 60 ? "Final check hourly" : "Final check every 6 hours")
+        : intervalMinutes < 60 ? `Every ${intervalMinutes} min` : intervalMinutes === 60 ? "Hourly" : "Every 6 hours",
+      urgency,
+      nextDueAt,
+      due: !nextDueAt || Date.parse(nextDueAt) <= Date.now(),
+    };
+  }
+
   function assess(item) {
     const s = workspace.settings;
     const hours = hoursRemaining(item);
@@ -688,14 +767,16 @@
     const statusText = item.status === "ended" ? "Ended" : timeLabel(item);
     const freshness = freshnessFor(item);
     const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
+    const marketplace = marketplaceFor(item);
+    const snapshotPlan = snapshotPlanFor(item);
     return `
-      <article class="opportunity-row${selected}" data-select-id="${escapeHtml(item.id)}" role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open analysis">
+      <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; ${sourceUrl ? `press Enter to open on ${escapeHtml(marketplace.name)}` : "source listing URL unavailable"}">
         <div class="item-cell">
           <span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>
           <span class="item-copy">
-            <strong>${escapeHtml(item.title)}</strong>
-            <small>${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span>${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
+            <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
+            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.score};--score-color:${scoreColor(a.signal)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
@@ -703,6 +784,7 @@
         <div class="money-cell"><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete"}</strong><small>${a.hasDecisionInputs ? "after all configured costs" : a.shippingKnown ? "add resale evidence" : "shipping required"}</small></div>
         <div class="money-cell"><span>Expected profit</span><strong class="${a.profitExpected === null ? "" : a.profitExpected >= 0 ? "positive" : "negative"}">${a.profitExpected === null ? "Insufficient" : money(a.profitExpected)}</strong><small>${a.roi === null ? "needs verified forecast" : `${percent(a.roi)} ROI`}</small></div>
         <div class="row-actions">
+          <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
           ${sourceUrl ? `<a class="row-direct-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing title="Open source listing" aria-label="Open ${escapeHtml(item.title)} on its source site">↗</a>` : ""}
           <button class="row-watch${watched}" type="button" data-watch-id="${escapeHtml(item.id)}" aria-label="${item.watched ? "Remove from" : "Add to"} watchlist" aria-pressed="${item.watched ? "true" : "false"}">${item.watched ? "◆" : "◇"}</button>
         </div>
@@ -783,13 +865,15 @@
     const container = $("[data-opportunity-detail]");
     if (!container) return;
     if (!item) {
-      container.innerHTML = '<div class="empty-state"><span>⌁</span><h4>Select an opportunity</h4><p>Choose a row to inspect the conservative bid model.</p></div>';
+      container.innerHTML = '<div class="empty-state"><span>⌁</span><h4>Select an opportunity</h4><p>Use Analyze to inspect the conservative bid model; clicking the listing row opens its source auction.</p></div>';
       return;
     }
     const a = assess(item);
     const curve = curveFor(item, a);
     const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
     const freshness = freshnessFor(item);
+    const marketplace = marketplaceFor(item);
+    const snapshotPlan = snapshotPlanFor(item);
     const acquisitionComparables = a.forecast.comparables || [];
     const resaleComparables = resaleComparablesFor(item);
     const maxWaterfall = Math.max(a.resaleMedian, a.acquisition, a.sellingCosts, Math.abs(a.profitExpected), 1);
@@ -806,7 +890,7 @@
         <div class="detail-eyebrow"><span class="section-kicker"><i></i> SELECTED ANALYSIS</span>${item.publishedResearch ? '<span class="record-source-chip published">PUBLISHED RECORD</span>' : '<span class="record-source-chip private">PRIVATE RECORD</span>'}</div>
         <div class="detail-title-row">
           <span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>
-          <div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.externalId)} · ${escapeHtml(item.category)}</p></div>
+          <div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.externalId)} · ${escapeHtml(item.category)}</p></div>
           <span class="score-ring" style="--score:${a.score};--score-color:${scoreColor(a.signal, true)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
         <div class="detail-signal"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span>${escapeHtml(item.identifiedAs || "Identity requires verification")}</span><span class="snapshot-freshness ${freshness.className}">${escapeHtml(freshness.label)} · ${escapeHtml(freshness.short)}</span></div>
@@ -886,10 +970,11 @@
         <section class="detail-section detail-source-ledger">
           <div class="detail-section-heading"><h4>Source and timing</h4><span>audit trail</span></div>
           <div class="source-metadata-grid">
-            <div><span>Source</span><strong>${escapeHtml(item.source || "Unknown source")}</strong></div>
+            <div><span>Marketplace</span><strong>${escapeHtml(marketplace.name)}</strong><small>${escapeHtml(item.source || marketplace.domain || "Feed-provided source")}</small></div>
             <div><span>Listing ID</span><strong>${escapeHtml(item.externalId || item.id)}</strong></div>
             <div><span>Observed</span><strong>${escapeHtml(formatDateTime(freshness.observedAt))}</strong><small>${escapeHtml(freshness.short)} · ${escapeHtml(freshness.label)}</small></div>
             <div><span>Scheduled end</span><strong>${escapeHtml(formatDateTime(item.endsAt))}</strong><small>${escapeHtml(timeLabel(item))}</small></div>
+            <div><span>Snapshot policy</span><strong>${escapeHtml(snapshotPlan.label)}</strong><small>${snapshotPlan.nextDueAt ? `${snapshotPlan.due ? "Due now" : `Next ${escapeHtml(formatDateTime(snapshotPlan.nextDueAt))}`}` : "Outcome capture complete"}</small></div>
             <div><span>Bid count</span><strong>${Number(item.bidCount) || 0}</strong></div>
             <div><span>Inbound shipping basis</span><strong>${a.shippingKnown ? money(a.shipping) : "Unknown"}</strong><small>${item.shippingQuoted === null && item.shippingAssumed ? "assumed, not quoted" : item.shippingKnown === false ? "not supplied" : "recorded input"}</small></div>
             <div><span>Normalized model key</span><strong title="${escapeHtml(item.modelKey || "Not supplied")}">${escapeHtml(item.modelKey || "Not supplied")}</strong><small>exact-match grouping key</small></div>
@@ -897,7 +982,7 @@
           </div>
         </section>
         <div class="detail-actions">
-          ${sourceUrl ? `<a class="button button-dark direct-listing-button" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Open source listing <span aria-hidden="true">↗</span></a>` : ""}
+          ${sourceUrl ? `<a class="button button-dark direct-listing-button" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Open on ${escapeHtml(marketplace.name)} <span aria-hidden="true">↗</span></a>` : ""}
           <button class="button button-primary" type="button" data-watch-id="${escapeHtml(item.id)}">${item.watched ? "Remove watch" : "Watch item"}</button>
           <button class="button button-quiet" type="button" data-update-id="${escapeHtml(item.id)}">Record update</button>
         </div>
@@ -909,13 +994,15 @@
     const query = String($("#global-search")?.value || "").trim().toLowerCase();
     const signal = $("#signal-filter")?.value || "all";
     const category = $("#category-filter")?.value || "all";
+    const source = $("#source-filter")?.value || "all";
     return allItems()
       .filter((item) => {
-        const haystack = [item.title, item.category, item.externalId, item.identifiedAs].join(" ").toLowerCase();
+        const haystack = [item.title, item.category, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
         const assessment = assess(item);
         return (!query || haystack.includes(query)) &&
           (signal === "all" || assessment.signal === signal) &&
-          (category === "all" || item.category === category);
+          (category === "all" || item.category === category) &&
+          (source === "all" || item.sourceKey === source);
       })
       .sort((a, b) => {
         if (a.status !== b.status) return a.status === "active" ? -1 : 1;
@@ -932,6 +1019,50 @@
     select.value = categories.includes(current) ? current : "all";
   }
 
+  function populateSources() {
+    const select = $("#source-filter");
+    if (!select) return;
+    const current = select.value;
+    const items = allItems();
+    const itemCounts = new Map();
+    for (const item of items) itemCounts.set(item.sourceKey, (itemCounts.get(item.sourceKey) || 0) + 1);
+    const known = AUCTION_MARKETS.map((market) => ({ ...market, count: itemCounts.get(market.key) || 0 }));
+    const other = [...new Set(items.map((item) => item.sourceKey).filter((key) => key && !AUCTION_MARKETS.some((market) => market.key === key)))]
+      .map((key) => {
+        const item = items.find((entry) => entry.sourceKey === key);
+        return { key, name: item?.marketplaceName || key, count: itemCounts.get(key) || 0 };
+      });
+    const sources = [...known, ...other];
+    select.innerHTML = '<option value="all">All marketplaces</option>' + sources
+      .map((market) => `<option value="${escapeHtml(market.key)}">${escapeHtml(market.name)}${market.count ? ` (${market.count})` : ""}</option>`)
+      .join("");
+    select.value = sources.some((market) => market.key === current) ? current : "all";
+  }
+
+function renderMarketplaceCoverage() {
+    const container = $("[data-marketplace-grid]");
+    if (!container) return;
+    const items = allItems();
+    const observedMarkets = [...new Set(items.map((item) => item.sourceKey).filter(Boolean))]
+      .filter((key) => !AUCTION_MARKETS.some((market) => market.key === key))
+      .map((key) => marketplaceFor(items.find((item) => item.sourceKey === key)));
+    container.innerHTML = [...AUCTION_MARKETS, ...observedMarkets].map((market) => {
+      const marketItems = items.filter((item) => item.sourceKey === market.key);
+      const active = marketItems.filter((item) => item.status === "active");
+      const observations = marketItems.reduce((total, item) => total + Math.max(1, Array.isArray(item.observations) ? item.observations.length : 0), 0);
+      const latest = marketItems.map((item) => Date.parse(observedAtFor(item) || "")).filter(Number.isFinite).sort((a, b) => b - a)[0];
+      const plans = active.map(snapshotPlanFor).filter((plan) => plan.intervalMinutes);
+      const fastest = plans.length ? Math.min(...plans.map((plan) => plan.intervalMinutes)) : null;
+      const connected = marketItems.length > 0;
+      return `<article class="marketplace-card ${connected ? "is-connected" : "is-awaiting"}">
+        <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${connected ? "REAL RECORDS CONNECTED" : "AWAITING AUTHORIZED FEED"}</small></div></div>
+        <p>${escapeHtml(market.focus)}</p>
+        <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Snapshots</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : "6h") : "—"}</dd></div></dl>
+        <div class="marketplace-card-footer"><span>${latest ? `Latest ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "No listing data stored"}</span><a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div>
+      </article>`;
+    }).join("");
+  }
+
   function renderStats() {
     const active = allItems().filter((item) => item.status === "active");
     const assessments = active.map(assess);
@@ -940,6 +1071,7 @@
     const urgent = active.filter((item) => hoursRemaining(item) <= 12).length;
     const confidence = forecasted.length ? forecasted.reduce((total, item) => total + item.forecast.confidence, 0) / forecasted.length : 0;
     const observations = allItems().reduce((total, item) => total + (Array.isArray(item.observations) ? item.observations.length : 0), 0);
+    const connectedMarkets = new Set(allItems().map((item) => item.sourceKey).filter(Boolean)).size;
     $("[data-stat-upside]").textContent = money(upside);
     $("[data-stat-urgent]").textContent = String(urgent);
     $("[data-stat-confidence]").textContent = percent(confidence);
@@ -947,6 +1079,7 @@
     $$('[data-opportunity-count]').forEach((el) => { el.textContent = String(active.length); });
     $$('[data-watch-count]').forEach((el) => { el.textContent = String(workspace.watchIds.length); });
     $$('[data-research-count]').forEach((el) => { el.textContent = String(PUBLISHED_RESEARCH.items.length); });
+    $$('[data-market-count]').forEach((el) => { el.textContent = String(connectedMarkets); });
     $$('[data-research-observed]').forEach((el) => {
       const observed = PUBLISHED_RESEARCH.observedAt ? new Date(PUBLISHED_RESEARCH.observedAt) : null;
       const formatted = observed && !Number.isNaN(observed.getTime())
@@ -966,15 +1099,18 @@
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
       let status = "Research snapshots loaded";
       if (!PUBLISHED_RESEARCH.items.length) status = "Awaiting research data";
+      else if (connectedMarkets > 1) status = `${connectedMarkets} auction marketplaces connected`;
       else if (mode.includes("apify")) status = "Apify dataset loaded";
       else if (mode.includes("authorized")) status = "Authorized feed loaded";
       else if (mode.includes("manual")) status = "Manual research pass loaded";
       el.textContent = status;
     });
+    renderMarketplaceCoverage();
   }
 
   function renderOpportunities() {
     populateCategories();
+    populateSources();
     const items = filteredItems();
     const list = $("[data-opportunity-list]");
     const empty = $("[data-queue-empty]");
@@ -993,8 +1129,9 @@
     grid.innerHTML = watched.map((item) => {
       const a = assess(item);
       const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
+      const marketplace = marketplaceFor(item);
       return `<article class="watch-card">
-        <div class="watch-card-top"><span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span><div><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.category)} · ${timeLabel(item)}</p></div></div>
+        <div class="watch-card-top"><span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span><div><h4>${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</h4><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${timeLabel(item)}</p></div></div>
         <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient"}</strong></div><div><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete"}</strong></div></div>
         <div class="watch-card-actions"><button class="button button-primary" type="button" data-open-id="${escapeHtml(item.id)}">Open analysis</button>${sourceUrl ? `<a class="button button-dark" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Source listing ↗</a>` : ""}<button class="button button-quiet" type="button" data-watch-id="${escapeHtml(item.id)}">Remove</button></div>
       </article>`;
@@ -1254,12 +1391,20 @@
       const parsed = parseOptionalMoney(value);
       return parsed === null ? undefined : Math.max(0, parsed);
     };
-    const id = `user-${cleanKey(externalId) || cleanKey(title) || Date.now()}`;
+    const source = String(lookup(record, aliases.source) ?? record.source ?? sourceName);
+    const url = String(lookup(record, aliases.url) ?? record.url ?? "").trim() || null;
+    const sourceKey = marketplaceFor({
+      sourceKey: lookup(record, aliases.sourceKey) ?? record.sourceKey,
+      source,
+      url,
+    }).key;
+    const id = `user-${cleanKey(sourceKey) || "source"}-${cleanKey(externalId) || cleanKey(title) || Date.now()}`;
     return {
       id,
       externalId,
-      source: String(lookup(record, aliases.source) ?? record.source ?? sourceName),
-      url: String(lookup(record, aliases.url) ?? record.url ?? "").trim() || null,
+      source,
+      sourceKey,
+      url,
       title,
       category: String(lookup(record, aliases.category) ?? record.category ?? "Unclassified").trim() || "Unclassified",
       modelKey,
@@ -1312,7 +1457,11 @@
 
   function mergeSnapshot(snapshot) {
     invalidateHistoricalIndex();
-    const index = workspace.userItems.findIndex((item) => item.id === snapshot.id || cleanKey(item.externalId) === cleanKey(snapshot.externalId));
+    const snapshotSourceKey = marketplaceFor(snapshot).key;
+    const index = workspace.userItems.findIndex((item) => item.id === snapshot.id || (
+      marketplaceFor(item).key === snapshotSourceKey
+      && cleanKey(item.externalId) === cleanKey(snapshot.externalId)
+    ));
     if (index >= 0) {
       const existing = workspace.userItems[index];
       const history = [...(Array.isArray(existing.observations) ? existing.observations : []), ...snapshot.observations].slice(-250);
@@ -1448,7 +1597,7 @@
 
   function downloadTemplate() {
     const csv = [
-      "id,title,category,model_key,url,current_bid,shipping,bid_count,ends_at,source_estimate,resale_low,resale_median,resale_high,demand,rarity,identity_confidence,condition_confidence,final_price,status,observed_at",
+      "id,source_key,source,title,category,model_key,url,current_bid,shipping,bid_count,ends_at,source_estimate,resale_low,resale_median,resale_high,demand,rarity,identity_confidence,condition_confidence,final_price,status,observed_at",
     ].join("\r\n");
     downloadBlob(csv, "bidaipro-snapshot-template.csv", "text/csv;charset=utf-8");
     toast("CSV template downloaded.");
@@ -1516,8 +1665,10 @@
     if (event.target.closest("[data-direct-listing]")) return;
     const row = event.target.closest("[data-select-id]");
     if (row) {
-      selectedId = row.dataset.selectId;
-      renderOpportunities();
+      if (!openSourceListing(row.dataset.sourceUrl)) {
+        selectedId = row.dataset.selectId;
+        renderOpportunities();
+      }
       return;
     }
     if (event.target.closest("[data-export-workspace]")) {
@@ -1561,12 +1712,14 @@
       $("#global-search")?.focus();
     }
     if (event.key === "Escape") closeMenu();
-    if (event.target.closest?.("[data-direct-listing], [data-watch-id]")) return;
+    if (event.target.closest?.("[data-direct-listing], [data-watch-id], [data-open-id]")) return;
     const row = event.target.closest?.("[data-select-id]");
     if (row && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
-      selectedId = row.dataset.selectId;
-      renderOpportunities();
+      if (!openSourceListing(row.dataset.sourceUrl)) {
+        selectedId = row.dataset.selectId;
+        renderOpportunities();
+      }
     }
   });
 
@@ -1576,6 +1729,7 @@
   });
   $("#signal-filter").addEventListener("change", renderOpportunities);
   $("#category-filter").addEventListener("change", renderOpportunities);
+  $("#source-filter").addEventListener("change", renderOpportunities);
   $("#snapshot-file").addEventListener("change", (event) => {
     if (event.target.files?.length) importFiles(Array.from(event.target.files));
     event.target.value = "";

@@ -2,7 +2,7 @@ name: Refresh authorized auction data
 
 on:
   schedule:
-    - cron: "17,47 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Check out main
         uses: actions/checkout@v4
@@ -27,13 +27,16 @@ jobs:
         with:
           node-version: 20
 
-      - name: Refresh normalized snapshots
+      - name: Refresh due auction sources
         env:
           BIDAI_APIFY_DATASET_ID: ${{ secrets.BIDAI_APIFY_DATASET_ID }}
+          BIDAI_APIFY_DATASET_IDS: ${{ secrets.BIDAI_APIFY_DATASET_IDS }}
           BIDAI_APIFY_TOKEN: ${{ secrets.BIDAI_APIFY_TOKEN }}
           BIDAI_FEED_URL: ${{ secrets.BIDAI_FEED_URL }}
+          BIDAI_FEED_URLS: ${{ secrets.BIDAI_FEED_URLS }}
+          BIDAI_SOURCE_CONFIG_JSON: ${{ secrets.BIDAI_SOURCE_CONFIG_JSON }}
           BIDAI_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_SOURCE_AUTHORIZED }}
-        run: node scripts/refresh-feed.mjs
+        run: node scripts/refresh-all-sources.mjs
 
       - name: Commit changed snapshot data
         shell: bash

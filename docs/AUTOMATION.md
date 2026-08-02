@@ -1,23 +1,54 @@
-# Automated dataset and feed ingestion
+# Automated multi-market collection and ingestion
 
-BidAI Pro can refresh auction snapshots from either an Apify Dataset or a generic JSON feed on a schedule. It runs only when `BIDAI_SOURCE_AUTHORIZED` is exactly `true`.
+BidAI Pro can orchestrate and merge real auction snapshots from multiple Apify Tasks, persistent Apify Datasets, and authorized HTTPS JSON feeds. It runs only when `BIDAI_SOURCE_AUTHORIZED` is exactly `true`; otherwise it makes no network request and leaves the published data unchanged.
 
-The two ingestion modes are:
+The supported source modes are:
 
-1. **Apify Dataset mode:** set `BIDAI_APIFY_DATASET_ID` and optionally `BIDAI_APIFY_TOKEN`. BidAI Pro downloads the dataset's structured item results.
-2. **Generic JSON feed mode:** set `BIDAI_FEED_URL` to an authorized HTTPS endpoint.
+1. **Apify Task plus Dataset:** BidAI Pro starts a preconfigured Task when that market is due, waits for the run to succeed, and imports the run's Dataset.
+2. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
+3. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
 
-Apify Dataset mode takes precedence whenever `BIDAI_APIFY_DATASET_ID` is set. In that case, `BIDAI_FEED_URL` is ignored. BidAI Pro is the dataset consumer only: it does not create, configure, start, or schedule an Apify Actor, crawler, or other collector. Collection must be configured separately so its output conforms to the flat item schema below.
+BidAI Pro does not invent listing records or use marketplace search pages as data. Every visible automated listing must arrive from one of the configured sources and must retain its source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
 
 Direct source automation requires permission from the source operator. Configure this workflow only for an official API, licensed data feed, operator-approved endpoint, or another source you are authorized to access programmatically. The authorization switch is a deployment safeguard, not a substitute for that permission. Follow the feed owner's rate limits, data-retention requirements, and license terms.
 
 ## GitHub setup
 
-In the GitHub repository, open **Settings > Secrets and variables > Actions**, then choose one source mode.
+In the GitHub repository, open **Settings > Secrets and variables > Actions**. For multiple marketplaces, create the secrets in the next section. The legacy single-Dataset and single-feed setup remains available afterward.
+
+### Multi-market mode
+
+1. Create one Apify Task, Dataset, or authorized HTTPS feed per auction marketplace. Map every output to the flat item schema below.
+2. Create `BIDAI_APIFY_TOKEN` when any configured Task must be started or any Dataset is private.
+3. Create `BIDAI_SOURCE_CONFIG_JSON` as a JSON array containing up to 20 source objects.
+4. Create `BIDAI_SOURCE_AUTHORIZED` with the exact value `true` only after source access has been authorized.
+5. Open **Actions > Refresh authorized auction data > Run workflow** for the first refresh. A manual run forces all configured Tasks to collect immediately.
+
+Each source object accepts:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `key` | yes | Stable lowercase marketplace key, such as `shopgoodwill`, `ebay`, or `hibid`. |
+| `name` | yes | Human-readable marketplace name shown in the app. |
+| `taskId` | one of these | Apify Task ID. When due, BidAI Pro starts it and imports the run Dataset. |
+| `datasetId` | one of these | Persistent Apify Dataset ID. It can also accompany `taskId` so a not-yet-due Task can reuse its current Dataset. |
+| `feedUrl` | one of these | Authorized HTTPS JSON endpoint. |
+
+Example secret value showing configuration shape only (replace every placeholder with a real ID or endpoint):
+
+```json
+[
+  {"key":"shopgoodwill","name":"ShopGoodwill","taskId":"YOUR_TASK_ID","datasetId":"YOUR_DATASET_ID"},
+  {"key":"ebay","name":"eBay Auctions","datasetId":"YOUR_DATASET_ID"},
+  {"key":"hibid","name":"HiBid","feedUrl":"https://YOUR_AUTHORIZED_ENDPOINT"}
+]
+```
+
+`BIDAI_APIFY_DATASET_IDS` can hold comma- or newline-separated Dataset IDs, and `BIDAI_FEED_URLS` can hold newline-separated URLs or a JSON array. These list forms are convenient but receive generic source names; `BIDAI_SOURCE_CONFIG_JSON` is preferred because it preserves a stable marketplace key and display name.
 
 ### Apify Dataset mode
 
-1. Configure and schedule an Apify collector separately, have it write one flat item per auction listing to a named, persistent Dataset, and let each run finish before BidAI Pro's `:17` or `:47` import.
+1. Configure and schedule an Apify collector separately and have it write one flat item per auction listing to a named, persistent Dataset.
 2. Create a repository secret named `BIDAI_APIFY_DATASET_ID` containing the Dataset ID, not an Actor ID, task ID, run ID, or full URL.
 3. For a private Dataset, create `BIDAI_APIFY_TOKEN` containing an Apify API token scoped to read that Dataset. The token is optional for a deliberately public Dataset.
 4. Create `BIDAI_SOURCE_AUTHORIZED` with the exact value `true` only after source access has been authorized.
@@ -30,11 +61,11 @@ In the GitHub repository, open **Settings > Secrets and variables > Actions**, t
 3. Create `BIDAI_SOURCE_AUTHORIZED` with the exact value `true` only after permission has been confirmed.
 4. Open **Actions > Refresh authorized auction data > Run workflow** for the first refresh.
 
-Keep `BIDAI_APIFY_TOKEN`, signed feed URLs, and all other credentials in GitHub Actions secrets. Do not add them to workflow YAML, source files, generated snapshots, screenshots, or documentation. If both modes are configured, remove `BIDAI_APIFY_DATASET_ID` whenever you intend to use the generic feed.
+Keep `BIDAI_APIFY_TOKEN`, `BIDAI_SOURCE_CONFIG_JSON`, signed feed URLs, and all other credentials in GitHub Actions secrets. Do not add them to workflow YAML, source files, generated snapshots, screenshots, or documentation. The legacy single-source mode gives `BIDAI_APIFY_DATASET_ID` precedence over `BIDAI_FEED_URL`.
 
-The workflow also runs at minutes 17 and 47 of every hour. Adjust the schedule in `.github/workflows/refresh-auction-data.yml` if the feed owner's rate limit requires a slower interval.
+The workflow wakes every five minutes. A configured Task runs only when one of its listings is due: every six hours more than 24 hours from close, hourly within 24 hours, every 15 minutes within six hours, and every five minutes within the final hour. A just-closed listing without a recorded final price continues at five-minute checks for the first hour, then hourly for the first day, so the learning loop can capture the outcome. Up to four due Tasks start concurrently; their Datasets are imported sequentially to keep history merges atomic. Dataset-only and feed-only sources are imported on every workflow wake. Adjust the schedule in `.github/workflows/refresh-auction-data.yml` or the external feed's rate limit when necessary.
 
-If authorization is absent or has any value other than lowercase `true`, the refresh script exits successfully without making a network request. Removing or changing that secret is the quickest way to stop ingestion. Removing the Dataset ID and feed URL disables both source modes while leaving existing published snapshots intact.
+If authorization is absent or has any value other than lowercase `true`, the orchestrator exits successfully without making a network request. Removing or changing that secret is the quickest way to stop ingestion. Removing all source configuration disables ingestion while leaving existing published snapshots intact.
 
 ## Flat item schema
 
@@ -45,8 +76,10 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | Field | Type | Purpose |
 | --- | --- | --- |
 | `id` | string | Durable listing ID; reuse it on every refresh. |
+| `sourceKey` | string | Stable marketplace key; prevents the same external ID on different sites from colliding. |
+| `source` | string | Human-readable marketplace or feed name. |
 | `title` | string | Listing title; required. |
-| `url` | string | Public HTTP(S) listing URL; `sourceUrl` and `listingUrl` are also accepted. |
+| `url` | string | Canonical public HTTP(S) listing URL; required for the direct-listing interaction. `sourceUrl` and `listingUrl` are also accepted. |
 | `category` | string | Broad category used for filtering. |
 | `currentBid` | number | Current bid in US dollars, without currency symbols when possible. |
 | `bidCount` | integer | Number of bids observed. |
@@ -60,13 +93,15 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | `intrinsicValueEvidence` | boolean | Optional intrinsic-value switch. It must normalize to `true` and be accompanied by a valid `valuationBasis`. |
 | `valuationBasis` | object | Optional timestamped 14K-gold valuation basis. It supports a conservative resale floor; it is not auction-close evidence. |
 
-Useful optional flat fields are `shipping`, `status`, `finalPrice`, `expectedClose`, `resaleLow`, `resaleMedian`, `resaleHigh`, `demand`, `rarity`, `identityConfidence`, `conditionConfidence`, `imageUrl`, `source`, `compCount`, `compRecencyDays`, `marketplaceFee`, `taxRate`, `buyerPremium`, `outboundShipping`, `repairReserve`, and `returnReserve`. `shippingKnown` and `feeKnown` may be supplied explicitly; otherwise the importer marks them true only when the corresponding numeric field was actually present and valid. Missing shipping, fees, and material cost reserves remain `null`, not zero.
+Useful optional flat fields are `shipping`, `status`, `finalPrice`, `expectedClose`, `resaleLow`, `resaleMedian`, `resaleHigh`, `demand`, `rarity`, `identityConfidence`, `conditionConfidence`, `imageUrl`, `compCount`, `compRecencyDays`, `marketplaceFee`, `taxRate`, `buyerPremium`, `outboundShipping`, `repairReserve`, and `returnReserve`. `shippingKnown` and `feeKnown` may be supplied explicitly; otherwise the importer marks them true only when the corresponding numeric field was actually present and valid. Missing shipping, fees, and material cost reserves remain `null`, not zero.
 
 Example Apify Dataset item:
 
 ```json
 {
   "id": "auction-272238150",
+  "sourceKey": "shopgoodwill",
+  "source": "ShopGoodwill",
   "title": "Tested 14K gold jewelry lot",
   "url": "https://example.invalid/item/272238150",
   "category": "Jewelry",
@@ -223,9 +258,11 @@ The workflow commits the file to `main` only when its content changes. That comm
 
 ## Operational checks
 
-- Run `node scripts/refresh-feed.mjs` without secrets to confirm the guarded no-op path.
+- Run `node scripts/refresh-all-sources.mjs` without secrets to confirm the guarded no-op path.
+- Run `node --test scripts/refresh-feed.test.mjs scripts/refresh-all-sources.test.mjs` before pushing ingestion changes.
 - Use **Run workflow** after changing the Dataset, endpoint, or schema.
 - Confirm the Apify Dataset contains flat item objects before enabling the schedule; a successful Actor run does not guarantee compatible output.
+- Confirm every production record carries the real auction URL; clicking a row intentionally opens that URL rather than a BidAI Pro detail route.
 - Use the same durable listing ID across repeated observations, numeric USD values, and a single string `imageUrl` rather than an image array.
 - Inspect the workflow summary before relying on new data.
 - Remove `BIDAI_SOURCE_AUTHORIZED` immediately if permission is withdrawn.

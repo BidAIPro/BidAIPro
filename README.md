@@ -41,7 +41,7 @@ Data is stored in browser `localStorage`. Clearing browser data removes it, so e
 
 The importer accepts CSV or JSON. Common CSV headers include:
 
-`id,title,category,model_key,url,current_bid,shipping,bid_count,ends_at,source_estimate,resale_low,resale_median,resale_high,demand,rarity,identity_confidence,condition_confidence,status,final_price,observed_at`
+`id,source_key,source,title,category,model_key,url,current_bid,shipping,bid_count,ends_at,source_estimate,resale_low,resale_median,resale_high,demand,rarity,identity_confidence,condition_confidence,status,final_price,observed_at`
 
 Money values are in US dollars. Confidence values can be decimals such as `0.82` or percentages such as `82`.
 
@@ -61,18 +61,18 @@ Profit and safe-ceiling calculations expose inbound shipping, tax, buyer premium
 
 ## Automatic refreshes
 
-The repository includes a scheduled GitHub Actions pipeline that can pull structured results from either an **Apify Dataset** or a generic HTTPS JSON feed. It normalizes current bids and ended outcomes, preserves observation history, and republishes the data file only when something changed. The schedule runs at minutes **17 and 47** of every hour.
+The repository includes a scheduled GitHub Actions pipeline that can merge structured results from multiple Apify collectors, Apify Datasets, and authorized HTTPS JSON feeds. It normalizes current bids and ended outcomes, preserves observation history by marketplace, and republishes the data file only when something changed. The workflow checks every five minutes; configured collectors are run adaptively every six hours, hourly, every 15 minutes, or every five minutes as their nearest active listing approaches its close.
 
-For Apify mode, configure these GitHub Actions secrets:
+For a production multi-market setup, configure these GitHub Actions secrets:
 
-- `BIDAI_APIFY_DATASET_ID` — the dataset ID that contains one flat JSON object per auction listing;
-- `BIDAI_APIFY_TOKEN` — optional for a public dataset and required for a private dataset;
-- `BIDAI_SOURCE_AUTHORIZED=true` — the exact permission-gate value required before any network request is made.
+- `BIDAI_SOURCE_CONFIG_JSON` — a JSON array describing up to 20 marketplace sources and their Apify Task, Dataset, or authorized feed;
+- `BIDAI_APIFY_TOKEN` — required when a configured private Dataset is read or an Apify Task is started;
+- `BIDAI_SOURCE_AUTHORIZED=true` — the exact permission-gate value required before collection or import is attempted.
 
-BidAI Pro only reads structured items already present in the dataset; it does not create or run an Apify Actor, crawler, or collector. Configure that collection separately in Apify, keep tokens in GitHub Actions secrets, and publish only fields BidAI Pro needs. If `BIDAI_APIFY_DATASET_ID` is present, Apify Dataset mode takes precedence over `BIDAI_FEED_URL`.
+Each configured Apify Task is a collector that you create and authorize in Apify. BidAI Pro can start that task when its marketplace is due, wait for a successful run, import the resulting Dataset, and retain unmatched records from every other market. The original single-source `BIDAI_APIFY_DATASET_ID` and `BIDAI_FEED_URL` secrets remain supported.
 
-Setup, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Until an authorized source is configured, the workflow performs a guarded no-op and the checked-in point-in-time research pass remains visible.
+Setup, the multi-source secret format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Until a real source is configured, the workflow performs a guarded no-op and the checked-in point-in-time research pass remains visible. The interface never fills an unconnected marketplace with fabricated listings.
 
 ## Data-source boundary
 
-This repository does not automate bidding. Its checked-in ShopGoodwill records are labeled point-in-time manual research snapshots. Unattended direct crawling is not included; the scheduled connector reads structured output from a separately configured Apify collector or another authorized HTTPS feed. Recommendations are decision support, not guarantees; verify authenticity, condition, taxes, fees, shipping, and resale restrictions before bidding.
+This repository does not automate bidding. Its checked-in ShopGoodwill records are labeled point-in-time manual research snapshots. Scheduled collection is delegated to the Apify Tasks or HTTPS feeds that the repository owner configures; BidAI Pro performs adaptive orchestration, normalization, retention, learning, and direct source linking. Recommendations are decision support, not guarantees; verify authenticity, condition, taxes, fees, shipping, and resale restrictions before bidding.

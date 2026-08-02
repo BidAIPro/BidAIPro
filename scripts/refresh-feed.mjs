@@ -13,6 +13,18 @@ const MAX_RESPONSE_BYTES = 20_000_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const APIFY_API_ORIGIN = "https://api.apify.com";
 const VERIFIED_FORECAST_STATUSES = new Set(["available", "ready", "verified"]);
+const SOURCE_DOMAINS = [
+  ["shopgoodwill.com", "shopgoodwill"],
+  ["ebay.com", "ebay"],
+  ["hibid.com", "hibid"],
+  ["liveauctioneers.com", "liveauctioneers"],
+  ["invaluable.com", "invaluable"],
+  ["govdeals.com", "govdeals"],
+  ["publicsurplus.com", "publicsurplus"],
+  ["propertyroom.com", "propertyroom"],
+  ["proxibid.com", "proxibid"],
+  ["bidspotter.com", "bidspotter"],
+];
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = join(repositoryRoot, "data");
@@ -106,6 +118,35 @@ function httpUrl(value) {
   } catch {
     return null;
   }
+}
+
+function normalizeSourceKey(value) {
+  return text(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function sourceKeyFor(record, url, fallback = "authorized-feed") {
+  const explicit = normalizeSourceKey(pick(
+    record,
+    "sourceKey",
+    "source_key",
+    "marketplaceKey",
+    "marketplace_key",
+    "marketplace",
+  ));
+  if (explicit) return explicit;
+  const normalizedUrl = httpUrl(url || pick(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"));
+  if (normalizedUrl) {
+    const hostname = new URL(normalizedUrl).hostname.toLowerCase().replace(/^www\./, "");
+    const known = SOURCE_DOMAINS.find(([domain]) => hostname === domain || hostname.endsWith(`.${domain}`));
+    if (known) return known[1];
+    const hostKey = normalizeSourceKey(hostname.split(".").slice(-2, -1)[0] || hostname);
+    if (hostKey) return hostKey;
+  }
+  return normalizeSourceKey(fallback) || "authorized-feed";
 }
 
 function comparableCurrency(value) {
@@ -448,6 +489,8 @@ function bearerToken(value, label) {
 }
 
 function feedRequestConfiguration(environment) {
+  const sourceLabelOverride = text(environment.BIDAI_SOURCE_LABEL_OVERRIDE);
+  const sourceKeyOverride = normalizeSourceKey(environment.BIDAI_SOURCE_KEY_OVERRIDE);
   const apifyDatasetId = text(environment.BIDAI_APIFY_DATASET_ID);
   if (apifyDatasetId) {
     if (!/^[a-zA-Z0-9._~-]{1,200}$/.test(apifyDatasetId)) {
@@ -468,7 +511,8 @@ function feedRequestConfiguration(environment) {
       feedUrl,
       headers,
       sourceMode: "apify-dataset",
-      sourceLabel: "Apify dataset",
+      sourceLabel: sourceLabelOverride || "Apify dataset",
+      sourceKey: sourceKeyOverride || "apify-dataset",
     };
   }
 
@@ -489,7 +533,8 @@ function feedRequestConfiguration(environment) {
     feedUrl,
     headers: { accept: "application/json" },
     sourceMode: "authorized-feed",
-    sourceLabel: "Authorized feed",
+    sourceLabel: sourceLabelOverride || "Authorized feed",
+    sourceKey: sourceKeyOverride || "authorized-feed",
   };
 }
 
@@ -505,7 +550,7 @@ function digest(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function stableIdentity(record, normalized) {
+function stableIdentity(record, normalized, sourceKey) {
   const suppliedId = text(pick(
     record,
     "externalId",
@@ -518,8 +563,10 @@ function stableIdentity(record, normalized) {
     "item_id",
     "id",
   ));
-  const identitySeed = suppliedId || normalized.url || [normalized.title, normalized.category, normalized.endsAt].join("|");
-  const label = slug(suppliedId || normalized.title) || "item";
+  const sourceScope = normalizeSourceKey(sourceKey) || "source";
+  const listingIdentity = suppliedId || normalized.url || [normalized.title, normalized.category, normalized.endsAt].join("|");
+  const identitySeed = `${sourceScope}|${listingIdentity}`;
+  const label = slug(`${sourceScope}-${suppliedId || normalized.title}`) || "item";
   return {
     id: `feed-${label}-${digest(identitySeed).slice(0, 12)}`,
     externalId: suppliedId || `derived-${digest(identitySeed).slice(0, 16)}`,
@@ -587,8 +634,10 @@ function mergeObservations(...collections) {
     .slice(-MAX_HISTORY_POINTS);
 }
 
-function externalIdentityKey(value) {
-  return text(value).toLowerCase();
+function externalIdentityKey(value, sourceKey = "") {
+  const identity = text(value).toLowerCase();
+  if (!identity) return "";
+  return `${normalizeSourceKey(sourceKey) || "unknown-source"}:${identity}`;
 }
 
 function newestObservationTime(item) {
@@ -847,7 +896,7 @@ function recordObservedAt(record) {
   return timestamp(pick(record, "observedAt", "observed_at", "capturedAt", "captured_at", "timestamp"));
 }
 
-function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized feed", requireObservedAt = false) {
+function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized feed", requireObservedAt = false, fallbackSourceKey = "authorized-feed") {
   if (!record || typeof record !== "object" || Array.isArray(record)) return null;
 
   const title = text(pick(record, "title", "name", "listingTitle", "listing_title"));
@@ -856,6 +905,7 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   const comparableSalesSupplied = hasOwn(record, "comparableSales", "comparable_sales", "soldComparables", "sold_comparables");
   const fieldPresence = {
     source: hasOwn(record, "source", "sourceName", "source_name"),
+    sourceKey: true,
     url: hasOwn(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"),
     sourceUrl: hasOwn(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"),
     imageUrl: hasOwn(record, "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url"),
@@ -902,7 +952,9 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     url: httpUrl(pick(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url")),
     endsAt,
   };
-  const identity = stableIdentity(record, normalized);
+  const recordSourceLabel = text(pick(record, "source", "sourceName", "source_name"), sourceLabel);
+  const sourceKey = sourceKeyFor(record, normalized.url, fallbackSourceKey || recordSourceLabel);
+  const identity = stableIdentity(record, normalized, sourceKey);
   const status = normalizeStatus(pick(record, "status", "state"), finalPrice, endsAt, observedAt);
   const bid = Math.max(currentBid, finalPrice);
   const defaults = {
@@ -958,7 +1010,8 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   return {
     id: identity.id,
     externalId: identity.externalId,
-    source: text(pick(record, "source", "sourceName", "source_name"), sourceLabel),
+    source: recordSourceLabel,
+    sourceKey,
     url: normalized.url,
     sourceUrl: normalized.url,
     imageUrl: httpUrl(pick(record, "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url")),
@@ -1152,6 +1205,7 @@ async function run() {
       capturedAt,
       requestConfiguration.sourceLabel,
       isApifyDataset,
+      requestConfiguration.sourceKey,
     ))
     .filter(Boolean);
   if (!normalized.length) throw new Error("The authorized feed contained no records with a title.");
@@ -1160,13 +1214,14 @@ async function run() {
   const previousById = new Map(previousEnvelope.items.map((item) => [item.id, item]));
   const previousByExternalId = new Map(
     previousEnvelope.items
-      .map((item) => [externalIdentityKey(item?.externalId), item])
+      .map((item) => [externalIdentityKey(item?.externalId, item?.sourceKey || sourceKeyFor(item, item?.url || item?.sourceUrl, item?.source)), item])
       .filter(([key]) => key),
   );
   const matchedPreviousIds = new Set();
   const mergedById = new Map();
   for (const item of normalized) {
-    const previous = previousById.get(item.id) || previousByExternalId.get(externalIdentityKey(item.externalId));
+    const previous = previousById.get(item.id)
+      || previousByExternalId.get(externalIdentityKey(item.externalId, item.sourceKey));
     const retainedId = previous?.id || item.id;
     const duplicate = mergedById.get(retainedId);
     const priorState = duplicate || previous;

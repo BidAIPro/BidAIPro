@@ -8,19 +8,24 @@ The current application supports:
 
 - user-entered and imported auction snapshots;
 - repeated observations for the same listing;
+- direct links from every sourced opportunity to its canonical auction page;
+- marketplace filtering and connection health for ten auction-market families;
 - landed-cost and conservative resale calculations;
 - maximum-bid, opportunity, demand, rarity, and confidence signals;
 - watchlists, settings, outcome recording, and local calibration;
 - portable JSON backups.
 
-GitHub Pages cannot run a database, scheduled monitor, secret API keys, or a continuously active agent. Closing the browser stops all activity.
+GitHub Pages cannot run a database, scheduled monitor, secret API keys, or a continuously active agent. The repository's GitHub Actions workflow provides scheduled server-side orchestration while Pages remains the static control surface.
 
 ## Production monitoring path
 
 The static site is designed to become the control surface for a separate, permissioned intelligence service:
 
 ```text
-Authorized auction feed or user exports
+Apify Tasks, authorized feeds, or user exports
+                  |
+                  v
+     Adaptive multi-source scheduler
                   |
                   v
           Snapshot ingestion
@@ -42,9 +47,9 @@ Authorized auction feed or user exports
          BidAI Pro dashboard
 ```
 
-Recommended hosted components:
+The included workflow supplies the adaptive scheduler and normalized snapshot store. A fuller production service can add:
 
-- a scheduled worker for an approved feed;
+- a durable job queue for higher source counts and long-running collectors;
 - a SQL database for listings, snapshots, outcomes, comparable sales, predictions, and model versions;
 - object storage for source documents and images when licensing permits;
 - category-specific resale integrations and a licensed precious-metals feed;
@@ -72,4 +77,4 @@ The closing-price forecast estimates whether the user is likely to win at that m
 
 The product should show a distribution and evidence quality rather than promise profit. Missing shipping, uncertain identity, unverified precious-metal content, thin comparable sales, or authenticity risk should force a research label or lower bid ceiling.
 
-Automatic collection should be enabled only for a source the operator is authorized to access programmatically. The GitHub Pages application therefore makes no automated requests to ShopGoodwill.
+Automatic collection should be enabled only for a source the operator is authorized to access programmatically. The GitHub Pages application makes no cross-origin marketplace requests; configured Apify Tasks and feeds collect server-side, and the browser reads only normalized real records committed by the workflow.

@@ -7,6 +7,7 @@
   "items": [
     {
       "id": "camera-1042",
+      "sourceKey": "authorized-partner",
       "source": "Authorized partner feed",
       "title": "Vintage rangefinder camera with 50mm lens",
       "category": "Cameras & optics",
@@ -215,6 +216,7 @@
     },
     {
       "externalId": "watch-2088",
+      "sourceKey": "authorized-partner",
       "source": "Authorized partner feed",
       "title": "Mechanical wristwatch for parts or restoration",
       "category": "Watches",
@@ -234,6 +236,7 @@
     },
     {
       "id": "gold-lot-14k-18g",
+      "sourceKey": "authorized-partner",
       "source": "Authorized partner feed",
       "title": "Tested 14K gold jewelry scrap lot, 18.3g",
       "category": "Jewelry",
