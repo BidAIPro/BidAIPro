@@ -61,6 +61,15 @@ jobs:
           BIDAI_EBAY_USED_BATCH_SIZE: "150"
         run: node scripts/enrich-ebay-used.mjs
 
+      - name: Enrich with broad and specialty market prices
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
+        env:
+          BIDAI_SERPAPI_KEY: ${{ secrets.BIDAI_SERPAPI_KEY }}
+          BIDAI_SERPAPI_BATCH_SIZE: "40"
+          BIDAI_PRICECHARTING_TOKEN: ${{ secrets.BIDAI_PRICECHARTING_TOKEN }}
+          BIDAI_PRICECHARTING_BATCH_SIZE: "20"
+        run: node scripts/enrich-market-prices.mjs
+
       - name: Commit changed snapshot data
         shell: bash
         run: |

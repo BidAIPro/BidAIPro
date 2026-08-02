@@ -111,7 +111,7 @@ test("a target-safe pawn route is recommended before an also-profitable online r
   assert.equal(result.recommendationState, "pawn-safe");
   assert.ok(result.pawnBreakEvenBid > result.pawnMaxBid);
   assert.ok(result.pawnProfitAtCurrentBid > 0);
-  assert.equal(model.recommendationLabel(result.recommendationState), "Pawn profit now");
+  assert.equal(model.recommendationLabel(result.recommendationState), "Immediate cash profit");
 });
 
 test("online resale becomes the recommendation when pawn misses the target-safe ceiling", () => {
@@ -126,7 +126,7 @@ test("online resale becomes the recommendation when pawn misses the target-safe 
   assert.ok(result.profitAtCurrentBid > 0);
 });
 
-test("a popular non-metal item can use the online route without a pawn estimate", () => {
+test("a popular non-metal item can use the online route without a metal estimate", () => {
   const model = loadModel();
   const item = baseItem();
   delete item.metalEstimate;
@@ -137,6 +137,119 @@ test("a popular non-metal item can use the online route without a pawn estimate"
   assert.equal(result.onlinePopularityKnown, true);
   assert.ok(result.onlinePopularityScore > 0);
   assert.ok(result.onlineSaleLikelihood > 0);
+});
+
+test("a matched specialty guide supplies retail, cash-buy, and yearly demand evidence", () => {
+  const model = loadModel();
+  const now = new Date().toISOString();
+  const item = baseItem({
+    currentBid: 50,
+    comparableSales: [],
+    resaleMarket: null,
+    specialtyMarket: {
+      status: "available",
+      channel: "PriceCharting current price guide",
+      asOf: now,
+      productId: "6910",
+      productName: "Brand Model 123 Watch",
+      matchScore: 96,
+      conditionBasis: "loose",
+      guideValue: 400,
+      retailerBuyValue: 250,
+      retailerSellValue: 420,
+      annualSalesVolume: 1_840,
+      sourceUrl: "https://www.pricecharting.com/search-products?q=brand+model+123",
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasSpecialtyEvidence, true);
+  assert.equal(result.hasDirectRetailerBuy, true);
+  assert.equal(result.pawnCashEstimate, 250);
+  assert.equal(result.pawnRetailEstimate, 420);
+  assert.equal(result.rawMarketMedian, 400);
+  assert.equal(result.resaleMedian, 340);
+  assert.equal(result.specialtyAnnualSalesVolume, 1_840);
+  assert.equal(result.onlinePopularityKnown, true);
+  assert.ok(result.onlinePopularityScore > 0);
+  assert.equal(result.exitType, "pawn");
+});
+
+test("matched used offers provide raw average and median without inventing sell-through", () => {
+  const model = loadModel();
+  const now = new Date().toISOString();
+  const prices = [120, 140, 160, 180, 200];
+  const item = baseItem({
+    title: "Hoka Challenger ATR 5 Running Shoes Size 8",
+    category: "Footwear & Sneakers",
+    resaleVertical: "Footwear & Sneakers",
+    currentBid: 25,
+    comparableSales: [],
+    resaleMarket: null,
+    retailMarket: {
+      status: "available",
+      asOf: now,
+      productInterest: { reviewCountMax: 1_200 },
+      offers: prices.map((price, index) => ({
+        id: `offer-${index}`,
+        title: `Hoka Challenger ATR 5 Running Shoes Size 8 ${index}`,
+        price,
+        totalPrice: price,
+        url: `https://merchant.example/offer-${index}`,
+        condition: "used",
+        source: index % 2 ? "Merchant A" : "Merchant B",
+        matchScore: 95,
+      })),
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.resaleEvidenceKind, "used-market");
+  assert.equal(result.hasRetailUsedEvidence, true);
+  assert.equal(result.rawMarketMedian, 160);
+  assert.equal(result.rawMarketAverage, 160);
+  assert.equal(result.resaleMedian, 112);
+  assert.equal(result.productReviewCountMax, 1_200);
+  assert.equal(result.productInterestKnown, true);
+  assert.equal(result.onlinePopularityKnown, false);
+  assert.equal(result.onlinePopularityScore, 0);
+});
+
+test("new-retail offers remain a separately labeled and deeply discounted fallback", () => {
+  const model = loadModel();
+  const prices = [450, 470, 490, 510, 530];
+  const item = baseItem({
+    title: "Hoka Challenger ATR 5 Running Shoes Size 8",
+    category: "Footwear & Sneakers",
+    resaleVertical: "Footwear & Sneakers",
+    currentBid: 40,
+    comparableSales: [],
+    resaleMarket: null,
+    retailMarket: {
+      status: "available",
+      asOf: new Date().toISOString(),
+      offers: prices.map((price, index) => ({
+        id: `new-${index}`,
+        title: `Hoka Challenger ATR 5 Running Shoes Size 8 ${index}`,
+        price,
+        totalPrice: price,
+        url: `https://merchant.example/new-${index}`,
+        condition: "new/unspecified",
+        source: index % 2 ? "Merchant A" : "Merchant B",
+        matchScore: 95,
+      })),
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasRetailNewEvidence, true);
+  assert.equal(result.resaleEvidenceKind, "retail-replacement");
+  assert.equal(result.rawMarketMedian, 490);
+  assert.equal(result.retailReplacementHaircut, 0.45);
+  assert.equal(result.resaleMedian, 269.5);
+  assert.equal(result.hasPawnEstimate, false);
+  assert.match(result.resaleEvidenceType, /new-retail offers/);
+  assert.match(result.safeCeilingBasis, /condition\/resale haircut/);
 });
 
 test("an unsupported item receives zero ceilings instead of an invented exit", () => {

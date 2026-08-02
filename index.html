@@ -381,6 +381,20 @@
               </div>
             </section>
 
+            <section class="content-card valuation-source-card" aria-labelledby="valuation-source-heading">
+              <div class="panel-head">
+                <div><span class="section-kicker"><i></i> REAL PRICE EVIDENCE</span><h3 id="valuation-source-heading">Four price tiers, one conservative ceiling.</h3></div>
+                <p>Each tier stays labeled so a retail asking price can never masquerade as a completed sale or cash offer.</p>
+              </div>
+              <div class="valuation-source-grid">
+                <article><span>01 · STRONGEST</span><strong>Completed sold comps</strong><p>Exact-model P20, median, average, P80, sell-through, and days to sell from an authorized feed.</p></article>
+                <article><span>02 · SPECIALTY</span><strong>Price guide + retailer buy</strong><p>Current collectible guide, retailer cash/trade value, retailer sell value, and raw yearly units.</p></article>
+                <article><span>03 · USED MARKET</span><strong>eBay + Google Shopping</strong><p>Closely matched used offers combined across channels, then discounted before planning.</p></article>
+                <article><span>04 · FALLBACK</span><strong>New-retail replacement</strong><p>A multi-merchant new-price reference with a larger condition and resale haircut.</p></article>
+              </div>
+              <p class="fine-print"><strong>Popularity rule:</strong> sold-versus-active data and reported annual unit volume can support demand. Product reviews show interest only; auction bids show auction activity only.</p>
+            </section>
+
             <section class="marketplace-network" aria-labelledby="marketplace-network-heading">
               <div class="panel-head">
                 <div><span class="section-kicker"><i></i> MULTI-MARKET COVERAGE</span><h3 id="marketplace-network-heading">One intelligence layer across major auction markets.</h3></div>
@@ -454,7 +468,10 @@
                   <label><span>Target margin</span><span class="suffix-input"><input name="targetMargin" type="number" min="0" max="90" step="1" /><b>%</b></span><small>Applied to conservative resale value.</small></label>
                   <label><span>Assumed inbound shipping</span><span class="money-input"><b>$</b><input name="assumedInboundShipping" type="number" min="0" step="1" /></span><small>Conservative fallback so every evidence-backed item receives a ceiling.</small></label>
                   <label><span>Online asking-price haircut</span><span class="suffix-input"><input name="askingPriceHaircut" type="number" min="0" max="80" step="1" /><b>%</b></span><small>Discount applied when used asking prices are the best available online evidence.</small></label>
+                  <label><span>New-retail replacement haircut</span><span class="suffix-input"><input name="retailReplacementHaircut" type="number" min="20" max="80" step="1" /><b>%</b></span><small>Condition and resale discount when only matched new-retail offers exist.</small></label>
+                  <label><span>Specialty guide reserve</span><span class="suffix-input"><input name="specialtyGuideHaircut" type="number" min="0" max="50" step="1" /><b>%</b></span><small>Safety reserve applied to a matched specialty-market price guide.</small></label>
                   <label><span>Likely pawn payout of melt</span><span class="suffix-input"><input name="pawnPayoutPercent" type="number" min="20" max="70" step="1" /><b>%</b></span><small>Default 50%; actual shops vary and test the item before making an offer.</small></label>
+                  <label><span>Likely pawn payout of used retail</span><span class="suffix-input"><input name="pawnResalePayoutPercent" type="number" min="15" max="60" step="1" /><b>%</b></span><small>Used only for pawn-friendly non-metal categories with matched real market evidence.</small></label>
                   <label><span>Pawn testing reserve</span><span class="money-input"><b>$</b><input name="pawnTestingReserve" type="number" min="0" step="1" /></span><small>Deducted before setting a precious-metal bid ceiling.</small></label>
                   <div class="form-actions settings-actions"><button class="button button-primary" type="submit">Save assumptions</button><button class="button button-quiet" type="button" data-reset-settings>Restore defaults</button></div>
                 </form>
@@ -466,7 +483,7 @@
                   <div class="formula">
                     <span>Conservative resale</span><b>−</b><span>Selling costs</span><b>−</b><span>Target profit</span><b>=</b><strong>Maximum landed cost</strong>
                   </div>
-                  <p>BidAI Pro checks a direct pawn sale first, then an evidence-backed online resale. It shows the target-safe ceiling that preserves your profit goal and the higher modeled break-even bid where estimated profit reaches zero.</p>
+                  <p>BidAI Pro checks a direct pawn or cash-buyer sale first, then an evidence-backed online resale. It shows the target-safe ceiling that preserves your profit goal and the higher modeled break-even bid where estimated profit reaches zero.</p>
                 </div>
                 <div class="content-card danger-card">
                   <span class="section-kicker"><i></i> LOCAL DATA</span>

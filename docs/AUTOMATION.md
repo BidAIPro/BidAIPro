@@ -129,13 +129,28 @@ The hourly/manual workflow requests a client-credentials OAuth token only at run
 
 Active asking prices do not prove what an item will sell for and do not create a sell-through rate. Exact-model completed sales remain the preferred evidence tier. If credentials are missing, OAuth fails, fewer than five matches qualify, or eBay returns no usable result, the connector does not publish a value for that item. No credentials or access tokens are written to `data/live-snapshots.js`.
 
+### Broad retail and specialty price research
+
+The included `scripts/enrich-market-prices.mjs` step adds two independent optional providers on the hourly/manual workflow pass:
+
+| Secret | Provider and purpose |
+| --- | --- |
+| `BIDAI_SERPAPI_KEY` | SerpApi Google Shopping results for broad used/refurbished and new-retail offer research. |
+| `BIDAI_PRICECHARTING_TOKEN` | Paid PriceCharting current guide, retailer buy/sell, and yearly unit-volume evidence for supported specialty categories. |
+
+SerpApi results must be USD-priced, have a stable public offer or product link, share at least 65% of significant target-title tokens with at least three tokens in common, and produce at least five qualifying offers from at least two merchants in the same condition group. Used/refurbished and new/unspecified offers are stored separately. New-retail prices never masquerade as used prices and receive a default 45% condition/resale haircut. Product rating and review counts are stored only as interest evidence; they do not create sell-through or modeled resale speed.
+
+PriceCharting is queried only for eligible games, consoles, cards, comics, Funko, LEGO, coins, currency, and similar titles. Its best product result must clear the same 65% title-coverage gate. Penny-denominated values are converted to USD. The app keeps current guide value, retailer buy, retailer sell, condition basis, raw annual unit volume, match score, observation time, and a public provider-search link separate. A default 15% reserve applies to the guide value used for an online ceiling. The direct retailer-buy value may support a cash-buyer route, but it is not labeled as a pawn-shop quote.
+
+The default batch limits are 40 broad-market targets and 20 specialty targets. Broad results refresh after 23 hours; specialty values refresh after 47 hours. Missing credentials are a byte-stable no-op. Weak and empty results store only an `insufficient` state, never a guessed price. Provider tokens are used only by GitHub Actions and are never added to the published snapshot file.
+
 ### Pawn-first exit decision
 
-The browser independently evaluates a direct pawn exit and an online resale exit for every item. A pawn route exists only when source-stated purity and weight produce a valid fresh metal estimate. An online route exists only when at least three qualifying exact-model completed sales or five sufficiently matched active-used listings survive validation.
+The browser independently evaluates an immediate pawn/cash-buyer exit and an online resale exit for every item. An immediate cash route can use valid fresh metal evidence, a matched specialty retailer-buy value, or a disclosed percentage of real matched used-market value for pawn-friendly non-metal categories. An online route can use at least three qualifying exact-model completed sales, a matched specialty guide, five sufficiently matched used offers, or five multi-merchant new-retail offers after the stronger replacement-cost haircut.
 
 The recommendation hierarchy is:
 
-1. Recommend pawn when the conservative pawn ceiling remains above the observed bid and therefore preserves the configured minimum profit and target margin.
+1. Recommend the immediate pawn/cash-buyer route when its conservative ceiling remains above the observed bid and therefore preserves the configured minimum profit and target margin.
 2. Otherwise recommend online resale when its conservative ceiling remains above the observed bid.
 3. If neither route clears the safety target but one likely case is still positive, label it as a thin margin instead of a candidate.
 4. If neither route is positive, label the item as having no safe exit; if neither route has evidence, keep the ceiling at `$0`.
@@ -150,7 +165,7 @@ If authorization is absent or has any value other than lowercase `true`, optiona
 
 ## Flat item schema
 
-An Apify Dataset item must be a flat JSON object, and a generic feed must expose the same kind of objects. Do not place listing fields inside `data`, `item`, `auction`, or other nested objects; map the collector output before BidAI Pro reads it. Arrays are used only for optional observation history, comparable-sale evidence, and prior-auction evidence. `forecast`, `valuationBasis`, `resaleMarket`, `askingMarket`, and `metalEstimate` are the supported nested analysis objects.
+An Apify Dataset item must be a flat JSON object, and a generic feed must expose the same kind of objects. Do not place listing fields inside `data`, `item`, `auction`, or other nested objects; map the collector output before BidAI Pro reads it. Arrays are used only for optional observation history, comparable-sale evidence, and prior-auction evidence. `forecast`, `valuationBasis`, `resaleMarket`, `askingMarket`, `retailMarket`, `specialtyMarket`, and `metalEstimate` are the supported nested analysis objects.
 
 For Apify mode, `title` and a valid `observedAt` are required on every row. Generic feeds require `title` and may omit `observedAt`, though supplying it is strongly recommended. For stable, useful automated analysis, every collector result should provide these canonical fields:
 
@@ -177,6 +192,9 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | `resaleMarketHistory` | array | Up to 365 timestamped validated market summaries retained for price and velocity learning. |
 | `askingMarket` | object | Current active-used asking-price evidence, kept separate from completed sales and validated again in the browser. |
 | `askingMarketHistory` | array | Up to 365 timestamped summaries of active-used asking prices for longitudinal learning. |
+| `retailMarket` | object | Multi-merchant Google Shopping evidence with used and new condition groups, raw offer links, statistics, and product-interest fields. |
+| `retailMarketHistory` | array | Up to 365 timestamped broad-market summaries for longitudinal price learning. |
+| `specialtyMarket` | object | Strictly matched specialty guide values, direct retailer buy/sell references, raw annual unit volume, and provider link. |
 | `metalEstimate` | object | Source-described purity/weight plus a fresh live spot quote and gross melt ceiling; informational until independently tested. |
 
 Useful optional flat fields are `shipping`, `status`, `finalPrice`, `expectedClose`, `resaleLow`, `resaleMedian`, `resaleHigh`, `demand`, `rarity`, `identityConfidence`, `conditionConfidence`, `imageUrl`, `resaleVertical`, `authenticationStatus`, `authenticationEvidence`, `riskSummary`, `compCount`, `compRecencyDays`, `marketplaceFee`, `taxRate`, `buyerPremium`, `outboundShipping`, `repairReserve`, and `returnReserve`. `shippingKnown` and `feeKnown` may be supplied explicitly; otherwise the importer marks them true only when the corresponding numeric field was actually present and valid. Missing shipping, fees, and material cost reserves remain `null`, not zero.
