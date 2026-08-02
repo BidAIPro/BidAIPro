@@ -52,7 +52,11 @@ Recommended hosted components:
 
 ## Learning loop
 
-Each listing should have a stable source ID. Repeated observations are appended with timestamps. When the auction ends, its actual final price is joined to every earlier prediction. Category-level calibration then learns the typical difference between predicted and actual closes.
+Each listing should have a stable source ID. Repeated observations are appended with timestamps, and a forecast stored on an observation is treated as an immutable point-in-time prediction. When the auction ends, its actual final price is joined without rewriting that forecast.
+
+The dashboard reports one fixed-horizon calibration sample per ended listing: the eligible verified forecast nearest six hours before close, limited to a three-to-nine-hour window. Source estimates, post-close forecasts, and forecasts whose five-outcome exact-model evidence cannot be revalidated are excluded. Category-level calibration then measures the typical difference between those approximately six-hour predictions and actual closes.
+
+Auction-close forecasting and resale valuation use separate evidence. `exactModelCount` means completed auction-close outcomes with the same normalized model key; completed resale sales never satisfy that five-outcome forecast threshold. Resale calculations use empirical P20, median, and P80 values when at least three qualifying exact-model completed sales exist, while explicit source resale ranges remain audit inputs.
 
 The economic maximum bid remains independent of the predicted closing price:
 

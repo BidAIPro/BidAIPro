@@ -7,10 +7,12 @@ import { runInNewContext } from "node:vm";
 const AUTHORIZED_VALUE = "true";
 const OUTPUT_PREFIX = "window.BIDAI_LIVE_SNAPSHOTS = ";
 const MAX_HISTORY_POINTS = 250;
+const MAX_COMPARABLES = 50;
 const MAX_RETAINED_ITEMS = 5_000;
 const MAX_RESPONSE_BYTES = 20_000_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const APIFY_API_ORIGIN = "https://api.apify.com";
+const VERIFIED_FORECAST_STATUSES = new Set(["available", "ready", "verified"]);
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = join(repositoryRoot, "data");
@@ -22,6 +24,10 @@ function pick(record, ...keys) {
     if (value !== undefined && value !== null && value !== "") return value;
   }
   return undefined;
+}
+
+function hasOwn(record, ...keys) {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(record || {}, key));
 }
 
 function text(value, fallback = "") {
@@ -72,6 +78,13 @@ function score(value, fallback = 0) {
   return Math.min(100, Math.max(0, Math.round(parsed)));
 }
 
+function nonnegativeNumber(value, fallback = null) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number.parseFloat(String(value).replace(/[^\d.-]/g, ""));
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.round(parsed * 10_000) / 10_000;
+}
+
 function timestamp(value, fallback = null) {
   if (value === undefined || value === null || value === "") return fallback;
   let candidate = value;
@@ -93,6 +106,306 @@ function httpUrl(value) {
   } catch {
     return null;
   }
+}
+
+function comparableCurrency(value) {
+  return text(pick(value, "currency", "currencyCode", "currency_code", "priceCurrency", "price_currency")).toUpperCase();
+}
+
+function normalizeComparable(value, kind, fallbackSource) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const currency = comparableCurrency(value);
+  if (currency && currency !== "USD") return null;
+
+  const title = text(pick(value, "title", "name", "listingTitle", "listing_title")).slice(0, 500);
+  const price = money(pick(value, "price", "finalPrice", "final_price", "soldPrice", "sold_price"), null);
+  if (!title || !(price > 0)) return null;
+
+  const endedAt = timestamp(pick(value, "endedAt", "ended_at", "soldAt", "sold_at", "endTime", "end_time"));
+  const source = text(pick(value, "source", "sourceName", "source_name"), fallbackSource).slice(0, 200);
+  const url = httpUrl(pick(value, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"));
+  const externalId = text(pick(value, "externalId", "external_id", "listingId", "listing_id", "auctionId", "auction_id", "itemId", "item_id", "id")).slice(0, 200);
+  return {
+    id: externalId || null,
+    externalId: externalId || null,
+    title,
+    price,
+    finalPrice: kind === "auction" ? price : null,
+    soldPrice: kind === "sale" ? price : null,
+    endedAt,
+    soldAt: kind === "sale" ? endedAt : null,
+    url,
+    outcomeObservedAt: timestamp(pick(value, "outcomeObservedAt", "outcome_observed_at", "finalObservedAt", "final_observed_at", "capturedAt", "captured_at", "observedAt", "observed_at")),
+    source,
+    modelKey: text(pick(value, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key")).slice(0, 200),
+    matchReason: text(pick(value, "matchReason", "match_reason")).slice(0, 500),
+    matchScore: percentage(pick(value, "matchScore", "match_score", "similarityScore", "similarity_score"), null),
+    bidAtComparableTime: money(pick(value, "bidAtComparableTime", "bid_at_comparable_time"), null),
+    hoursToClose: nonnegativeNumber(pick(value, "hoursToClose", "hours_to_close"), null),
+  };
+}
+
+function normalizeComparables(value, kind, fallbackSource) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((comparable) => normalizeComparable(comparable, kind, fallbackSource))
+    .filter(Boolean)
+    .slice(0, MAX_COMPARABLES);
+}
+
+function mergeComparableEvidence(...collections) {
+  const byStableKey = new Map();
+  for (const collection of collections) {
+    for (const comparable of Array.isArray(collection) ? collection : []) {
+      if (!comparable || typeof comparable !== "object") continue;
+      const key = comparableOutcomeKey(comparable);
+      const existing = byStableKey.get(key);
+      if (!existing) {
+        byStableKey.set(key, comparable);
+        continue;
+      }
+
+      const existingKnownTime = Date.parse(existing.outcomeObservedAt || "");
+      const incomingKnownTime = Date.parse(comparable.outcomeObservedAt || "");
+      const incomingIsEarlier = Number.isFinite(incomingKnownTime)
+        && (!Number.isFinite(existingKnownTime) || incomingKnownTime < existingKnownTime);
+      const preferred = incomingIsEarlier ? comparable : existing;
+      const fallback = incomingIsEarlier ? existing : comparable;
+      const merged = { ...fallback, ...preferred };
+      for (const [field, value] of Object.entries(fallback)) {
+        if (!supplied(preferred[field]) && supplied(value)) merged[field] = value;
+      }
+      const earliestKnownTime = [existingKnownTime, incomingKnownTime]
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b)[0];
+      merged.outcomeObservedAt = Number.isFinite(earliestKnownTime)
+        ? new Date(earliestKnownTime).toISOString()
+        : null;
+      byStableKey.set(key, merged);
+    }
+  }
+
+  return [...byStableKey.values()].slice(-MAX_COMPARABLES);
+}
+
+function normalizedModelKey(value) {
+  return text(value)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s*([:|/])\s*/g, "$1");
+}
+
+function comparableOutcomeKey(comparable) {
+  const stableId = text(pick(comparable, "externalId", "id")).toLowerCase();
+  if (stableId) return `id:${text(comparable?.source).toLowerCase()}:${stableId}`;
+  const url = httpUrl(comparable?.url);
+  if (url) return `url:${url.toLowerCase()}`;
+  return [
+    normalizedModelKey(comparable?.modelKey),
+    text(comparable?.title).toLowerCase(),
+    money(pick(comparable, "price", "finalPrice", "soldPrice"), null),
+    timestamp(pick(comparable, "endedAt", "soldAt")),
+    text(comparable?.source).toLowerCase(),
+  ].join("|");
+}
+
+function eligibleDatedComparables(comparables, cutoff, requiredModelKey = "") {
+  const cutoffTime = Date.parse(cutoff || "");
+  if (!Number.isFinite(cutoffTime)) return [];
+  const requiredKey = normalizedModelKey(requiredModelKey);
+  const deduplicated = new Map();
+  for (const comparable of Array.isArray(comparables) ? comparables : []) {
+    const endedAt = timestamp(pick(comparable, "endedAt", "soldAt"));
+    const endedTime = Date.parse(endedAt || "");
+    const price = money(pick(comparable, "price", "finalPrice", "soldPrice"), null);
+    const outcomeObservedTime = Date.parse(comparable?.outcomeObservedAt || "");
+    if (!Number.isFinite(endedTime) || endedTime > cutoffTime || !(price > 0)) continue;
+    if (!Number.isFinite(outcomeObservedTime) || outcomeObservedTime > cutoffTime) continue;
+    if (requiredKey && normalizedModelKey(comparable?.modelKey) !== requiredKey) continue;
+    if (requiredKey && !(percentage(comparable?.matchScore, null) >= 75)) continue;
+    if (requiredKey && !pick(comparable, "externalId", "id") && !httpUrl(comparable?.url)) continue;
+    const normalized = { ...comparable, price, endedAt };
+    const key = comparableOutcomeKey(normalized);
+    if (!deduplicated.has(key)) deduplicated.set(key, normalized);
+  }
+  return [...deduplicated.values()];
+}
+
+function comparableRanges(comparableSales) {
+  const prices = comparableSales
+    .map((comparable) => comparable.price)
+    .filter((price) => Number.isFinite(price) && price > 0)
+    .sort((a, b) => a - b);
+  if (prices.length < 3) return null;
+  return {
+    low: quantile(prices, 0.2),
+    median: quantile(prices, 0.5),
+    high: quantile(prices, 0.8),
+  };
+}
+
+function supplied(value) {
+  return value !== undefined && value !== null && value !== "";
+}
+
+function boolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = text(value).toLowerCase();
+  if (["true", "1", "yes"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  return fallback;
+}
+
+function normalizePurity(value) {
+  const raw = text(value).toLowerCase().replace(/\s+/g, "");
+  if (/^14k(?:t)?$/.test(raw)) return "14k";
+  const parsed = Number.parseFloat(raw.replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(parsed)) return null;
+  if (Math.abs(parsed - 14) <= 0.01) return "14k";
+  if (Math.abs(parsed - 0.585) <= 0.005) return "14k";
+  if (Math.abs(parsed - 58.5) <= 0.5) return "14k";
+  return null;
+}
+
+function normalizeGramUnit(value) {
+  const raw = text(value).toLowerCase().replace(/\s+/g, " ");
+  return ["g", "gram", "grams", "per gram", "usd/g", "$/g"].includes(raw) ? "gram" : null;
+}
+
+function normalizeValuationBasis(value, observedAt) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const referenceObservedAt = timestamp(pick(
+    value,
+    "referenceObservedAt",
+    "reference_observed_at",
+    "quoteObservedAt",
+    "quote_observed_at",
+  ));
+  const referenceTime = Date.parse(referenceObservedAt || "");
+  const observationTime = Date.parse(observedAt || "");
+  const currency = text(pick(value, "currency", "currencyCode", "currency_code")).toUpperCase();
+  const unit = normalizeGramUnit(pick(value, "unit", "weightUnit", "weight_unit", "referenceUnit", "reference_unit"));
+  const purity = normalizePurity(pick(value, "purity", "karat", "karats"));
+  const grossWeightGrams = nonnegativeNumber(pick(
+    value,
+    "grossWeightGrams",
+    "gross_weight_grams",
+    "grossWeight",
+    "gross_weight",
+    "weightGrams",
+    "weight_grams",
+  ), null);
+  const reference14kMeltPerGram = money(pick(
+    value,
+    "reference14kMeltPerGram",
+    "reference_14k_melt_per_gram",
+    "meltPerGram",
+    "melt_per_gram",
+  ), null);
+  if (!Number.isFinite(referenceTime)
+    || !Number.isFinite(observationTime)
+    || referenceTime > observationTime
+    || currency !== "USD"
+    || unit !== "gram"
+    || purity !== "14k"
+    || !(grossWeightGrams > 0)
+    || !(reference14kMeltPerGram > 0)) return null;
+
+  return {
+    referenceObservedAt,
+    currency: "USD",
+    unit: "gram",
+    purity: "14k",
+    grossWeight: grossWeightGrams,
+    grossWeightGrams,
+    reference14kMeltPerGram,
+    source: text(pick(value, "source", "sourceName", "source_name")).slice(0, 200),
+    sourceUrl: httpUrl(pick(value, "sourceUrl", "source_url", "url")),
+  };
+}
+
+function normalizeForecast(value, context = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const currency = comparableCurrency(value);
+  if (currency && currency !== "USD") return null;
+
+  const sampleSize = integer(pick(value, "sampleSize", "sample_size", "compCount", "comp_count"), 0);
+  const exactModelCount = Math.min(
+    sampleSize,
+    integer(pick(value, "exactModelCount", "exact_model_count"), 0),
+  );
+  const suppliedStatus = text(pick(value, "status", "state"))
+    .toLowerCase()
+    .slice(0, 80);
+  const asOf = timestamp(pick(value, "asOf", "as_of", "observedAt", "observed_at"));
+  const modelVersion = text(pick(value, "modelVersion", "model_version", "version")).slice(0, 120);
+  const expected = money(pick(value, "expected", "expectedClose", "expected_close"), null);
+  const low = money(pick(value, "low", "lower", "lowerBound", "lower_bound"), null);
+  const high = money(pick(value, "high", "upper", "upperBound", "upper_bound"), null);
+  const observationTime = Date.parse(context.observedAt || "");
+  const asOfTime = Date.parse(asOf || "");
+  const currentBid = money(context.currentBid, null);
+  const timestampAligned = Number.isFinite(asOfTime)
+    && (!Number.isFinite(observationTime)
+      || (asOfTime <= observationTime + 5 * 60_000
+        && observationTime - asOfTime <= 2 * 60 * 60_000));
+  const intervalCoherent = low > 0 && expected >= low && high >= expected;
+  const clearsCurrentBid = currentBid === null || low >= currentBid;
+  const verified = sampleSize >= 5
+    && exactModelCount >= 5
+    && VERIFIED_FORECAST_STATUSES.has(suppliedStatus)
+    && Boolean(modelVersion)
+    && timestampAligned
+    && intervalCoherent
+    && clearsCurrentBid;
+  const reasonCodes = pick(value, "reasonCodes", "reason_codes", "reasons");
+  const rawEvidenceIds = pick(value, "evidenceIds", "evidence_ids", "cohortIds", "cohort_ids");
+  const evidenceIds = [...new Set((Array.isArray(rawEvidenceIds) ? rawEvidenceIds : [])
+    .map((identifier) => text(identifier).slice(0, 500))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, MAX_HISTORY_POINTS);
+  const suppliedEvidenceHash = text(pick(value, "evidenceHash", "evidence_hash")).toLowerCase();
+  const evidenceHash = evidenceIds.length
+    ? digest(evidenceIds.join("\n"))
+    : (/^[a-f0-9]{64}$/.test(suppliedEvidenceHash) ? suppliedEvidenceHash : null);
+  return {
+    status: verified ? suppliedStatus : "insufficient-data",
+    asOf,
+    modelVersion,
+    expected: verified ? expected : null,
+    low: verified ? low : null,
+    high: verified ? high : null,
+    sampleSize,
+    exactModelCount,
+    curveCount: integer(pick(value, "curveCount", "curve_count"), null),
+    confidence: ratio(pick(value, "confidence", "forecastConfidence", "forecast_confidence"), null),
+    method: text(pick(value, "method", "forecastMethod", "forecast_method")).slice(0, 200),
+    reasonCodes: (Array.isArray(reasonCodes) ? reasonCodes : [])
+      .map((reason) => text(reason).slice(0, 120))
+      .filter(Boolean)
+      .slice(0, 20),
+    ...(evidenceIds.length ? { evidenceIds } : {}),
+    ...(evidenceHash ? { evidenceHash } : {}),
+  };
+}
+
+function apifyComparableArraysAreValid(record) {
+  const groups = [
+    [pick(record, "comparableSales", "comparable_sales", "soldComparables", "sold_comparables"), "sale"],
+    [pick(record, "auctionComparables", "auction_comparables", "auctionComps", "auction_comps"), "auction"],
+  ];
+  return groups.every(([collection, kind]) => {
+    if (collection === undefined) return true;
+    if (!Array.isArray(collection)) return false;
+    return collection.every((comparable) => normalizeComparable(comparable, kind, "Apify dataset"));
+  });
+}
+
+function apifyForecastIsValid(record) {
+  const value = pick(record, "forecast", "verifiedForecast", "verified_forecast");
+  if (value === undefined) return true;
+  return Boolean(normalizeForecast(value));
 }
 
 async function readJsonResponse(response) {
@@ -213,12 +526,14 @@ function stableIdentity(record, normalized) {
   };
 }
 
-function normalizeStatus(value, finalPrice, endsAt) {
+function normalizeStatus(value, finalPrice, endsAt, referenceAt = null) {
   const raw = text(value, "active").toLowerCase();
   if (finalPrice > 0 || ["ended", "closed", "complete", "completed", "sold"].some((word) => raw.includes(word))) {
     return "ended";
   }
-  if (endsAt && Date.parse(endsAt) <= Date.now()) return "ended";
+  const endTime = Date.parse(endsAt || "");
+  const referenceTime = Date.parse(referenceAt || "");
+  if (Number.isFinite(endTime) && Number.isFinite(referenceTime) && endTime <= referenceTime) return "ended";
   return "active";
 }
 
@@ -228,13 +543,27 @@ function normalizeObservation(point, defaults) {
     defaults.observedAt,
   );
   if (!observedAt) return null;
+  const pointCurrentBid = money(
+    pick(point, "currentBid", "current_bid", "price", "bidAmount", "bid_amount"),
+    defaults.currentBid,
+  );
+  const forecast = normalizeForecast(
+    pick(point, "forecast", "verifiedForecast", "verified_forecast"),
+    { observedAt, currentBid: pointCurrentBid },
+  );
+  const pointFinalPrice = money(pick(point, "finalPrice", "final_price", "soldPrice", "sold_price"), 0);
+  const pointEndsAt = timestamp(
+    pick(point, "endsAt", "ends_at", "endTime", "end_time", "closeTime", "close_time"),
+    defaults.endsAt,
+  );
 
   return {
     observedAt,
-    currentBid: money(pick(point, "currentBid", "current_bid", "price", "bidAmount", "bid_amount"), defaults.currentBid),
+    currentBid: pointCurrentBid,
     bidCount: integer(pick(point, "bidCount", "bid_count", "bids"), defaults.bidCount),
     expectedClose: money(pick(point, "expectedClose", "expected_close", "predictedFinal", "predicted_final"), defaults.expectedClose),
-    status: normalizeStatus(pick(point, "status", "state"), defaults.finalPrice, defaults.endsAt),
+    status: normalizeStatus(pick(point, "status", "state"), pointFinalPrice, pointEndsAt, observedAt),
+    ...(forecast ? { forecast } : {}),
   };
 }
 
@@ -242,7 +571,15 @@ function mergeObservations(...collections) {
   const byTimestamp = new Map();
   for (const collection of collections) {
     for (const observation of Array.isArray(collection) ? collection : []) {
-      if (observation?.observedAt) byTimestamp.set(observation.observedAt, observation);
+      if (!observation?.observedAt) continue;
+      const existing = byTimestamp.get(observation.observedAt);
+      if (!existing) {
+        byTimestamp.set(observation.observedAt, observation);
+        continue;
+      }
+      const merged = { ...existing, ...observation };
+      if (existing.forecast) merged.forecast = existing.forecast;
+      byTimestamp.set(observation.observedAt, merged);
     }
   }
   return [...byTimestamp.values()]
@@ -274,6 +611,238 @@ function reconcileRetainedStatus(item) {
   return { ...item, status: "ended" };
 }
 
+function hasVerifiedForecast(forecast, context = {}) {
+  const normalized = normalizeForecast(forecast, context);
+  return Boolean(normalized
+    && VERIFIED_FORECAST_STATUSES.has(normalized.status)
+    && normalized.expected > 0
+    && normalized.low > 0
+    && normalized.high > 0);
+}
+
+function sourceForecastCanBePreserved(item, items) {
+  if (!hasVerifiedForecast(item?.forecast, {
+    observedAt: item?.observedAt,
+    currentBid: item?.currentBid,
+  }) || !normalizedModelKey(item?.modelKey)) return false;
+  const observedTime = Date.parse(item?.observedAt || "");
+  const forecastTime = Date.parse(item?.forecast?.asOf || "");
+  if (!Number.isFinite(observedTime) || !Number.isFinite(forecastTime)) return false;
+  const ageMilliseconds = observedTime - forecastTime;
+  if (ageMilliseconds < -5 * 60_000 || ageMilliseconds > 2 * 60 * 60_000) return false;
+  return collectExactModelOutcomes(item, items).length >= 5;
+}
+
+function quantile(values, probability) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const position = (sorted.length - 1) * probability;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  const lower = sorted[lowerIndex];
+  const upper = sorted[upperIndex];
+  const interpolated = lower + ((upper - lower) * (position - lowerIndex));
+  return Math.round(interpolated * 100) / 100;
+}
+
+function curveHourTolerance(targetHoursToClose) {
+  return Math.max(1, Math.min(24, targetHoursToClose * 0.25));
+}
+
+function matchingHistoryCurve(item, targetHoursToClose, finalPrice) {
+  const endTime = Date.parse(item?.endsAt || "");
+  if (!Number.isFinite(endTime) || !Number.isFinite(targetHoursToClose)) return null;
+  const tolerance = curveHourTolerance(targetHoursToClose);
+  let best = null;
+  for (const observation of Array.isArray(item?.observations) ? item.observations : []) {
+    const observedTime = Date.parse(observation?.observedAt || "");
+    const bid = money(observation?.currentBid, null);
+    if (!Number.isFinite(observedTime) || observedTime > endTime || !(bid > 0) || bid > finalPrice) continue;
+    const hoursToClose = (endTime - observedTime) / 3_600_000;
+    const distance = Math.abs(hoursToClose - targetHoursToClose);
+    if (distance > tolerance || (best && distance >= best.distance)) continue;
+    best = { bid, hoursToClose, distance };
+  }
+  return best;
+}
+
+function empiricalOutcomeKey(value) {
+  const stableId = text(pick(value, "externalId", "id")).toLowerCase();
+  if (stableId) return `id:${text(value?.source).toLowerCase()}:${stableId}`;
+  const url = httpUrl(pick(value, "url", "sourceUrl"));
+  if (url) return `url:${url.toLowerCase()}`;
+  return comparableOutcomeKey({
+    id: pick(value, "externalId", "id"),
+    externalId: pick(value, "externalId", "id"),
+    modelKey: value?.modelKey,
+    title: value?.title,
+    price: pick(value, "finalPrice", "price", "soldPrice"),
+    endedAt: pick(value, "endsAt", "endedAt", "soldAt"),
+    source: value?.source,
+  });
+}
+
+function collectExactModelOutcomes(target, items) {
+  const targetKey = normalizedModelKey(target?.modelKey);
+  const targetObservedTime = Date.parse(target?.observedAt || "");
+  if (!targetKey || !Number.isFinite(targetObservedTime)) return [];
+  const targetUrl = httpUrl(pick(target, "url", "sourceUrl"));
+  const targetEndTime = Date.parse(target?.endsAt || "");
+  const targetHoursToClose = Number.isFinite(targetEndTime) && targetEndTime >= targetObservedTime
+    ? (targetEndTime - targetObservedTime) / 3_600_000
+    : null;
+  const outcomes = new Map();
+  const addOutcome = (outcome) => {
+    if (!outcome?.key || !(outcome.finalPrice > 0)) return;
+    const existing = outcomes.get(outcome.key);
+    if (!existing) {
+      outcomes.set(outcome.key, outcome);
+      return;
+    }
+    if (!existing.curveBid && outcome.curveBid) {
+      outcomes.set(outcome.key, { ...existing, curveBid: outcome.curveBid, curveHours: outcome.curveHours });
+    }
+  };
+
+  for (const candidate of items) {
+    if (!candidate || candidate.id === target.id || candidate.status !== "ended") continue;
+    if (normalizedModelKey(candidate.modelKey) !== targetKey) continue;
+    const finalPrice = money(candidate.finalPrice, null);
+    const endedTime = Date.parse(candidate.endsAt || "");
+    const capturedTime = Date.parse(candidate.observedAt || "");
+    if (!(finalPrice > 0)
+      || !Number.isFinite(endedTime)
+      || endedTime > targetObservedTime
+      || !Number.isFinite(capturedTime)
+      || capturedTime > targetObservedTime) continue;
+    const candidateUrl = httpUrl(pick(candidate, "url", "sourceUrl"));
+    if (targetUrl && candidateUrl === targetUrl) continue;
+    const curve = matchingHistoryCurve(candidate, targetHoursToClose, finalPrice);
+    addOutcome({
+      key: empiricalOutcomeKey(candidate),
+      finalPrice,
+      endedAt: candidate.endsAt,
+      curveBid: curve?.bid ?? null,
+      curveHours: curve?.hoursToClose ?? null,
+    });
+  }
+
+  for (const owner of items) {
+    const ownerObservedTime = Date.parse(owner?.observedAt || "");
+    if (!Number.isFinite(ownerObservedTime) || ownerObservedTime > targetObservedTime) continue;
+    const comparables = eligibleDatedComparables(owner?.auctionComparables, target.observedAt, targetKey);
+    for (const comparable of comparables) {
+      const comparableUrl = httpUrl(comparable.url);
+      if (targetUrl && comparableUrl === targetUrl) continue;
+      const finalPrice = money(pick(comparable, "finalPrice", "price", "soldPrice"), null);
+      const comparableHours = nonnegativeNumber(comparable.hoursToClose, null);
+      const comparableBid = money(comparable.bidAtComparableTime, null);
+      const tolerance = Number.isFinite(targetHoursToClose) ? curveHourTolerance(targetHoursToClose) : null;
+      const curveMatches = Number.isFinite(tolerance)
+        && comparableHours !== null
+        && comparableBid > 0
+        && comparableBid <= finalPrice
+        && Math.abs(comparableHours - targetHoursToClose) <= tolerance;
+      addOutcome({
+        key: empiricalOutcomeKey(comparable),
+        finalPrice,
+        endedAt: comparable.endedAt,
+        curveBid: curveMatches ? comparableBid : null,
+        curveHours: curveMatches ? comparableHours : null,
+      });
+    }
+  }
+
+  return [...outcomes.values()];
+}
+
+function buildEmpiricalClosingForecast(target, items) {
+  if (target?.status !== "active" || !normalizedModelKey(target?.modelKey)) return null;
+  const outcomes = collectExactModelOutcomes(target, items);
+  if (outcomes.length < 5) return null;
+
+  const currentBid = money(target.currentBid, 0);
+  const curveOutcomes = currentBid > 0
+    ? outcomes.filter((outcome) => outcome.curveBid > 0 && outcome.finalPrice >= outcome.curveBid)
+    : [];
+  const usesCurve = currentBid > 0 && curveOutcomes.length >= 5;
+  const distribution = usesCurve
+    ? curveOutcomes.map((outcome) => currentBid * (outcome.finalPrice / outcome.curveBid))
+    : outcomes.map((outcome) => outcome.finalPrice);
+  const evidenceIds = [...new Set(outcomes.map((outcome) => text(outcome.key)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  const low = Math.max(currentBid, quantile(distribution, 0.2));
+  const expected = Math.max(currentBid, quantile(distribution, 0.5));
+  const high = Math.max(currentBid, quantile(distribution, 0.8));
+  if (![low, expected, high].every(Number.isFinite)) return null;
+
+  return {
+    status: "available",
+    asOf: timestamp(target.observedAt),
+    modelVersion: "empirical-close-v1",
+    expected,
+    low,
+    high,
+    sampleSize: outcomes.length,
+    exactModelCount: outcomes.length,
+    curveCount: curveOutcomes.length,
+    confidence: null,
+    method: usesCurve ? "exact-model time-to-close uplift" : "exact-model final-price distribution",
+    evidenceIds,
+    evidenceHash: digest(evidenceIds.join("\n")),
+    reasonCodes: usesCurve
+      ? ["BIDAI_EMPIRICAL_EXACT_MODEL", "TIME_TO_CLOSE_UPLIFT", "DATED_OUTCOMES_ONLY"]
+      : ["BIDAI_EMPIRICAL_EXACT_MODEL", "FINAL_PRICE_DISTRIBUTION", "DATED_OUTCOMES_ONLY"],
+  };
+}
+
+function applyEmpiricalClosingForecasts(items) {
+  return items.map((item) => {
+    if (item?._forecastSnapshotLocked || item?.status !== "active" || sourceForecastCanBePreserved(item, items)) return item;
+    const currentObservationExists = Array.isArray(item.observations)
+      && item.observations.some((observation) => observation?.observedAt === item.observedAt);
+    if (!currentObservationExists) return item;
+    const forecast = buildEmpiricalClosingForecast(item, items);
+    if (!forecast) {
+      if (!hasVerifiedForecast(item.forecast, {
+        observedAt: item?.observedAt,
+        currentBid: item?.currentBid,
+      })) return item;
+      const unsupportedForecast = {
+        ...item.forecast,
+        status: "insufficient-data",
+        expected: null,
+        low: null,
+        high: null,
+        reasonCodes: [
+          ...(Array.isArray(item.forecast.reasonCodes) ? item.forecast.reasonCodes : []),
+          "EXACT_MODEL_EVIDENCE_NOT_REVALIDATED",
+        ].slice(0, 20),
+      };
+      return {
+        ...item,
+        forecast: unsupportedForecast,
+        observations: item.observations.map((observation) => (
+          observation?.observedAt === item.observedAt
+            ? { ...observation, forecast: unsupportedForecast }
+            : observation
+        )),
+      };
+    }
+    return {
+      ...item,
+      forecast,
+      observations: item.observations.map((observation) => (
+        observation?.observedAt === item.observedAt
+          ? { ...observation, forecast }
+          : observation
+      )),
+    };
+  });
+}
+
 function recordObservedAt(record) {
   return timestamp(pick(record, "observedAt", "observed_at", "capturedAt", "captured_at", "timestamp"));
 }
@@ -284,13 +853,49 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   const title = text(pick(record, "title", "name", "listingTitle", "listing_title"));
   if (!title) return null;
 
+  const comparableSalesSupplied = hasOwn(record, "comparableSales", "comparable_sales", "soldComparables", "sold_comparables");
+  const fieldPresence = {
+    source: hasOwn(record, "source", "sourceName", "source_name"),
+    url: hasOwn(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"),
+    sourceUrl: hasOwn(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"),
+    imageUrl: hasOwn(record, "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url"),
+    category: hasOwn(record, "category", "department", "type"),
+    currentBid: hasOwn(record, "currentBid", "current_bid", "currentPrice", "current_price", "price", "bidAmount", "bid_amount", "finalPrice", "final_price", "soldPrice", "sold_price"),
+    shipping: hasOwn(record, "shipping", "shippingCost", "shipping_cost"),
+    shippingKnown: hasOwn(record, "shipping", "shippingCost", "shipping_cost", "shippingKnown", "shipping_known"),
+    bidCount: hasOwn(record, "bidCount", "bid_count", "bids"),
+    endsAt: hasOwn(record, "endsAt", "ends_at", "endTime", "end_time", "closeTime", "close_time"),
+    expectedClose: hasOwn(record, "expectedClose", "expected_close", "predictedFinal", "predicted_final"),
+    resaleLow: comparableSalesSupplied || hasOwn(record, "resaleLow", "resale_low"),
+    resaleMedian: comparableSalesSupplied || hasOwn(record, "resaleMedian", "resale_median", "resaleValue", "resale_value"),
+    resaleHigh: comparableSalesSupplied || hasOwn(record, "resaleHigh", "resale_high"),
+    finalPrice: hasOwn(record, "finalPrice", "final_price", "soldPrice", "sold_price"),
+    demand: hasOwn(record, "demand", "demandScore", "demand_score"),
+    rarity: hasOwn(record, "rarity", "rarityScore", "rarity_score"),
+    identityConfidence: hasOwn(record, "identityConfidence", "identity_confidence"),
+    conditionConfidence: hasOwn(record, "conditionConfidence", "condition_confidence"),
+    compCount: comparableSalesSupplied || hasOwn(record, "compCount", "comp_count", "comparableCount", "comparable_count"),
+    compRecencyDays: hasOwn(record, "compRecencyDays", "comp_recency_days"),
+    modelKey: hasOwn(record, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key"),
+    forecastBasis: hasOwn(record, "forecastBasis", "forecast_basis", "predictionBasis", "prediction_basis"),
+    identifiedAs: hasOwn(record, "identifiedAs", "identified_as"),
+    marketplaceFee: hasOwn(record, "marketplaceFee", "marketplace_fee"),
+    feeKnown: hasOwn(record, "marketplaceFee", "marketplace_fee", "feeKnown", "fee_known"),
+    taxRate: hasOwn(record, "taxRate", "tax_rate"),
+    buyerPremium: hasOwn(record, "buyerPremium", "buyer_premium"),
+    outboundShipping: hasOwn(record, "outboundShipping", "outbound_shipping"),
+    repairReserve: hasOwn(record, "repairReserve", "repair_reserve"),
+    returnReserve: hasOwn(record, "returnReserve", "return_reserve"),
+  };
+
   const currentBid = money(pick(record, "currentBid", "current_bid", "currentPrice", "current_price", "price", "bidAmount", "bid_amount"));
   const finalPrice = money(pick(record, "finalPrice", "final_price", "soldPrice", "sold_price"), 0);
   const endsAt = timestamp(pick(record, "endsAt", "ends_at", "endTime", "end_time", "closeTime", "close_time"));
   const suppliedObservedAt = recordObservedAt(record);
   if (requireObservedAt && !suppliedObservedAt) return null;
   const observedAt = suppliedObservedAt || capturedAt;
-  const expectedClose = money(pick(record, "expectedClose", "expected_close", "predictedFinal", "predicted_final"), 0);
+  const rawExpectedClose = pick(record, "expectedClose", "expected_close", "predictedFinal", "predicted_final");
+  const expectedClose = money(rawExpectedClose, null);
   const normalized = {
     title,
     category: text(pick(record, "category", "department", "type"), "Unclassified"),
@@ -298,14 +903,13 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     endsAt,
   };
   const identity = stableIdentity(record, normalized);
-  const status = normalizeStatus(pick(record, "status", "state"), finalPrice, endsAt);
+  const status = normalizeStatus(pick(record, "status", "state"), finalPrice, endsAt, observedAt);
   const bid = Math.max(currentBid, finalPrice);
   const defaults = {
     observedAt,
     currentBid: bid,
     bidCount: integer(pick(record, "bidCount", "bid_count", "bids")),
     expectedClose,
-    finalPrice,
     endsAt,
   };
   const suppliedHistory = pick(record, "observations", "history", "snapshots", "bidHistory", "bid_history");
@@ -313,6 +917,43 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     .map((point) => normalizeObservation(point, defaults))
     .filter(Boolean);
   const currentObservation = normalizeObservation(record, defaults);
+  const comparableSales = normalizeComparables(
+    pick(record, "comparableSales", "comparable_sales", "soldComparables", "sold_comparables"),
+    "sale",
+    sourceLabel,
+  ).map((comparable) => ({
+    ...comparable,
+    outcomeObservedAt: comparable.outcomeObservedAt || observedAt,
+  }));
+  const auctionComparables = normalizeComparables(
+    pick(record, "auctionComparables", "auction_comparables", "auctionComps", "auction_comps"),
+    "auction",
+    sourceLabel,
+  ).map((comparable) => ({
+    ...comparable,
+    outcomeObservedAt: comparable.outcomeObservedAt || observedAt,
+  }));
+  const modelKey = text(pick(record, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key"));
+  const eligibleComparableSales = eligibleDatedComparables(comparableSales, observedAt, modelKey);
+  const derivedResale = comparableRanges(eligibleComparableSales);
+  const rawResaleLow = pick(record, "resaleLow", "resale_low");
+  const rawResaleMedian = pick(record, "resaleMedian", "resale_median", "resaleValue", "resale_value");
+  const rawResaleHigh = pick(record, "resaleHigh", "resale_high");
+  const rawCompCount = pick(record, "compCount", "comp_count", "comparableCount", "comparable_count");
+  const rawShipping = pick(record, "shipping", "shippingCost", "shipping_cost");
+  const normalizedShipping = money(rawShipping, null);
+  const rawMarketplaceFee = pick(record, "marketplaceFee", "marketplace_fee");
+  const normalizedMarketplaceFee = percentage(rawMarketplaceFee, null);
+  const suppliedForecast = pick(record, "forecast", "verifiedForecast", "verified_forecast");
+  const forecast = normalizeForecast(suppliedForecast, { observedAt, currentBid: bid });
+  const rawValuationBasis = pick(record, "valuationBasis", "valuation_basis", "intrinsicValuation", "intrinsic_valuation");
+  const rawIntrinsicValueEvidence = pick(record, "intrinsicValueEvidence", "intrinsic_value_evidence");
+  const intrinsicEvidenceSupplied = rawValuationBasis !== undefined || rawIntrinsicValueEvidence !== undefined;
+  const valuationBasis = normalizeValuationBasis(rawValuationBasis, observedAt);
+  const intrinsicValueEvidence = boolean(
+    rawIntrinsicValueEvidence,
+    false,
+  ) && Boolean(valuationBasis);
 
   return {
     id: identity.id,
@@ -325,31 +966,42 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     category: normalized.category,
     status,
     currentBid: bid,
-    shipping: money(pick(record, "shipping", "shippingCost", "shipping_cost")),
+    shipping: normalizedShipping,
+    shippingKnown: normalizedShipping !== null
+      && boolean(pick(record, "shippingKnown", "shipping_known"), supplied(rawShipping)),
     bidCount: defaults.bidCount,
     endsAt,
     expectedClose,
-    resaleLow: money(pick(record, "resaleLow", "resale_low")),
-    resaleMedian: money(pick(record, "resaleMedian", "resale_median", "resaleValue", "resale_value")),
-    resaleHigh: money(pick(record, "resaleHigh", "resale_high")),
+    resaleLow: supplied(rawResaleLow) ? money(rawResaleLow, null) : (derivedResale?.low ?? null),
+    resaleMedian: supplied(rawResaleMedian) ? money(rawResaleMedian, null) : (derivedResale?.median ?? null),
+    resaleHigh: supplied(rawResaleHigh) ? money(rawResaleHigh, null) : (derivedResale?.high ?? null),
     finalPrice: finalPrice || null,
     demand: score(pick(record, "demand", "demandScore", "demand_score"), 50),
     rarity: score(pick(record, "rarity", "rarityScore", "rarity_score")),
     identityConfidence: ratio(pick(record, "identityConfidence", "identity_confidence"), 0.35),
     conditionConfidence: ratio(pick(record, "conditionConfidence", "condition_confidence"), 0.35),
-    compCount: integer(pick(record, "compCount", "comp_count", "comparableCount", "comparable_count")),
-    compRecencyDays: integer(pick(record, "compRecencyDays", "comp_recency_days"), 365),
+    compCount: supplied(rawCompCount) ? integer(rawCompCount) : eligibleComparableSales.length,
+    compRecencyDays: integer(pick(record, "compRecencyDays", "comp_recency_days"), null),
+    modelKey,
+    forecastBasis: text(pick(record, "forecastBasis", "forecast_basis", "predictionBasis", "prediction_basis")),
+    comparableSales,
+    auctionComparables,
+    ...(forecast ? { forecast } : {}),
+    ...(intrinsicEvidenceSupplied ? { intrinsicValueEvidence, valuationBasis } : {}),
     identifiedAs: text(pick(record, "identifiedAs", "identified_as"), "Feed-provided identity; verify before bidding"),
     publishedResearch: true,
-    marketplaceFee: percentage(pick(record, "marketplaceFee", "marketplace_fee"), 0),
+    marketplaceFee: normalizedMarketplaceFee,
+    feeKnown: normalizedMarketplaceFee !== null
+      && boolean(pick(record, "feeKnown", "fee_known"), supplied(rawMarketplaceFee)),
     taxRate: percentage(pick(record, "taxRate", "tax_rate")),
     buyerPremium: percentage(pick(record, "buyerPremium", "buyer_premium")),
-    outboundShipping: money(pick(record, "outboundShipping", "outbound_shipping"), 0),
-    repairReserve: money(pick(record, "repairReserve", "repair_reserve"), 0),
-    returnReserve: money(pick(record, "returnReserve", "return_reserve"), 0),
+    outboundShipping: money(pick(record, "outboundShipping", "outbound_shipping"), null),
+    repairReserve: money(pick(record, "repairReserve", "repair_reserve"), null),
+    returnReserve: money(pick(record, "returnReserve", "return_reserve"), null),
     observedAt,
     observations: mergeObservations(history, currentObservation ? [currentObservation] : []),
     feedOrder: index,
+    _fieldPresence: fieldPresence,
   };
 }
 
@@ -450,14 +1102,26 @@ async function run() {
     originalIndex,
     observedAt: recordObservedAt(record),
   }));
+  if (isApifyDataset && recordEntries.some(({ record }) => (
+    !record || typeof record !== "object" || Array.isArray(record)
+    || !text(pick(record, "title", "name", "listingTitle", "listing_title"))
+  ))) {
+    throw new Error("Every Apify dataset item must be a flat object with a title.");
+  }
   if (isApifyDataset && recordEntries.some((entry) => !entry.observedAt)) {
     throw new Error("Every Apify dataset item must include a valid observedAt timestamp.");
   }
   if (isApifyDataset && recordEntries.some(({ record }) => {
-    const currency = text(pick(record, "currency", "currencyCode", "currency_code", "priceCurrency")).toUpperCase();
+    const currency = comparableCurrency(record);
     return currency && currency !== "USD";
   })) {
     throw new Error("Apify dataset monetary fields must be denominated in USD.");
+  }
+  if (isApifyDataset && recordEntries.some(({ record }) => !apifyComparableArraysAreValid(record))) {
+    throw new Error("Every Apify comparable must be a USD object with a title and positive sale price.");
+  }
+  if (isApifyDataset && recordEntries.some(({ record }) => !apifyForecastIsValid(record))) {
+    throw new Error("Every supplied Apify forecast must be a USD object.");
   }
   if (isApifyDataset) {
     recordEntries.sort((a, b) => (
@@ -473,6 +1137,14 @@ async function run() {
     pick(payload, "generatedAt", "generated_at", "observedAt", "observed_at"),
     isApifyDataset ? newestRecordObservation : new Date().toISOString(),
   );
+  if (!isApifyDataset) {
+    recordEntries.sort((a, b) => {
+      const aTime = Date.parse(a.observedAt || capturedAt || "");
+      const bTime = Date.parse(b.observedAt || capturedAt || "");
+      const chronology = (Number.isFinite(aTime) ? aTime : 0) - (Number.isFinite(bTime) ? bTime : 0);
+      return chronology || a.originalIndex - b.originalIndex;
+    });
+  }
   const normalized = recordEntries
     .map((entry, index) => normalizeRecord(
       entry.record,
@@ -497,14 +1169,53 @@ async function run() {
     const previous = previousById.get(item.id) || previousByExternalId.get(externalIdentityKey(item.externalId));
     const retainedId = previous?.id || item.id;
     const duplicate = mergedById.get(retainedId);
+    const priorState = duplicate || previous;
+    const incomingObservations = item.observations.map((observation) => ({
+      ...observation,
+      ...(!item._fieldPresence?.currentBid && priorState?.currentBid !== undefined
+        ? { currentBid: priorState.currentBid }
+        : {}),
+      ...(!item._fieldPresence?.bidCount && priorState?.bidCount !== undefined
+        ? { bidCount: priorState.bidCount }
+        : {}),
+      ...(!item._fieldPresence?.expectedClose && priorState?.expectedClose !== undefined
+        ? { expectedClose: priorState.expectedClose }
+        : {}),
+    }));
     if (previous?.id) matchedPreviousIds.add(previous.id);
-    mergedById.set(retainedId, {
+    const merged = {
       ...(previous || {}),
       ...(duplicate || {}),
       ...item,
       id: retainedId,
-      observations: mergeObservations(previous?.observations, duplicate?.observations, item.observations),
-    });
+      observations: mergeObservations(previous?.observations, duplicate?.observations, incomingObservations),
+      comparableSales: mergeComparableEvidence(
+        previous?.comparableSales,
+        duplicate?.comparableSales,
+        item.comparableSales,
+      ),
+      auctionComparables: mergeComparableEvidence(
+        previous?.auctionComparables,
+        duplicate?.auctionComparables,
+        item.auctionComparables,
+      ),
+    };
+    for (const [field, wasSupplied] of Object.entries(item._fieldPresence || {})) {
+      if (!wasSupplied && priorState && Object.prototype.hasOwnProperty.call(priorState, field)) {
+        merged[field] = priorState[field];
+      }
+    }
+    const immutableForecastSource = duplicate?.observedAt === item.observedAt && duplicate?.forecast
+      ? duplicate
+      : (previous?.observedAt === item.observedAt && previous?.forecast ? previous : null);
+    if (immutableForecastSource) {
+      merged.forecast = immutableForecastSource.forecast;
+      merged._forecastSnapshotLocked = true;
+    } else {
+      delete merged._forecastSnapshotLocked;
+      if (!Object.prototype.hasOwnProperty.call(item, "forecast")) delete merged.forecast;
+    }
+    mergedById.set(retainedId, merged);
   }
 
   for (const previous of previousEnvelope.items) {
@@ -512,11 +1223,13 @@ async function run() {
     mergedById.set(previous.id, previous);
   }
 
-  const items = [...mergedById.values()]
-    .map(({ feedOrder: _feedOrder, ...item }) => item)
+  const retainedItems = [...mergedById.values()]
+    .map(({ feedOrder: _feedOrder, _fieldPresence: _fieldPresence, ...item }) => item)
     .map(reconcileRetainedStatus)
     .sort(retentionOrder)
     .slice(0, MAX_RETAINED_ITEMS);
+  const items = applyEmpiricalClosingForecasts(retainedItems)
+    .map(({ _forecastSnapshotLocked: _locked, ...item }) => item);
   const incomingNotes = pick(payload, "sourceNotes", "source_notes", "notes");
   const sourceNotes = (Array.isArray(incomingNotes) ? incomingNotes : [])
     .map((note) => text(note))

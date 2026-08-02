@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="BidAI Pro ranks auction opportunities using downside-aware bid limits, resale evidence, demand signals, and observed price history."
+      content="BidAI Pro turns timestamped auction snapshots, comparable-sale evidence, full costs, and observed price history into closing-price forecasts and disciplined bid ceilings."
     />
     <meta name="theme-color" content="#0b0f0d" />
     <meta property="og:title" content="BidAI Pro — Auction intelligence" />
     <meta
       property="og:description"
-      content="Know the margin before the gavel falls. Analyze auction snapshots, compare downside, and learn from final prices."
+      content="Know the price, forecast the close, inspect comparable evidence, and calculate the full margin before the gavel falls."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://bidaipro.github.io/BidAIPro/" />
@@ -69,13 +69,13 @@
           <span class="status-orbit" aria-hidden="true"><i></i></span>
           <div>
             <strong data-source-status>Awaiting research data</strong>
-            <span>Source state is always labeled</span>
+            <span>Provenance and snapshot age tracked</span>
           </div>
         </div>
 
         <div class="privacy-note">
           <span aria-hidden="true">▣</span>
-          <p><strong>Evidence before action</strong>Live research and illustrative records are kept visibly distinct.</p>
+          <p><strong>Evidence before action</strong>Every decision traces back to its source, observation time, market evidence, and cost assumptions.</p>
         </div>
       </aside>
 
@@ -102,7 +102,7 @@
           <div class="topbar-actions">
             <div class="system-state" aria-label="Research system status">
               <span aria-hidden="true"></span>
-              <div><strong>Research workspace</strong><small>Decision support</small></div>
+              <div><strong>Market intelligence</strong><small>Sources + forecasts</small></div>
             </div>
             <label class="search-box" for="global-search">
               <span aria-hidden="true">⌕</span>
@@ -125,12 +125,12 @@
             <div class="view-intro">
               <div>
                 <span class="section-kicker"><i></i> AUCTION COMMAND CENTER</span>
-                <h2 id="opportunities-heading">Spot the spread before the market catches up.</h2>
-                <p>Surface underpriced lots, pressure-test the resale case, and set a disciplined ceiling before the bidding accelerates.</p>
+                <h2 id="opportunities-heading">Know the price. Forecast the close. Protect the margin.</h2>
+                <p>Rank auction opportunities using timestamped prices, exact-model outcomes, completed resale evidence, full landed costs, and direct source links.</p>
               </div>
               <div class="snapshot-mode" role="status">
                 <span class="mode-dot" aria-hidden="true"></span>
-                <div><strong data-source-status>Awaiting research data</strong><span>Published pass + private workspace</span></div>
+                <div><strong data-source-status>Awaiting research data</strong><span data-research-observed>Awaiting first source snapshot</span></div>
               </div>
             </div>
 
@@ -138,43 +138,50 @@
               <div class="research-pass-lead">
                 <span class="research-pass-mark" aria-hidden="true"><i></i><i></i><i></i></span>
                 <div>
-                  <span class="section-kicker"><i></i> LATEST RESEARCH PASS</span>
+                  <span class="section-kicker"><i></i> LATEST PUBLISHED SOURCE PASS</span>
                   <h3 id="research-pass-heading" data-source-status>Awaiting research data</h3>
-                  <p>Published observations are scored against resale evidence and your full cost profile.</p>
+                  <p>Each listing is timestamped and evaluated; a closing forecast appears only after the exact-model evidence threshold is met.</p>
                 </div>
               </div>
               <dl class="research-pass-stats">
-                <div><dt>Research snapshots</dt><dd data-research-count>0</dd></div>
-                <div><dt>Last observed</dt><dd data-research-observed>No published pass</dd></div>
-                <div><dt>Decision rule</dt><dd>Margin after all costs</dd></div>
+                <div><dt>Published snapshots</dt><dd data-research-count>0</dd></div>
+                <div><dt>Snapshot observed</dt><dd data-research-observed>No source observation</dd></div>
+                <div><dt>Forecast inputs</dt><dd>History + comparable evidence</dd></div>
               </dl>
               <button class="research-pass-action" type="button" data-view-target="sources">
-                Inspect sources <span aria-hidden="true">→</span>
+                Open source ledger <span aria-hidden="true">→</span>
               </button>
             </section>
 
-            <div class="demo-notice">
-              <span class="demo-tag">DATA KEY</span>
-              <p><strong>Research snapshot</strong> means a published observation. <strong>Illustrative</strong> means a model example. Neither replaces identity, condition, fee, or sold-comparable verification.</p>
-              <button type="button" data-view-target="sources">Review inputs <span aria-hidden="true">→</span></button>
+            <div class="source-integrity-banner">
+              <span class="source-integrity-label">SOURCE INTEGRITY</span>
+              <div class="source-integrity-copy">
+                <strong>Every forecast should be auditable.</strong>
+                <p>Review the listing source, observation age, comparable sales, identity confidence, condition risk, and every cost before acting.</p>
+              </div>
+              <div class="snapshot-freshness" role="status">
+                <span>Latest source observation</span>
+                <strong data-research-observed>Awaiting first snapshot</strong>
+              </div>
+              <button type="button" data-view-target="sources">Audit inputs <span aria-hidden="true">→</span></button>
             </div>
 
             <div class="metric-grid" aria-label="Opportunity summary">
               <article class="summary-metric">
                 <div class="metric-icon lime" aria-hidden="true">↗</div>
-                <div><span>Modeled opportunity</span><strong data-stat-upside>$0</strong><small>Median profit across active records</small></div>
+                <div><span>Expected opportunity</span><strong data-stat-upside>$0</strong><small>Median profit after modeled costs</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon orange" aria-hidden="true">◷</div>
-                <div><span>Ending soon</span><strong data-stat-urgent>0</strong><small>Within the next 12 hours</small></div>
+                <div><span>Closing soon</span><strong data-stat-urgent>0</strong><small>Auctions ending within 12 hours</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon blue" aria-hidden="true">◎</div>
-                <div><span>Evidence confidence</span><strong data-stat-confidence>0%</strong><small>Identity, condition, and resale inputs</small></div>
+                <div><span>Forecast confidence</span><strong data-stat-confidence>0%</strong><small>Average verified close-model confidence</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon neutral" aria-hidden="true">≋</div>
-                <div><span>Stored observations</span><strong data-stat-observations>0</strong><small>Across repeated snapshots</small></div>
+                <div><span>Price observations</span><strong data-stat-observations>0</strong><small>Historical snapshots retained</small></div>
               </article>
             </div>
 
@@ -182,8 +189,8 @@
               <section class="queue-panel" aria-labelledby="queue-heading">
                 <div class="panel-head queue-head">
                   <div>
-                    <span class="section-kicker"><i></i> CONSERVATIVE RANKING</span>
-                    <h3 id="queue-heading">Profit decision queue</h3>
+                    <span class="section-kicker"><i></i> EVIDENCE-WEIGHTED RANKING</span>
+                    <h3 id="queue-heading">Opportunity intelligence</h3>
                   </div>
                   <div class="filter-row">
                     <label>
@@ -203,14 +210,14 @@
                   </div>
                 </div>
                 <div class="queue-labels" aria-hidden="true">
-                  <span>ITEM / SIGNAL</span><span>CURRENT</span><span>SAFE CEILING</span><span>MEDIAN PROFIT</span><span></span>
+                  <span>ITEM / SIGNAL</span><span>OBSERVED / CLOSE</span><span>SAFE CEILING</span><span>EXPECTED PROFIT</span><span>SOURCE</span>
                 </div>
                 <div class="opportunity-list" data-opportunity-list></div>
                 <div class="empty-state" data-queue-empty hidden>
                   <span aria-hidden="true">⌕</span>
-                  <h4>No matching snapshots</h4>
-                  <p>Try a broader search or import another record.</p>
-                  <button class="button button-primary" type="button" data-add-snapshot>Add snapshot</button>
+                  <h4>No listings match</h4>
+                  <p>Broaden the filters or connect a source to ingest current auction records.</p>
+                  <button class="button button-primary" type="button" data-add-snapshot>Record a listing</button>
                 </div>
               </section>
 
@@ -246,7 +253,7 @@
               <div>
                 <span class="section-kicker"><i></i> OUTCOME CALIBRATION</span>
                 <h2 id="learning-heading">Learn from every close.</h2>
-                <p>Ended items compare the price predicted at snapshot time with the actual final bid.</p>
+                <p>Compare the verified forecast nearest six hours before close with the actual final price, then measure error and bias by category.</p>
               </div>
             </div>
 
@@ -257,7 +264,7 @@
                 <div class="panel-head"><div><span class="section-kicker"><i></i> BY CATEGORY</span><h3>Prediction calibration</h3></div></div>
                 <div class="learning-table-wrap">
                   <table class="learning-table">
-                    <thead><tr><th scope="col">Category</th><th scope="col">Ended</th><th scope="col">Typical error</th><th scope="col">Bias</th><th scope="col">Signal</th></tr></thead>
+                    <thead><tr><th scope="col">Category</th><th scope="col">6-hour closes</th><th scope="col">Typical error</th><th scope="col">Bias</th><th scope="col">Signal</th></tr></thead>
                     <tbody data-learning-table></tbody>
                   </table>
                 </div>
@@ -266,11 +273,11 @@
                 <span class="section-kicker"><i></i> HOW IT LEARNS</span>
                 <h3>Snapshots become a price curve.</h3>
                 <ol class="method-list">
-                  <li><span>01</span><div><strong>Record each observation</strong><p>Repeated IDs update the item while preserving current bid, bid count, and time.</p></div></li>
-                  <li><span>02</span><div><strong>Capture the final price</strong><p>Mark the listing ended and add the actual close to measure forecast error.</p></div></li>
-                  <li><span>03</span><div><strong>Calibrate by category</strong><p>Median prediction ratios reveal whether a category tends to close above or below estimates.</p></div></li>
+                  <li><span>01</span><div><strong>Build the price curve</strong><p>Repeated listing IDs preserve each bid, bidder-count, and time observation.</p></div></li>
+                  <li><span>02</span><div><strong>Verify the final price</strong><p>The actual close measures forecast error and replaces assumption with outcome data.</p></div></li>
+                  <li><span>03</span><div><strong>Measure by category</strong><p>Category accuracy reports expose bias, but never substitute for the exact-model evidence used to price an item.</p></div></li>
                 </ol>
-                <p class="fine-print">Local results are descriptive, not a guarantee of future profit. Larger, cleaner samples make calibration more useful.</p>
+                <p class="fine-print">When no verified closing history exists, BidAI Pro must say so. Forecast confidence improves only as comparable and outcome evidence accumulates.</p>
               </aside>
             </div>
           </section>
@@ -279,17 +286,24 @@
             <div class="view-intro compact">
               <div>
                 <span class="section-kicker"><i></i> RESEARCH INGESTION</span>
-                <h2 id="sources-heading">Know exactly what the model is seeing.</h2>
-                <p>Published research passes, authorized scheduled feeds, imported files, and manual records converge here with their source state preserved.</p>
+                <h2 id="sources-heading">Trace every number to its source.</h2>
+                <p>Automated feeds, imported files, and direct records converge here with observation times, listing links, identifiers, and source state preserved.</p>
               </div>
               <button class="button button-dark" type="button" data-export-workspace><span aria-hidden="true">⇩</span> Export private workspace</button>
             </div>
 
             <div class="source-status-card">
               <div class="source-status-icon" aria-hidden="true">✓</div>
-              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published research snapshots are available. The latest observation was <span data-research-observed>not yet published</span>. Authorized feeds refresh through GitHub Actions when configured; private CSV, JSON, and manual records stay on this device.</p></div>
-              <span class="status-chip"><i></i> SOURCE LABELED</span>
+              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published listing snapshots are available. The latest source observation was <span data-research-observed>not yet received</span>. Automated feeds refresh through GitHub Actions when configured; imported and direct records stay on this device.</p></div>
+              <span class="status-chip"><i></i> PROVENANCE TRACKED</span>
             </div>
+
+            <dl class="source-metadata source-metadata-grid" aria-label="Source pipeline metadata">
+              <div><dt>Ingestion mode</dt><dd>Automated feed + direct records</dd></div>
+              <div><dt>Refresh cadence</dt><dd>Scheduled twice hourly</dd></div>
+              <div><dt>Latest observation</dt><dd data-research-observed>Awaiting first snapshot</dd></div>
+              <div><dt>Published records</dt><dd data-research-count>0</dd></div>
+            </dl>
 
             <section class="apify-connector-card" aria-labelledby="apify-connector-heading">
               <div class="connector-card-head">
@@ -298,7 +312,7 @@
                   <div>
                     <span class="section-kicker"><i></i> AUTOMATION BRIDGE</span>
                     <h3 id="apify-connector-heading">Apify Dataset connector</h3>
-                    <p>Turn structured collector results into fresh BidAI Pro research snapshots without exposing credentials to the public site.</p>
+                    <p>Turn structured collector results into timestamped auction records without exposing credentials to the public site.</p>
                   </div>
                 </div>
                 <span class="connector-installed"><i aria-hidden="true"></i> CONNECTOR CODE INSTALLED</span>
@@ -318,7 +332,7 @@
                 <li>
                   <span class="connector-step">03</span>
                   <span class="connector-flow-icon" aria-hidden="true">&#8635;</span>
-                  <div><strong>Scheduled BidAI import</strong><p>GitHub Actions refreshes the published snapshot feed on your chosen cadence.</p></div>
+                  <div><strong>Scheduled BidAI import</strong><p>GitHub Actions refreshes observed prices, bid counts, ending times, and source links on schedule.</p></div>
                 </li>
               </ol>
 
@@ -340,12 +354,12 @@
                   <span>or drop files here · up to 5,000 rows each</span>
                 </button>
                 <div class="format-row">
-                  <div><strong>Repeated listing IDs</strong><span>update the item and add an observation</span></div>
+                  <div><strong>Repeated listing IDs</strong><span>update the observed price and extend its historical curve</span></div>
                   <button class="text-button" type="button" data-download-template>Download CSV template <span aria-hidden="true">↓</span></button>
                 </div>
                 <details class="field-reference">
                   <summary>Accepted field names</summary>
-                  <p><code>id</code>, <code>title</code>, <code>category</code>, <code>url</code>, <code>current_bid</code>, <code>shipping</code>, <code>bid_count</code>, <code>ends_at</code>, <code>expected_close</code>, <code>resale_low</code>, <code>resale_median</code>, <code>resale_high</code>, <code>demand</code>, <code>rarity</code>, <code>identity_confidence</code>, <code>condition_confidence</code>, <code>final_price</code>, <code>status</code>, <code>observed_at</code>.</p>
+                  <p><code>id</code>, <code>title</code>, <code>category</code>, <code>model_key</code>, <code>url</code>, <code>current_bid</code>, <code>shipping</code>, <code>bid_count</code>, <code>ends_at</code>, <code>source_estimate</code>, <code>resale_low</code>, <code>resale_median</code>, <code>resale_high</code>, <code>demand</code>, <code>rarity</code>, <code>identity_confidence</code>, <code>condition_confidence</code>, <code>final_price</code>, <code>status</code>, <code>observed_at</code>.</p>
                 </details>
               </section>
 
@@ -355,12 +369,13 @@
                   <div class="field span-2"><label for="snapshot-title">Listing title *</label><input id="snapshot-title" name="title" required placeholder="e.g. Vintage camera body and lens" /></div>
                   <div class="field"><label for="snapshot-id">Listing ID *</label><input id="snapshot-id" name="externalId" required placeholder="SGW-123456" /></div>
                   <div class="field"><label for="snapshot-category">Category *</label><input id="snapshot-category" name="category" required placeholder="Cameras & optics" /></div>
+                  <div class="field span-2"><label for="snapshot-model-key">Normalized model key</label><input id="snapshot-model-key" name="modelKey" placeholder="maker:model:variant:condition:bundle" /></div>
                   <div class="field span-2"><label for="snapshot-url">Listing URL</label><input id="snapshot-url" name="url" type="url" inputmode="url" placeholder="https://example.com/listing/123456" /></div>
                   <div class="field"><label for="snapshot-current">Current bid *</label><span class="money-input"><b>$</b><input id="snapshot-current" name="currentBid" type="number" min="0" step="0.01" required placeholder="0.00" /></span></div>
                   <div class="field"><label for="snapshot-shipping">Inbound shipping</label><span class="money-input"><b>$</b><input id="snapshot-shipping" name="shipping" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
                   <div class="field"><label for="snapshot-bids">Bid count</label><input id="snapshot-bids" name="bidCount" type="number" min="0" step="1" placeholder="0" /></div>
                   <div class="field"><label for="snapshot-ends">Auction ends</label><input id="snapshot-ends" name="endsAt" type="datetime-local" /></div>
-                  <div class="field"><label for="snapshot-expected">Expected final bid</label><span class="money-input"><b>$</b><input id="snapshot-expected" name="expectedClose" type="number" min="0" step="0.01" placeholder="Model if blank" /></span></div>
+                  <div class="field"><label for="snapshot-expected">Source estimate</label><span class="money-input"><b>$</b><input id="snapshot-expected" name="expectedClose" type="number" min="0" step="0.01" placeholder="Optional; not a learned forecast" /></span></div>
                   <div class="field"><label for="snapshot-final">Actual final bid</label><span class="money-input"><b>$</b><input id="snapshot-final" name="finalPrice" type="number" min="0" step="0.01" placeholder="Add when ended" /></span></div>
                   <div class="field"><label for="snapshot-resale-low">Resale low</label><span class="money-input"><b>$</b><input id="snapshot-resale-low" name="resaleLow" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
                   <div class="field"><label for="snapshot-resale-median">Resale median</label><span class="money-input"><b>$</b><input id="snapshot-resale-median" name="resaleMedian" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
@@ -399,11 +414,11 @@
               <aside class="settings-aside">
                 <div class="content-card formula-card">
                   <span class="section-kicker"><i></i> SAFE CEILING</span>
-                  <h3>Bid from the exit backward.</h3>
+                  <h3>Price the exit before placing the bid.</h3>
                   <div class="formula">
                     <span>Conservative resale</span><b>−</b><span>Selling costs</span><b>−</b><span>Target profit</span><b>=</b><strong>Maximum landed cost</strong>
                   </div>
-                  <p>BidAI Pro then removes expected tax, shipping, and buyer premium to calculate the most you should bid—not what it predicts the auction will reach.</p>
+                  <p>BidAI Pro separates the expected closing price from the safe bid ceiling, then removes tax, shipping, premium, selling fees, repair, and loss reserves before calculating what you can afford to bid.</p>
                 </div>
                 <div class="content-card danger-card">
                   <span class="section-kicker"><i></i> LOCAL DATA</span>
@@ -417,8 +432,8 @@
         </div>
 
         <footer class="workspace-footer">
-          <p>BidAI Pro estimates are decision support—not appraisals, guarantees, or financial advice.</p>
-          <p><span class="footer-dot"></span> Research workspace · <span data-current-year>2026</span></p>
+          <p>Forecasts are evidence-based estimates, not appraisals or guarantees. Verify the listing and all costs before bidding.</p>
+          <p><span class="footer-dot"></span> Auction intelligence · <span data-current-year>2026</span></p>
         </footer>
       </main>
     </div>

@@ -34,212 +34,6 @@
     };
   })();
 
-  const now = Date.now();
-  const hoursFromNow = (hours) => new Date(now + hours * 3600000).toISOString();
-  const observedBefore = (hours) => new Date(now - hours * 3600000).toISOString();
-
-  const DEMO_ITEMS = [
-    {
-      id: "demo-gold-ring",
-      externalId: "SGW-DEMO-8726",
-      source: "Illustrative ShopGoodwill snapshot",
-      title: "Unmarked yellow-gold ring with old-cut diamond",
-      category: "Jewelry & precious metal",
-      initials: "Au",
-      accent: "gold",
-      status: "active",
-      currentBid: 124,
-      shipping: 9.95,
-      bidCount: 11,
-      endsAt: hoursFromNow(6.4),
-      expectedClose: 215,
-      resaleLow: 410,
-      resaleMedian: 480,
-      resaleHigh: 545,
-      identityConfidence: 0.81,
-      conditionConfidence: 0.74,
-      rarity: 48,
-      demand: 92,
-      compCount: 8,
-      compRecencyDays: 12,
-      identifiedAs: "Likely 14k ring, approximately 8.6g gross, with a possible 0.35ct old-cut stone",
-      repairReserve: 20,
-      outboundShipping: 10,
-      returnReserve: 16,
-      illustrative: true,
-      observations: [
-        { observedAt: observedBefore(40), currentBid: 46, bidCount: 3, expectedClose: 172, status: "active" },
-        { observedAt: observedBefore(18), currentBid: 81, bidCount: 7, expectedClose: 194, status: "active" },
-        { observedAt: observedBefore(1), currentBid: 124, bidCount: 11, expectedClose: 215, status: "active" },
-      ],
-      evidence: [
-        { label: "Identity", value: "Hallmark shape visible" },
-        { label: "Demand", value: "Liquid gold downside" },
-        { label: "Risk", value: "Stone untested" },
-      ],
-    },
-    {
-      id: "demo-leica",
-      externalId: "SGW-DEMO-4412",
-      source: "Illustrative ShopGoodwill snapshot",
-      title: "Leica M6 classic 0.72 rangefinder body",
-      category: "Cameras & optics",
-      initials: "L",
-      accent: "red",
-      status: "active",
-      currentBid: 850,
-      shipping: 18.75,
-      bidCount: 24,
-      endsAt: hoursFromNow(19.2),
-      expectedClose: 1120,
-      resaleLow: 1480,
-      resaleMedian: 1760,
-      resaleHigh: 1995,
-      identityConfidence: 0.94,
-      conditionConfidence: 0.62,
-      rarity: 56,
-      demand: 96,
-      compCount: 12,
-      compRecencyDays: 9,
-      identifiedAs: "Leica M6 Classic 0.72, black chrome, likely late-1980s production",
-      repairReserve: 185,
-      outboundShipping: 24,
-      returnReserve: 65,
-      illustrative: true,
-      observations: [
-        { observedAt: observedBefore(66), currentBid: 390, bidCount: 10, expectedClose: 930, status: "active" },
-        { observedAt: observedBefore(25), currentBid: 645, bidCount: 17, expectedClose: 1030, status: "active" },
-        { observedAt: observedBefore(2), currentBid: 850, bidCount: 24, expectedClose: 1120, status: "active" },
-      ],
-      evidence: [
-        { label: "Identity", value: "Body details match M6" },
-        { label: "Demand", value: "12 recent comps" },
-        { label: "Risk", value: "Meter not verified" },
-      ],
-    },
-    {
-      id: "demo-nes",
-      externalId: "SGW-DEMO-9103",
-      source: "Illustrative ShopGoodwill snapshot",
-      title: "Nintendo NES console with ROB and accessories",
-      category: "Vintage electronics",
-      initials: "8",
-      accent: "green",
-      status: "active",
-      currentBid: 62,
-      shipping: 22.5,
-      bidCount: 8,
-      endsAt: hoursFromNow(31),
-      expectedClose: 96,
-      resaleLow: 175,
-      resaleMedian: 225,
-      resaleHigh: 285,
-      identityConfidence: 0.91,
-      conditionConfidence: 0.46,
-      rarity: 42,
-      demand: 84,
-      compCount: 9,
-      compRecencyDays: 23,
-      identifiedAs: "Front-loading NES bundle with ROB, Zapper, two controllers, and loose cables",
-      repairReserve: 38,
-      outboundShipping: 27,
-      returnReserve: 20,
-      illustrative: true,
-      observations: [
-        { observedAt: observedBefore(48), currentBid: 28, bidCount: 3, expectedClose: 73, status: "active" },
-        { observedAt: observedBefore(4), currentBid: 62, bidCount: 8, expectedClose: 96, status: "active" },
-      ],
-      evidence: [
-        { label: "Contents", value: "ROB raises bundle value" },
-        { label: "Demand", value: "Broad collector market" },
-        { label: "Risk", value: "Console untested" },
-      ],
-    },
-    {
-      id: "demo-sterling",
-      externalId: "SGW-DEMO-2871",
-      source: "Illustrative ShopGoodwill snapshot",
-      title: "Mixed sterling flatware lot, 1.34kg gross",
-      category: "Jewelry & precious metal",
-      initials: "Ag",
-      accent: "silver",
-      status: "active",
-      currentBid: 185,
-      shipping: 14.25,
-      bidCount: 14,
-      endsAt: hoursFromNow(10.7),
-      expectedClose: 310,
-      resaleLow: 465,
-      resaleMedian: 540,
-      resaleHigh: 630,
-      identityConfidence: 0.88,
-      conditionConfidence: 0.82,
-      rarity: 28,
-      demand: 79,
-      compCount: 7,
-      compRecencyDays: 6,
-      identifiedAs: "Predominantly .925 sterling service pieces; knives may include weighted handles",
-      repairReserve: 8,
-      outboundShipping: 18,
-      returnReserve: 12,
-      illustrative: true,
-      observations: [
-        { observedAt: observedBefore(35), currentBid: 95, bidCount: 7, expectedClose: 258, status: "active" },
-        { observedAt: observedBefore(3), currentBid: 185, bidCount: 14, expectedClose: 310, status: "active" },
-      ],
-      evidence: [
-        { label: "Identity", value: ".925 marks pictured" },
-        { label: "Floor", value: "Metal value supports exit" },
-        { label: "Risk", value: "Gross weight includes fill" },
-      ],
-    },
-    {
-      id: "demo-omega",
-      externalId: "SGW-DEMO-5588",
-      source: "Illustrative ShopGoodwill snapshot",
-      title: "Omega Seamaster automatic wristwatch",
-      category: "Watches",
-      initials: "O",
-      accent: "blue",
-      status: "active",
-      currentBid: 390,
-      shipping: 15.99,
-      bidCount: 16,
-      endsAt: hoursFromNow(48),
-      expectedClose: 675,
-      resaleLow: 980,
-      resaleMedian: 1220,
-      resaleHigh: 1480,
-      identityConfidence: 0.82,
-      conditionConfidence: 0.53,
-      rarity: 61,
-      demand: 89,
-      compCount: 6,
-      compRecencyDays: 18,
-      identifiedAs: "Likely 1960s Omega Seamaster reference 166.010, possibly caliber 562",
-      repairReserve: 250,
-      outboundShipping: 14,
-      returnReserve: 60,
-      illustrative: true,
-      observations: [
-        { observedAt: observedBefore(55), currentBid: 215, bidCount: 9, expectedClose: 560, status: "active" },
-        { observedAt: observedBefore(5), currentBid: 390, bidCount: 16, expectedClose: 675, status: "active" },
-      ],
-      evidence: [
-        { label: "Reference", value: "Dial and case match" },
-        { label: "Demand", value: "Durable vintage demand" },
-        { label: "Risk", value: "Movement not pictured" },
-      ],
-    },
-  ];
-
-  const ILLUSTRATIVE_OUTCOMES = [
-    { category: "Jewelry & precious metal", predicted: 198, actual: 226, illustrative: true },
-    { category: "Jewelry & precious metal", predicted: 342, actual: 321, illustrative: true },
-    { category: "Cameras & optics", predicted: 980, actual: 1065, illustrative: true },
-    { category: "Vintage electronics", predicted: 118, actual: 104, illustrative: true },
-    { category: "Watches", predicted: 710, actual: 782, illustrative: true },
-  ];
 
   const aliases = {
     externalId: ["externalid", "itemid", "itemnumber", "itemno", "auctionid", "listingid", "id"],
@@ -249,7 +43,7 @@
     shipping: ["shipping", "shippingcost", "shippingandhandling", "inboundshipping", "handling"],
     bidCount: ["bidcount", "bids", "numberofbids"],
     endsAt: ["endsat", "enddate", "endtime", "auctionend", "closeddate", "dateclosed"],
-    expectedClose: ["expectedclose", "predictedfinal", "expectedfinalbid", "projectedclose"],
+    expectedClose: ["expectedclose", "predictedfinal", "expectedfinalbid", "projectedclose", "sourceestimate", "sourcepriceestimate"],
     resaleLow: ["resalelow", "valuelow", "comparablelow"],
     resaleMedian: ["resalemedian", "resalevalue", "estimatedvalue", "comparablemedian"],
     resaleHigh: ["resalehigh", "valuehigh", "comparablehigh"],
@@ -265,6 +59,8 @@
     compCount: ["compcount", "comparables", "soldcomps", "comparablecount"],
     compRecencyDays: ["comprecencydays", "compagedays", "comparablerecencydays"],
     identifiedAs: ["identifiedas", "normalizedidentity", "itemidentity", "model"],
+    modelKey: ["modelkey", "compgroup", "similaritemkey", "normalizedmodel"],
+    forecastBasis: ["forecastbasis", "forecastmethod", "predictionbasis"],
     marketplaceFee: ["marketplacefee", "sellingfee", "resalefeepercent"],
     taxRate: ["taxrate", "salestax", "taxpercent"],
     buyerPremium: ["buyerpremium", "buyerpremiumpercent"],
@@ -277,6 +73,11 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, Number(value) || 0));
   const cleanKey = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normalizedModelKey = (value) => String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s*([:|/])\s*/g, "$1");
   const escapeHtml = (value) => String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -303,21 +104,89 @@
     const parsed = Number(String(value ?? "").replace(/[$,\s]/g, ""));
     return Number.isFinite(parsed) ? parsed : 0;
   };
+  const parseOptionalMoney = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = typeof value === "number" ? value : Number(String(value).replace(/[$,\s]/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  };
   const parseConfidence = (value, fallback) => {
+    if (value === null || value === undefined || value === "") return fallback;
     const parsed = Number(String(value ?? "").replace(/[%\s]/g, ""));
     if (!Number.isFinite(parsed)) return fallback;
     return clamp(parsed > 1 ? parsed / 100 : parsed);
   };
   const parseScore = (value, fallback) => {
+    if (value === null || value === undefined || value === "") return fallback;
     const parsed = Number(String(value ?? "").replace(/[%\s]/g, ""));
     if (!Number.isFinite(parsed)) return fallback;
     return Math.round(clamp(parsed > 1 ? parsed / 100 : parsed) * 100);
+  };
+  const VERIFIED_FORECAST_STATUSES = new Set(["available", "ready", "verified"]);
+  const isVerifiedForecast = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const low = Number(value.low);
+    const expected = Number(value.expected);
+    const high = Number(value.high);
+    const sampleSize = Number(value.sampleSize);
+    const exactModelCount = Number(value.exactModelCount);
+    return VERIFIED_FORECAST_STATUSES.has(String(value.status || "").toLowerCase())
+      && typeof value.modelVersion === "string"
+      && value.modelVersion.trim().length > 0
+      && Number.isFinite(low)
+      && Number.isFinite(expected)
+      && Number.isFinite(high)
+      && low > 0
+      && low <= expected
+      && expected <= high
+      && Number.isFinite(sampleSize)
+      && sampleSize >= 5
+      && Number.isFinite(exactModelCount)
+      && exactModelCount >= 5
+      && Number.isFinite(Date.parse(value.asOf || ""));
   };
   const median = (values) => {
     const sorted = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
     if (!sorted.length) return 0;
     const middle = Math.floor(sorted.length / 2);
     return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  };
+  const quantile = (values, percentile) => {
+    const sorted = values.filter(Number.isFinite).slice().sort((a, b) => a - b);
+    if (!sorted.length) return 0;
+    const position = (sorted.length - 1) * clamp(percentile);
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return sorted[lower];
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+  };
+  const formatDateTime = (value) => {
+    if (value === null || value === undefined || value === "") return "Unknown";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? "Unknown"
+      : date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  };
+  const observedAtFor = (item) => {
+    const observations = Array.isArray(item?.observations) ? item.observations : [];
+    return item?.observedAt || observations.at(-1)?.observedAt || null;
+  };
+  const freshnessFor = (item) => {
+    const observedAt = observedAtFor(item);
+    const timestamp = Date.parse(observedAt || "");
+    if (!Number.isFinite(timestamp)) return { className: "is-unknown", label: "Observation time unknown", short: "unknown age", observedAt: null };
+    const ageMinutes = (Date.now() - timestamp) / 60000;
+    if (ageMinutes < -5) return { className: "is-invalid", label: "Future-dated snapshot", short: "clock error", observedAt };
+    const normalizedAgeMinutes = Math.max(0, ageMinutes);
+    const short = normalizedAgeMinutes < 2
+      ? "just now"
+      : normalizedAgeMinutes < 60
+        ? `${Math.round(normalizedAgeMinutes)}m ago`
+        : normalizedAgeMinutes < 1440
+          ? `${Math.round(normalizedAgeMinutes / 60)}h ago`
+          : `${Math.round(normalizedAgeMinutes / 1440)}d ago`;
+    const className = normalizedAgeMinutes <= 45 ? "is-fresh" : normalizedAgeMinutes <= 120 ? "is-aging" : "is-stale";
+    const label = className === "is-fresh" ? "Fresh snapshot" : className === "is-aging" ? "Delayed snapshot" : "Stale snapshot";
+    return { className, label, short, observedAt };
   };
 
   function loadWorkspace() {
@@ -336,7 +205,8 @@
 
   let workspace = loadWorkspace();
   let activeView = "opportunities";
-  let selectedId = PUBLISHED_RESEARCH.items[0]?.id || "demo-gold-ring";
+  let selectedId = PUBLISHED_RESEARCH.items[0]?.id || workspace.userItems[0]?.id || "";
+  let historicalIndexCache = null;
 
   function saveWorkspace() {
     try {
@@ -349,110 +219,429 @@
   }
 
   function allItems() {
-    return [...PUBLISHED_RESEARCH.items, ...DEMO_ITEMS, ...workspace.userItems].map((item) => ({
+    return [...PUBLISHED_RESEARCH.items, ...workspace.userItems].map((item) => ({
       ...item,
+      status: item.status === "active" && item.endsAt && Date.parse(item.endsAt) <= Date.now() ? "ended" : item.status,
       watched: workspace.watchIds.includes(item.id),
     }));
   }
 
+  function invalidateHistoricalIndex() {
+    historicalIndexCache = null;
+  }
+
+  function comparableKey(comparable) {
+    const stableId = String(comparable.externalId || comparable.id || "").trim().toLowerCase();
+    if (stableId) return `id:${String(comparable.source || "").trim().toLowerCase()}:${stableId}`;
+    const url = safeHttpUrl(comparable.url || comparable.sourceUrl);
+    if (url) return `url:${url.toLowerCase()}`;
+    return `fallback:${[
+      normalizedModelKey(comparable.modelKey),
+      String(comparable.title || "").trim().toLowerCase(),
+      comparable.endedAt || comparable.soldAt || "",
+      String(comparable.source || "").trim().toLowerCase(),
+    ].join("|")}`;
+  }
+
+  function normalizedAuctionComparable(value, fallback = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const finalPrice = Number(value.finalPrice ?? value.soldPrice ?? value.price);
+    if (!(finalPrice > 0)) return null;
+    const endedAt = value.endedAt || value.soldAt || value.endsAt || fallback.endedAt || null;
+    const rawMatchScore = value.matchScore ?? fallback.matchScore;
+    const parsedMatchScore = rawMatchScore === null || rawMatchScore === undefined || rawMatchScore === ""
+      ? null
+      : Number(rawMatchScore);
+    return {
+      id: String(value.id || value.externalId || fallback.id || ""),
+      externalId: String(value.externalId || value.id || fallback.externalId || ""),
+      title: String(value.title || fallback.title || "Comparable auction"),
+      finalPrice,
+      endedAt,
+      observedAt: value.observedAt || null,
+      outcomeObservedAt: value.outcomeObservedAt || value.finalObservedAt || value.capturedAt || value.observedAt || fallback.outcomeObservedAt || null,
+      url: safeHttpUrl(value.url || value.sourceUrl || fallback.url),
+      source: String(value.source || fallback.source || "Recorded auction outcome"),
+      category: String(value.category || fallback.category || "Unclassified"),
+      modelKey: String(value.modelKey || value.compGroup || value.similarItemKey || ""),
+      matchReason: String(value.matchReason || fallback.matchReason || "Exact normalized model"),
+      matchScore: Number.isFinite(parsedMatchScore) ? clamp(parsedMatchScore > 1 ? parsedMatchScore / 100 : parsedMatchScore) : null,
+      bidAtComparableTime: Number(value.bidAtComparableTime || value.currentBidAtMatch || 0) || null,
+      hoursToClose: Number(value.hoursToClose ?? value.timeToCloseHours) || null,
+      observations: Array.isArray(value.observations) ? value.observations.slice(-250) : [],
+    };
+  }
+
+  function historicalIndex() {
+    if (historicalIndexCache) return historicalIndexCache;
+    const byModel = new Map();
+    const byCategory = new Map();
+    const addComparable = (comparable) => {
+      if (!comparable) return;
+      const modelKey = normalizedModelKey(comparable.modelKey);
+      const categoryKey = cleanKey(comparable.category);
+      if (modelKey) {
+        if (!byModel.has(modelKey)) byModel.set(modelKey, []);
+        byModel.get(modelKey).push(comparable);
+      }
+      if (categoryKey) {
+        if (!byCategory.has(categoryKey)) byCategory.set(categoryKey, []);
+        byCategory.get(categoryKey).push(comparable);
+      }
+    };
+    for (const item of allItems()) {
+      const itemObservedAt = observedAtFor(item);
+      for (const entry of Array.isArray(item.auctionComparables) ? item.auctionComparables : []) {
+        addComparable(normalizedAuctionComparable(entry, {
+          category: item.category,
+          source: item.source,
+          outcomeObservedAt: itemObservedAt,
+        }));
+      }
+      if (!(Number(item.finalPrice) > 0) || item.status !== "ended") continue;
+      addComparable(normalizedAuctionComparable(item, {
+        id: item.id,
+        externalId: item.externalId,
+        title: item.title,
+        endedAt: item.endsAt,
+        url: item.url || item.sourceUrl,
+        source: item.source,
+        category: item.category,
+        outcomeObservedAt: item.outcomeObservedAt || item.finalObservedAt || itemObservedAt,
+        matchReason: "Recorded completed auction",
+        matchScore: 1,
+      }));
+    }
+    historicalIndexCache = { byModel, byCategory };
+    return historicalIndexCache;
+  }
+
+  function uniqueComparables(values, target, asOf) {
+    const cutoff = Date.parse(asOf || "") || Date.now();
+    const excludedIds = new Set([target?.id, target?.externalId]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase()));
+    const targetUrl = safeHttpUrl(target?.url || target?.sourceUrl).toLowerCase();
+    const seen = new Set();
+    return values
+      .filter(Boolean)
+      .filter((entry) => !excludedIds.has(String(entry.id || "").trim().toLowerCase())
+        && !excludedIds.has(String(entry.externalId || "").trim().toLowerCase()))
+      .filter((entry) => !targetUrl || safeHttpUrl(entry.url || entry.sourceUrl).toLowerCase() !== targetUrl)
+      .filter((entry) => Number.isFinite(Date.parse(entry.endedAt || "")) && Date.parse(entry.endedAt) <= cutoff)
+      .filter((entry) => Number.isFinite(Date.parse(entry.outcomeObservedAt || "")) && Date.parse(entry.outcomeObservedAt) <= cutoff)
+      .filter((entry) => {
+        const key = comparableKey(entry);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => Date.parse(b.endedAt || "") - Date.parse(a.endedAt || ""))
+      .slice(0, 50);
+  }
+
+  function exactAuctionComparables(item) {
+    const modelKey = normalizedModelKey(item.modelKey);
+    if (!modelKey) return [];
+    const embedded = (Array.isArray(item.auctionComparables) ? item.auctionComparables : [])
+      .map((entry) => normalizedAuctionComparable(entry, {
+        category: item.category,
+        source: item.source,
+        outcomeObservedAt: observedAtFor(item),
+      }))
+      .filter((entry) => normalizedModelKey(entry?.modelKey) === modelKey && Number(entry.matchScore) >= 0.75);
+    const indexed = (historicalIndex().byModel.get(modelKey) || [])
+      .filter((entry) => Number(entry.matchScore) >= 0.75);
+    return uniqueComparables([...embedded, ...indexed], item, observedAtFor(item));
+  }
+
+  function categoryReferenceComparables(item) {
+    const categoryKey = cleanKey(item.category);
+    if (!categoryKey) return [];
+    return uniqueComparables(historicalIndex().byCategory.get(categoryKey) || [], item, observedAtFor(item)).slice(0, 10);
+  }
+
+  function comparableBidAtHorizon(comparable, targetHours) {
+    if (!Number.isFinite(targetHours)) return null;
+    const tolerance = Math.max(2, targetHours * 0.35);
+    if (Number(comparable.bidAtComparableTime) > 0
+      && comparable.hoursToClose !== null
+      && comparable.hoursToClose !== undefined
+      && Number.isFinite(Number(comparable.hoursToClose))
+      && Number(comparable.hoursToClose) >= 0
+      && Math.abs(Number(comparable.hoursToClose) - targetHours) <= tolerance) {
+      return Number(comparable.bidAtComparableTime);
+    }
+    const closeAt = Date.parse(comparable.endedAt || "");
+    if (!Number.isFinite(closeAt)) return null;
+    const matches = (Array.isArray(comparable.observations) ? comparable.observations : [])
+      .map((point) => ({
+        bid: Number(point?.currentBid),
+        hours: (closeAt - Date.parse(point?.observedAt || "")) / 3600000,
+      }))
+      .filter((point) => point.bid > 0 && Number.isFinite(point.hours) && point.hours >= 0)
+      .filter((point) => Math.abs(point.hours - targetHours) <= tolerance)
+      .sort((a, b) => Math.abs(a.hours - targetHours) - Math.abs(b.hours - targetHours));
+    return matches[0]?.bid || null;
+  }
+
+  function observationHorizonHours(item) {
+    const closeAt = Date.parse(item?.endsAt || "");
+    const observedAt = Date.parse(observedAtFor(item) || "");
+    if (!Number.isFinite(closeAt) || !Number.isFinite(observedAt)) return Number.POSITIVE_INFINITY;
+    return Math.max(0, (closeAt - observedAt) / 3600000);
+  }
+
+  function forecastFor(item) {
+    const currentBid = Math.max(0, Number(item.currentBid) || 0);
+    const modelKey = normalizedModelKey(item.modelKey);
+    const comparables = modelKey ? exactAuctionComparables(item) : [];
+    const supplied = item.forecast && typeof item.forecast === "object" ? item.forecast : null;
+    const suppliedExpected = Number(supplied?.expected);
+    const suppliedExact = Math.max(0, Number(supplied?.exactModelCount) || 0);
+    const suppliedAsOf = Date.parse(supplied?.asOf || "");
+    const observedAt = Date.parse(observedAtFor(item) || "");
+    const endsAt = Date.parse(item.endsAt || "");
+    const suppliedIsPointInTime = isVerifiedForecast(supplied)
+      && Boolean(modelKey)
+      && comparables.length >= 5
+      && Number(supplied.low) >= currentBid
+      && (!Number.isFinite(observedAt) || suppliedAsOf <= observedAt + 300000)
+      && (!Number.isFinite(observedAt) || observedAt - suppliedAsOf <= 7200000)
+      && (!Number.isFinite(endsAt) || suppliedAsOf <= endsAt);
+    if (suppliedIsPointInTime) {
+      return {
+        status: "available",
+        expected: Math.max(currentBid, suppliedExpected),
+        low: Math.min(Math.max(currentBid, suppliedExpected), Math.max(currentBid, Number(supplied.low) || suppliedExpected)),
+        high: Math.max(currentBid, suppliedExpected, Number(supplied.high) || suppliedExpected),
+        sampleSize: comparables.length,
+        exactModelCount: comparables.length,
+        curveCount: Math.max(0, Number(supplied.curveCount) || 0),
+        method: String(supplied.method || "Source empirical forecast"),
+        modelVersion: String(supplied.modelVersion || "source-model"),
+        asOf: supplied.asOf || observedAtFor(item),
+        confidence: parseConfidence(supplied.confidence, 0.55 + Math.min(0.35, suppliedExact * 0.025)),
+        reasonCodes: Array.isArray(supplied.reasonCodes) ? supplied.reasonCodes.map(String).slice(0, 8) : [],
+        evidenceIds: Array.isArray(supplied.evidenceIds) ? supplied.evidenceIds.map(String).slice(0, 250) : [],
+        evidenceHash: String(supplied.evidenceHash || ""),
+        comparables,
+        categoryReferences: categoryReferenceComparables(item),
+        sourceEstimate: Number(item.expectedClose) > 0 ? Number(item.expectedClose) : null,
+      };
+    }
+
+    if (comparables.length >= 5) {
+      const targetHours = observationHorizonHours(item);
+      const curveComparableValues = currentBid > 0
+        ? comparables
+            .map((entry) => ({ entry, matchedBid: comparableBidAtHorizon(entry, targetHours) }))
+            .filter(({ matchedBid }) => Number(matchedBid) > 0)
+            .map(({ entry, matchedBid }) => currentBid * (entry.finalPrice / matchedBid))
+        : [];
+      const values = curveComparableValues.length >= 5
+        ? curveComparableValues
+        : comparables.map((entry) => entry.finalPrice);
+      const expected = Math.max(currentBid, quantile(values, 0.5));
+      return {
+        status: "available",
+        expected,
+        low: Math.max(currentBid, quantile(values, 0.2)),
+        high: Math.max(expected, quantile(values, 0.8)),
+        sampleSize: comparables.length,
+        exactModelCount: comparables.length,
+        curveCount: curveComparableValues.length,
+        method: curveComparableValues.length >= 5 ? "Same-model time-to-close terminal uplift" : "Same-model completed-auction distribution",
+        modelVersion: "empirical-close-v1",
+        asOf: observedAtFor(item),
+        confidence: clamp(0.5 + Math.min(0.38, comparables.length * 0.035) + Math.min(0.1, curveComparableValues.length * 0.015)),
+        reasonCodes: [],
+        comparables,
+        categoryReferences: categoryReferenceComparables(item),
+        sourceEstimate: Number(item.expectedClose) > 0 ? Number(item.expectedClose) : null,
+      };
+    }
+
+    return {
+      status: "insufficient",
+      expected: null,
+      low: null,
+      high: null,
+      sampleSize: comparables.length,
+      exactModelCount: comparables.length,
+      curveCount: comparables.filter((entry) => Number(entry.bidAtComparableTime) > 0).length,
+      method: item.modelKey ? `Insufficient exact-model outcomes (${comparables.length}/5)` : "A normalized model key is required",
+      modelVersion: "empirical-close-v1",
+      asOf: observedAtFor(item),
+      confidence: 0,
+      reasonCodes: [item.modelKey ? "MINIMUM_EXACT_COMPS_NOT_MET" : "MODEL_KEY_MISSING"],
+      comparables,
+      categoryReferences: categoryReferenceComparables(item),
+      sourceEstimate: Number(item.expectedClose) > 0 ? Number(item.expectedClose) : null,
+    };
+  }
+
   function hoursRemaining(item) {
+    if (!item?.endsAt) return Number.POSITIVE_INFINITY;
     const value = new Date(item.endsAt).getTime();
-    return Number.isFinite(value) ? Math.max(0, (value - Date.now()) / 3600000) : 0;
-  }
-
-  function projectFinalBid(currentBid, hours, bidCount) {
-    const timePressure = clamp(1 - hours / 168);
-    const activity = clamp(Math.log2((Number(bidCount) || 0) + 1) / 6);
-    const lift = 1 + 0.34 * (0.35 + 0.45 * timePressure + 0.2 * activity);
-    return Math.max(currentBid, Math.round(currentBid * lift));
-  }
-
-  function probabilityAbove(low, middle, high, threshold) {
-    if (!middle || !high) return 0;
-    if (threshold <= low) return 0.96;
-    if (threshold >= high) return 0.04;
-    if (threshold <= middle) return clamp(0.5 + 0.46 * ((middle - threshold) / Math.max(1, middle - low)));
-    return clamp(0.5 - 0.46 * ((threshold - middle) / Math.max(1, high - middle)));
+    return Number.isFinite(value) ? Math.max(0, (value - Date.now()) / 3600000) : Number.POSITIVE_INFINITY;
   }
 
   function assess(item) {
     const s = workspace.settings;
     const hours = hoursRemaining(item);
-    const expectedClose = Number(item.expectedClose) > 0
-      ? Number(item.expectedClose)
-      : projectFinalBid(Number(item.currentBid) || 0, hours, Number(item.bidCount) || 0);
-    const marketplaceFee = Number.isFinite(Number(item.marketplaceFee)) ? Number(item.marketplaceFee) : s.marketplaceFee;
-    const taxRate = Number.isFinite(Number(item.taxRate)) ? Number(item.taxRate) : s.taxRate;
-    const buyerPremium = Number.isFinite(Number(item.buyerPremium)) ? Number(item.buyerPremium) : s.buyerPremium;
-    const outboundShipping = Number.isFinite(Number(item.outboundShipping)) ? Number(item.outboundShipping) : s.outboundShipping;
-    const repairReserve = Number.isFinite(Number(item.repairReserve)) ? Number(item.repairReserve) : s.repairReserve;
-    const returnReserve = Number.isFinite(Number(item.returnReserve)) ? Number(item.returnReserve) : s.returnReserve;
-    const shipping = Number(item.shipping) || 0;
-    const resaleMedian = Number(item.resaleMedian) || 0;
-    const resaleLow = Number(item.resaleLow) || (resaleMedian ? resaleMedian * 0.82 : 0);
-    const resaleHigh = Number(item.resaleHigh) || (resaleMedian ? resaleMedian * 1.18 : 0);
+    const configuredNumber = (value, fallback) => value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+      ? Number(fallback) || 0
+      : Number(value);
+    const forecast = forecastFor(item);
+    const currentBid = Math.max(0, Number(item.currentBid) || 0);
+    const expectedClose = forecast.status === "available" ? Number(forecast.expected) : null;
+    const modeledBid = expectedClose ?? currentBid;
+    const marketplaceFee = configuredNumber(item.marketplaceFee, s.marketplaceFee);
+    const taxRate = configuredNumber(item.taxRate, s.taxRate);
+    const buyerPremium = configuredNumber(item.buyerPremium, s.buyerPremium);
+    const outboundShipping = configuredNumber(item.outboundShipping, s.outboundShipping);
+    const repairReserve = configuredNumber(item.repairReserve, s.repairReserve);
+    const returnReserve = configuredNumber(item.returnReserve, s.returnReserve);
+    const hasNumericShipping = item.shipping !== null
+      && item.shipping !== undefined
+      && item.shipping !== ""
+      && Number.isFinite(Number(item.shipping));
+    const shippingIsUnacceptedEstimate = item.shippingQuoted === null
+      && item.shippingAssumed !== null
+      && item.shippingAssumed !== undefined
+      && item.shippingEstimateAccepted !== true;
+    const shippingKnown = hasNumericShipping && item.shippingKnown !== false && !shippingIsUnacceptedEstimate;
+    const shipping = shippingKnown ? Math.max(0, Number(item.shipping)) : 0;
+    const resaleModelKey = normalizedModelKey(item.modelKey);
+    const evidenceCutoff = Date.parse(observedAtFor(item) || "") || Date.now();
+    const qualifyingResaleEvidence = (Array.isArray(item.comparableSales) ? item.comparableSales : [])
+      .filter((entry) => Number(entry?.soldPrice ?? entry?.finalPrice ?? entry?.price) > 0)
+      .filter((entry) => resaleModelKey && normalizedModelKey(entry?.modelKey || entry?.compGroup || entry?.similarItemKey) === resaleModelKey)
+      .filter((entry) => {
+        const rawScore = entry?.matchScore;
+        const parsedScore = rawScore === null || rawScore === undefined || rawScore === "" ? null : Number(rawScore);
+        const matchScore = Number.isFinite(parsedScore) ? clamp(parsedScore > 1 ? parsedScore / 100 : parsedScore) : null;
+        return matchScore !== null && matchScore >= 0.75;
+      })
+      .filter((entry) => Boolean(entry?.id || entry?.externalId || safeHttpUrl(entry?.url || entry?.sourceUrl)))
+      .filter((entry) => {
+        const ended = Date.parse(entry?.soldAt || entry?.endedAt || "");
+        const knownAt = Date.parse(entry?.outcomeObservedAt || entry?.finalObservedAt || entry?.capturedAt || entry?.observedAt || observedAtFor(item) || "");
+        return Number.isFinite(ended) && ended <= evidenceCutoff && Number.isFinite(knownAt) && knownAt <= evidenceCutoff;
+      });
+    const uniqueResaleEvidence = [...new Map(qualifyingResaleEvidence.map((entry) => [comparableKey(entry), entry])).values()];
+    const resaleEvidenceCount = uniqueResaleEvidence.length;
+    const comparableResalePrices = uniqueResaleEvidence.map((entry) => Number(entry.soldPrice ?? entry.finalPrice ?? entry.price));
+    const intrinsicQuoteAt = Date.parse(item.valuationBasis?.referenceObservedAt || "");
+    const hasIntrinsicEvidence = item.intrinsicValueEvidence === true
+      && Number(item.valuationBasis?.grossWeightGrams) > 0
+      && Number(item.valuationBasis?.reference14kMeltPerGram) > 0
+      && Number.isFinite(intrinsicQuoteAt)
+      && intrinsicQuoteAt <= evidenceCutoff
+      && evidenceCutoff - intrinsicQuoteAt <= 86400000;
+    const hasComparableResaleEvidence = resaleEvidenceCount >= 3;
+    const sourceResaleLow = Math.max(0, Number(item.resaleLow) || 0);
+    const sourceResaleMedian = Math.max(0, Number(item.resaleMedian) || 0);
+    const sourceResaleHigh = Math.max(0, Number(item.resaleHigh) || 0);
+    const resaleLow = hasComparableResaleEvidence ? quantile(comparableResalePrices, 0.2) : sourceResaleLow;
+    const resaleMedian = hasComparableResaleEvidence ? quantile(comparableResalePrices, 0.5) : sourceResaleMedian;
+    const resaleHigh = hasComparableResaleEvidence ? quantile(comparableResalePrices, 0.8) : sourceResaleHigh;
     const landedAt = (bid) => ((Math.max(0, bid) * (1 + buyerPremium / 100) + shipping) * (1 + taxRate / 100));
-    const acquisition = landedAt(expectedClose);
+    const buyerPremiumCost = modeledBid * buyerPremium / 100;
+    const acquisitionSubtotal = modeledBid + buyerPremiumCost + shipping;
+    const taxCost = acquisitionSubtotal * taxRate / 100;
+    const acquisition = acquisitionSubtotal + taxCost;
+    const currentAcquisition = landedAt(currentBid);
     const netResale = (sale) => sale * (1 - marketplaceFee / 100) - outboundShipping - repairReserve - returnReserve;
     const netLow = netResale(resaleLow);
     const netMedian = netResale(resaleMedian);
     const netHigh = netResale(resaleHigh);
-    const profitLow = netLow - acquisition;
-    const profitExpected = netMedian - acquisition;
-    const profitHigh = netHigh - acquisition;
+    const hasResaleEvidence = resaleMedian > 0
+      && resaleLow > 0
+      && resaleLow <= resaleMedian
+      && resaleHigh >= resaleMedian
+      && (hasComparableResaleEvidence || hasIntrinsicEvidence);
+    const hasForecast = forecast.status === "available";
+    const hasDecisionInputs = hasResaleEvidence && shippingKnown;
+    const profitLow = hasForecast && hasDecisionInputs ? netLow - landedAt(forecast.high) : null;
+    const profitExpected = hasForecast && hasDecisionInputs ? netMedian - acquisition : null;
+    const profitHigh = hasForecast && hasDecisionInputs ? netHigh - landedAt(forecast.low) : null;
+    const profitAtCurrentBid = hasDecisionInputs ? netMedian - currentAcquisition : null;
     const conservativeResale = resaleLow + Math.max(0, resaleMedian - resaleLow) * 0.2;
     const desiredProfit = Math.max(Number(s.minimumProfit) || 0, conservativeResale * (Number(s.targetMargin) || 0) / 100);
     const maximumLanded = Math.max(0, netResale(conservativeResale) - desiredProfit);
-    const maxBid = Math.max(0, (maximumLanded / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100));
-    const breakEvenSale = (acquisition + outboundShipping + repairReserve + returnReserve) / Math.max(0.05, 1 - marketplaceFee / 100);
-    const probabilityProfit = probabilityAbove(resaleLow, resaleMedian, resaleHigh, breakEvenSale);
-    const compCoverage = clamp(Math.log2((Number(item.compCount) || 0) + 1) / 4);
-    const recency = clamp(1 - (Number(item.compRecencyDays) || 365) / 365);
+    const maxBid = hasDecisionInputs
+      ? Math.max(0, (maximumLanded / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
+      : null;
+    const comparableCount = Math.max(Number(item.compCount) || 0, forecast.exactModelCount || 0);
+    const compCoverage = clamp(Math.log2(comparableCount + 1) / 4);
+    const suppliedRecencyDays = Number(item.compRecencyDays);
+    const compRecencyDays = Number.isFinite(suppliedRecencyDays) && suppliedRecencyDays >= 0
+      ? suppliedRecencyDays
+      : 365;
+    const recency = clamp(1 - compRecencyDays / 365);
     const confidence = clamp(
-      (Number(item.identityConfidence) || 0.35) * 0.28 +
-      (Number(item.conditionConfidence) || 0.35) * 0.2 +
+      parseConfidence(item.identityConfidence, 0.35) * 0.28 +
+      parseConfidence(item.conditionConfidence, 0.35) * 0.2 +
       compCoverage * 0.25 +
       recency * 0.12 +
-      clamp((Number(item.demand) || 50) / 100) * 0.15,
+      clamp((Number(item.demand) || 50) / 100) * 0.1 +
+      forecast.confidence * 0.05,
     );
-    const roi = profitExpected / Math.max(1, acquisition);
+    const roi = profitExpected === null ? null : profitExpected / Math.max(1, acquisition);
     const marginComponent = clamp((roi + 0.15) / 1.15);
     const urgency = clamp(1 - hours / 72);
     const rawScore = 100 * clamp(
-      probabilityProfit * 0.3 +
-      marginComponent * 0.24 +
-      clamp((Number(item.demand) || 50) / 100) * 0.16 +
-      confidence * 0.15 +
+      marginComponent * 0.34 +
+      clamp((Number(item.demand) || 50) / 100) * 0.2 +
+      confidence * 0.2 +
       clamp((Number(item.rarity) || 0) / 100) * 0.1 +
-      urgency * 0.05,
+      urgency * 0.06 +
+      forecast.confidence * 0.1,
     );
-    const hasResaleEvidence = resaleMedian > 0;
-    const score = hasResaleEvidence ? Math.round(rawScore) : 15;
+    const freshness = freshnessFor(item);
+    const endTimestamp = Date.parse(item.endsAt || "");
+    const actionableSnapshot = item.status === "active"
+      && Number.isFinite(endTimestamp)
+      && endTimestamp > Date.now()
+      && currentBid > 0
+      && (freshness.className === "is-fresh" || freshness.className === "is-aging");
+    const score = hasForecast && hasDecisionInputs && actionableSnapshot
+      ? Math.round(rawScore)
+      : Math.min(35, hasResaleEvidence ? Math.round(rawScore) : 15);
     let signal = "research";
-    if (hasResaleEvidence && (profitExpected < 0 || maxBid < Number(item.currentBid) * 0.9)) signal = "avoid";
-    else if (hasResaleEvidence && score >= 70 && maxBid > Number(item.currentBid)) signal = "candidate";
-    else if (hasResaleEvidence && score >= 48) signal = "watch";
-    if (["candidate", "watch", "research", "avoid"].includes(item.riskGate)) {
-      signal = item.riskGate;
-    }
+    if (hasForecast && hasDecisionInputs && (profitExpected < 0 || maxBid < currentBid * 0.9)) signal = "avoid";
+    else if (hasForecast && hasDecisionInputs && actionableSnapshot && score >= 70 && maxBid > currentBid && profitLow >= Number(s.minimumProfit || 0)) signal = "candidate";
+    else if (hasForecast && hasDecisionInputs && actionableSnapshot && score >= 48 && profitExpected > 0) signal = "watch";
+    if (["research", "avoid"].includes(item.riskGate)) signal = item.riskGate;
     return {
       expectedClose,
+      modeledBid,
+      currentBid,
+      forecast,
+      hasForecast,
       marketplaceFee,
+      marketplaceFeeCost: resaleMedian * marketplaceFee / 100,
       taxRate,
+      taxCost,
       buyerPremium,
+      buyerPremiumCost,
       outboundShipping,
       repairReserve,
       returnReserve,
       shipping,
+      shippingKnown,
       resaleLow,
       resaleMedian,
       resaleHigh,
       acquisition,
+      currentAcquisition,
       sellingCosts: resaleMedian - netMedian,
       profitLow,
       profitExpected,
       profitHigh,
-      probabilityProfit,
+      profitAtCurrentBid,
       confidence: hasResaleEvidence ? confidence : Math.min(confidence, 0.2),
       score,
       signal,
@@ -460,6 +649,10 @@
       roi,
       hours,
       hasResaleEvidence,
+      resaleEvidenceCount,
+      resaleEvidenceType: hasIntrinsicEvidence ? "intrinsic liquidation basis" : `${resaleEvidenceCount} exact-model sold comparable${resaleEvidenceCount === 1 ? "" : "s"}`,
+      hasDecisionInputs,
+      actionableSnapshot,
     };
   }
 
@@ -477,6 +670,7 @@
   function timeLabel(item) {
     if (item.status === "ended") return "Ended";
     const hours = hoursRemaining(item);
+    if (!Number.isFinite(hours)) return "End time unknown";
     if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m left`;
     if (hours < 48) return `${Math.round(hours)}h left`;
     return `${Math.round(hours / 24)}d left`;
@@ -492,36 +686,97 @@
     const selected = selectedId === item.id ? " is-selected" : "";
     const watched = item.watched ? " is-watched" : "";
     const statusText = item.status === "ended" ? "Ended" : timeLabel(item);
+    const freshness = freshnessFor(item);
+    const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
     return `
-      <div class="opportunity-row${selected}" data-select-id="${escapeHtml(item.id)}" role="button" tabindex="0" aria-label="View ${escapeHtml(item.title)} details">
+      <article class="opportunity-row${selected}" data-select-id="${escapeHtml(item.id)}" role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open analysis">
         <div class="item-cell">
           <span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>
           <span class="item-copy">
             <strong>${escapeHtml(item.title)}</strong>
             <small>${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span>${item.publishedResearch ? '<span class="status-pill research-source">RESEARCH SNAPSHOT</span>' : ""}</span>
+            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span>${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.score};--score-color:${scoreColor(a.signal)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
-        <div class="money-cell"><span>Bid</span><strong>${money(item.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids</small></div>
-        <div class="money-cell"><span>Max bid</span><strong>${a.hasResaleEvidence ? money(a.maxBid) : "Needs comps"}</strong><small>${a.hasResaleEvidence ? "downside-aware" : "add resale value"}</small></div>
-        <div class="money-cell"><span>Profit</span><strong class="${a.profitExpected >= 0 ? "positive" : "negative"}">${a.hasResaleEvidence ? money(a.profitExpected) : "—"}</strong><small>${a.hasResaleEvidence ? percent(a.roi) + " ROI" : "not modeled"}</small></div>
-        <button class="row-watch${watched}" type="button" data-watch-id="${escapeHtml(item.id)}" aria-label="${item.watched ? "Remove from" : "Add to"} watchlist" aria-pressed="${item.watched ? "true" : "false"}">${item.watched ? "◆" : "◇"}</button>
-      </div>`;
+        <div class="money-cell"><span>Observed bid</span><strong>${money(item.currentBid)}</strong><small>${a.hasForecast ? `Expected ${money(a.expectedClose)} · ` : "No learned close · "}${Number(item.bidCount) || 0} bids</small></div>
+        <div class="money-cell"><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete"}</strong><small>${a.hasDecisionInputs ? "after all configured costs" : a.shippingKnown ? "add resale evidence" : "shipping required"}</small></div>
+        <div class="money-cell"><span>Expected profit</span><strong class="${a.profitExpected === null ? "" : a.profitExpected >= 0 ? "positive" : "negative"}">${a.profitExpected === null ? "Insufficient" : money(a.profitExpected)}</strong><small>${a.roi === null ? "needs verified forecast" : `${percent(a.roi)} ROI`}</small></div>
+        <div class="row-actions">
+          ${sourceUrl ? `<a class="row-direct-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing title="Open source listing" aria-label="Open ${escapeHtml(item.title)} on its source site">↗</a>` : ""}
+          <button class="row-watch${watched}" type="button" data-watch-id="${escapeHtml(item.id)}" aria-label="${item.watched ? "Remove from" : "Add to"} watchlist" aria-pressed="${item.watched ? "true" : "false"}">${item.watched ? "◆" : "◇"}</button>
+        </div>
+      </article>`;
   }
 
   function curveFor(item, assessment) {
-    const points = Array.isArray(item.observations) ? item.observations.slice(-5) : [];
+    const points = (Array.isArray(item.observations) ? item.observations : [])
+      .filter((point) => Number(point?.currentBid) >= 0)
+      .sort((a, b) => Date.parse(a.observedAt || "") - Date.parse(b.observedAt || ""))
+      .slice(-6);
     const observed = points.map((point, index) => ({
-      label: index === points.length - 1 ? "Now" : `S${Math.max(1, (item.observations.length || points.length) - points.length + index + 1)}`,
+      label: index === points.length - 1
+        ? "Now"
+        : (() => {
+            const date = new Date(point.observedAt);
+            return Number.isNaN(date.getTime())
+              ? `S${index + 1}`
+              : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" });
+          })(),
       value: Number(point.currentBid) || 0,
       observed: true,
       current: index === points.length - 1,
     }));
     if (!observed.length) observed.push({ label: "Now", value: Number(item.currentBid) || 0, observed: true, current: true });
-    if (item.status !== "ended") observed.push({ label: "Close", value: assessment.expectedClose, observed: false, current: false });
+    if (item.status !== "ended" && assessment.hasForecast) {
+      observed.push({ label: "Close", value: assessment.expectedClose, observed: false, current: false });
+    }
     const max = Math.max(...observed.map((point) => point.value), 1);
     return observed.map((point) => ({ ...point, height: Math.max(6, Math.round(point.value / max * 100)) }));
+  }
+
+  function resaleComparablesFor(item) {
+    const cutoff = Date.parse(observedAtFor(item) || "") || Date.now();
+    return (Array.isArray(item.comparableSales) ? item.comparableSales : [])
+      .map((entry) => {
+        const price = Number(entry.soldPrice ?? entry.finalPrice ?? entry.price);
+        if (!(price > 0)) return null;
+        const rawMatchScore = Number(entry.matchScore ?? 0);
+        return {
+          title: String(entry.title || "Comparable sale"),
+          price,
+          endedAt: entry.soldAt || entry.endedAt || null,
+          source: String(entry.source || "Resale market"),
+          url: safeHttpUrl(entry.url || entry.sourceUrl),
+          matchReason: String(entry.matchReason || "Resale comparable"),
+          matchScore: clamp(rawMatchScore > 1 ? rawMatchScore / 100 : rawMatchScore),
+        };
+      })
+      .filter(Boolean)
+      .filter((entry) => Number.isFinite(Date.parse(entry.endedAt || "")) && Date.parse(entry.endedAt) <= cutoff)
+      .sort((a, b) => Date.parse(b.endedAt || "") - Date.parse(a.endedAt || ""))
+      .slice(0, 12);
+  }
+
+  function renderComparableTable(comparables, type) {
+    if (!comparables.length) {
+      return `<div class="no-history-state"><strong>No ${escapeHtml(type)} evidence stored</strong><p>The automated source must attach real completed transactions before this section can support a forecast.</p></div>`;
+    }
+    return `<div class="comparable-sales-list"><table class="comparable-sales-table">
+      <thead><tr><th scope="col">Comparable</th><th scope="col">Match</th><th scope="col">Ended</th><th scope="col">Price</th><th scope="col">Source</th></tr></thead>
+      <tbody>${comparables.slice(0, 8).map((entry) => {
+        const price = Number(entry.finalPrice ?? entry.soldPrice ?? entry.price) || 0;
+        const url = safeHttpUrl(entry.url || entry.sourceUrl);
+        const matchScore = Number(entry.matchScore) > 0 ? `${Math.round(clamp(entry.matchScore) * 100)}%` : "—";
+        return `<tr>
+          <td><strong>${escapeHtml(entry.title || "Comparable result")}</strong><small>${escapeHtml(entry.matchReason || entry.source || "Recorded outcome")}</small></td>
+          <td>${matchScore}</td>
+          <td>${escapeHtml((entry.endedAt || entry.soldAt) ? formatDateTime(entry.endedAt || entry.soldAt) : "Unknown")}</td>
+          <td><strong>${money(price)}</strong></td>
+          <td>${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">View result ↗</a>` : escapeHtml(entry.source || "Recorded")}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
   }
 
   function renderDetail(item) {
@@ -534,57 +789,119 @@
     const a = assess(item);
     const curve = curveFor(item, a);
     const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
+    const freshness = freshnessFor(item);
+    const acquisitionComparables = a.forecast.comparables || [];
+    const resaleComparables = resaleComparablesFor(item);
     const maxWaterfall = Math.max(a.resaleMedian, a.acquisition, a.sellingCosts, Math.abs(a.profitExpected), 1);
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
       ? item.evidence
       : [
-          { label: "Identity", value: "User snapshot" },
-          { label: "Demand", value: a.hasResaleEvidence ? "Resale values supplied" : "Needs sold comps" },
-          { label: "Risk", value: "Verify condition" },
+          { label: "Identity", value: item.identifiedAs || "Identity not yet verified" },
+          { label: "Forecast", value: a.hasForecast ? `${a.forecast.exactModelCount} exact-model outcomes` : "Insufficient exact-model outcomes" },
+          { label: "Costs", value: a.shippingKnown ? "Inbound shipping recorded" : "Inbound shipping missing" },
         ];
     container.innerHTML = `
       <div class="detail-top">
-        <div class="detail-eyebrow"><span class="section-kicker"><i></i> SELECTED ANALYSIS</span>${item.publishedResearch ? '<span class="illustrative-chip live">RESEARCH SNAPSHOT</span>' : item.illustrative ? '<span class="illustrative-chip">ILLUSTRATIVE</span>' : '<span class="illustrative-chip">USER SNAPSHOT</span>'}</div>
+        <div class="detail-eyebrow"><span class="section-kicker"><i></i> SELECTED ANALYSIS</span>${item.publishedResearch ? '<span class="record-source-chip published">PUBLISHED RECORD</span>' : '<span class="record-source-chip private">PRIVATE RECORD</span>'}</div>
         <div class="detail-title-row">
           <span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>
           <div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.externalId)} · ${escapeHtml(item.category)}</p></div>
           <span class="score-ring" style="--score:${a.score};--score-color:${scoreColor(a.signal, true)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
-        <div class="detail-signal"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span>${escapeHtml(item.identifiedAs || "Identity requires user verification")}</span></div>
+        <div class="detail-signal"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span>${escapeHtml(item.identifiedAs || "Identity requires verification")}</span><span class="snapshot-freshness ${freshness.className}">${escapeHtml(freshness.label)} · ${escapeHtml(freshness.short)}</span></div>
       </div>
       <div class="detail-body">
         <div class="bid-metrics">
-          <div class="bid-metric"><span>${item.status === "ended" ? "Final bid" : "Current bid"}</span><strong>${money(item.status === "ended" && item.finalPrice ? item.finalPrice : item.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids · ${timeLabel(item)}</small></div>
-          <div class="bid-metric"><span>Expected close</span><strong>${money(a.expectedClose)}</strong><small>snapshot forecast</small></div>
-          <div class="bid-metric primary"><span>Safe ceiling</span><strong>${a.hasResaleEvidence ? money(a.maxBid) : "—"}</strong><small>target profit preserved</small></div>
+          <div class="bid-metric"><span>${item.status === "ended" ? "Final recorded bid" : "Observed bid"}</span><strong>${money(item.status === "ended" && item.finalPrice ? item.finalPrice : item.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids · ${timeLabel(item)} · ${escapeHtml(freshness.short)}</small></div>
+          <div class="bid-metric"><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient history"}</strong><small>${a.hasForecast ? `${money(a.forecast.low)}–${money(a.forecast.high)}` : `${a.forecast.exactModelCount}/5 exact-model outcomes`}</small></div>
+          <div class="bid-metric primary"><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete inputs"}</strong><small>${a.hasDecisionInputs ? "target profit preserved" : a.shippingKnown ? "resale evidence required" : "shipping cost required"}</small></div>
         </div>
+        <section class="forecast-basis-panel ${a.hasForecast ? "is-available" : "is-insufficient"}">
+          <div class="forecast-basis-head"><div><span>FORECAST BASIS</span><h4>${a.hasForecast ? escapeHtml(a.forecast.method) : "Insufficient similar completed auctions"}</h4></div><strong>${a.hasForecast ? `${Math.round(a.forecast.confidence * 100)}% model confidence` : "Not ranked"}</strong></div>
+          <div class="forecast-basis-grid">
+            <div><span>Exact-model sample</span><strong>${a.forecast.exactModelCount}</strong></div>
+            <div><span>Bid-curve matches</span><strong>${a.forecast.curveCount}</strong></div>
+            <div><span>Model version</span><strong>${escapeHtml(a.forecast.modelVersion)}</strong></div>
+            <div><span>Forecast as of</span><strong>${escapeHtml(formatDateTime(a.forecast.asOf))}</strong></div>
+            <div><span>Evidence cohort</span><strong>${a.forecast.evidenceHash ? escapeHtml(a.forecast.evidenceHash.slice(0, 12)) : `${a.forecast.exactModelCount} revalidated outcomes`}</strong></div>
+          </div>
+          ${a.forecast.sourceEstimate ? `<p class="source-estimate-note">Source estimate: <strong>${money(a.forecast.sourceEstimate)}</strong>. It is displayed for audit but is not treated as a learned forecast without five exact-model outcomes.</p>` : ""}
+          ${!a.hasForecast ? `<p class="no-history-copy">${escapeHtml(a.forecast.method)}. Category-wide outcomes are shown only as reference and are not used to estimate this item.</p>` : ""}
+        </section>
         <section class="detail-section">
-          <div class="detail-section-heading"><h4>Median profit waterfall</h4><span>${a.hasResaleEvidence ? percent(a.probabilityProfit) + " modeled chance of profit" : "Add resale evidence"}</span></div>
+          <div class="detail-section-heading"><h4>${a.hasForecast ? "Expected-close profit waterfall" : "Observed-bid cost position"}</h4><span>${a.hasForecast ? `${money(a.forecast.low)}–${money(a.forecast.high)} close range` : "forecast withheld until evidence threshold is met"}</span></div>
           <div class="waterfall">
             <div class="waterfall-row"><span>Median resale</span><span class="waterfall-track"><i style="--width:${width(a.resaleMedian)}"></i></span><strong>${money(a.resaleMedian)}</strong></div>
-            <div class="waterfall-row cost"><span>Landed cost</span><span class="waterfall-track"><i style="--width:${width(a.acquisition)}"></i></span><strong>−${money(a.acquisition)}</strong></div>
+            <div class="waterfall-row cost"><span>${a.hasForecast ? "Expected landed cost" : "Landed at observed bid"}</span><span class="waterfall-track"><i style="--width:${width(a.acquisition)}"></i></span><strong>−${a.shippingKnown ? money(a.acquisition) : "Shipping missing"}</strong></div>
             <div class="waterfall-row cost"><span>Sell + risk costs</span><span class="waterfall-track"><i style="--width:${width(a.sellingCosts)}"></i></span><strong>−${money(a.sellingCosts)}</strong></div>
-            <div class="waterfall-row profit ${a.profitExpected < 0 ? "negative" : ""}"><span>Modeled profit</span><span class="waterfall-track"><i style="--width:${width(a.profitExpected)}"></i></span><strong>${a.hasResaleEvidence ? money(a.profitExpected) : "—"}</strong></div>
+            <div class="waterfall-row profit ${a.profitExpected !== null && a.profitExpected < 0 ? "negative" : ""}"><span>Expected profit</span><span class="waterfall-track"><i style="--width:${width(a.profitExpected)}"></i></span><strong>${a.profitExpected === null ? "Insufficient inputs" : money(a.profitExpected)}</strong></div>
+          </div>
+          ${a.profitExpected !== null ? `<div class="profit-scenarios">
+            <div class="downside"><span>Conservative case</span><strong>${money(a.profitLow)}</strong><small>${money(a.resaleLow)} resale · ${money(a.forecast.high)} close</small></div>
+            <div class="base"><span>Base case</span><strong>${money(a.profitExpected)}</strong><small>${money(a.resaleMedian)} resale · ${money(a.expectedClose)} close</small></div>
+            <div class="upside"><span>Upside case</span><strong>${money(a.profitHigh)}</strong><small>${money(a.resaleHigh)} resale · ${money(a.forecast.low)} close</small></div>
+          </div>` : ""}
+        </section>
+        <section class="detail-section cost-risk-panel">
+          <div class="detail-section-heading"><h4>Full cost stack</h4><span>${a.shippingKnown ? "configured inputs" : "blocked by missing shipping"}</span></div>
+          <div class="cost-risk-grid">
+            <div><span>${a.hasForecast ? "Expected acquisition bid" : "Observed bid basis"}</span><strong>${money(a.modeledBid)}</strong></div>
+            <div><span>Inbound shipping</span><strong>${a.shippingKnown ? money(a.shipping) : "Unknown"}</strong></div>
+            <div><span>Buyer premium (${a.buyerPremium.toFixed(2)}%)</span><strong>${money(a.buyerPremiumCost)}</strong></div>
+            <div><span>Purchase tax (${a.taxRate.toFixed(2)}%)</span><strong>${money(a.taxCost)}</strong></div>
+            <div><span>Marketplace fee (${a.marketplaceFee.toFixed(2)}%)</span><strong>${money(a.marketplaceFeeCost)}</strong></div>
+            <div><span>Outbound shipping</span><strong>${money(a.outboundShipping)}</strong></div>
+            <div><span>Repair / testing reserve</span><strong>${money(a.repairReserve)}</strong></div>
+            <div><span>Return / loss reserve</span><strong>${money(a.returnReserve)}</strong></div>
           </div>
         </section>
         <section class="detail-section">
-          <div class="detail-section-heading"><h4>Bid development</h4><span>stored snapshots + projected close</span></div>
+          <div class="detail-section-heading"><h4>Bid development</h4><span>timestamped observations${a.hasForecast ? " + evidence-based close" : ""}</span></div>
           <div class="curve-chart" aria-label="Bid snapshot curve">
             ${curve.map((point) => `<span class="curve-bar ${point.observed ? "observed" : ""} ${point.current ? "current" : ""}" title="${escapeHtml(point.label)}: ${money(point.value)}"><i style="--height:${point.height}%"></i><span>${escapeHtml(point.label)}</span></span>`).join("")}
           </div>
-          <div class="curve-caption"><span>Observed: ${money(curve[0].value)}</span><strong>Expected: ${money(a.expectedClose)}</strong></div>
+          <div class="curve-caption"><span>First retained: ${money(curve[0].value)}</span><strong>${a.hasForecast ? `Expected: ${money(a.expectedClose)}` : "Expected close withheld"}</strong></div>
         </section>
         <section class="detail-section">
           <div class="detail-section-heading"><h4>Evidence check</h4><span>${percent(a.confidence)} confidence</span></div>
-          <div class="evidence-grid">${evidence.slice(0, 3).map((entry) => `<div class="evidence-item"><span>${escapeHtml(entry.label)}</span><strong title="${escapeHtml(entry.value)}">${escapeHtml(entry.value)}</strong></div>`).join("")}</div>
+          <div class="evidence-grid">${evidence.slice(0, 4).map((entry) => `<div class="evidence-item"><span>${escapeHtml(entry.label)}</span><strong title="${escapeHtml(entry.value)}">${escapeHtml(entry.value)}</strong></div>`).join("")}</div>
+          <div class="analysis-factors-grid">
+            <div><span>Demand signal</span><strong>${Math.round(Number(item.demand) || 0)}/100</strong></div>
+            <div><span>Rarity signal</span><strong>${Math.round(Number(item.rarity) || 0)}/100</strong></div>
+            <div><span>Identity confidence</span><strong>${percent(parseConfidence(item.identityConfidence, 0))}</strong></div>
+            <div><span>Condition confidence</span><strong>${percent(parseConfidence(item.conditionConfidence, 0))}</strong></div>
+          </div>
+          <div class="risk-summary-card"><span>LISTING-SPECIFIC RISK</span><p>${escapeHtml(item.riskSummary || "No source-specific risk summary was supplied; identity and condition still require independent verification.")}</p><small>Resale basis: ${escapeHtml(a.resaleEvidenceType)}. Inbound shipping: ${a.shippingKnown ? "recorded" : "missing"}.</small></div>
+        </section>
+        <section class="detail-section comparable-sales">
+          <div class="detail-section-heading"><h4>Auction-close comparables</h4><span>${acquisitionComparables.length} exact-model outcomes attached</span></div>
+          ${renderComparableTable(acquisitionComparables, "exact-model auction")}
+        </section>
+        <section class="detail-section comparable-sales">
+          <div class="detail-section-heading"><h4>Resale sold comparables</h4><span>${resaleComparables.length} completed sales attached</span></div>
+          ${renderComparableTable(resaleComparables, "resale sold")}
+        </section>
+        ${a.forecast.categoryReferences.length ? `<section class="detail-section comparable-sales category-reference"><div class="detail-section-heading"><h4>Broader category reference</h4><span>not used in this forecast</span></div>${renderComparableTable(a.forecast.categoryReferences, "category reference")}</section>` : ""}
+        <section class="detail-section detail-source-ledger">
+          <div class="detail-section-heading"><h4>Source and timing</h4><span>audit trail</span></div>
+          <div class="source-metadata-grid">
+            <div><span>Source</span><strong>${escapeHtml(item.source || "Unknown source")}</strong></div>
+            <div><span>Listing ID</span><strong>${escapeHtml(item.externalId || item.id)}</strong></div>
+            <div><span>Observed</span><strong>${escapeHtml(formatDateTime(freshness.observedAt))}</strong><small>${escapeHtml(freshness.short)} · ${escapeHtml(freshness.label)}</small></div>
+            <div><span>Scheduled end</span><strong>${escapeHtml(formatDateTime(item.endsAt))}</strong><small>${escapeHtml(timeLabel(item))}</small></div>
+            <div><span>Bid count</span><strong>${Number(item.bidCount) || 0}</strong></div>
+            <div><span>Inbound shipping basis</span><strong>${a.shippingKnown ? money(a.shipping) : "Unknown"}</strong><small>${item.shippingQuoted === null && item.shippingAssumed ? "assumed, not quoted" : item.shippingKnown === false ? "not supplied" : "recorded input"}</small></div>
+            <div><span>Normalized model key</span><strong title="${escapeHtml(item.modelKey || "Not supplied")}">${escapeHtml(item.modelKey || "Not supplied")}</strong><small>exact-match grouping key</small></div>
+            <div><span>Forecast state</span><strong>${a.hasForecast ? "Verified evidence threshold met" : "Insufficient exact-model history"}</strong><small>${escapeHtml((a.forecast.reasonCodes || []).join(", ") || a.forecast.method)}</small></div>
+          </div>
         </section>
         <div class="detail-actions">
+          ${sourceUrl ? `<a class="button button-dark direct-listing-button" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Open source listing <span aria-hidden="true">↗</span></a>` : ""}
           <button class="button button-primary" type="button" data-watch-id="${escapeHtml(item.id)}">${item.watched ? "Remove watch" : "Watch item"}</button>
           <button class="button button-quiet" type="button" data-update-id="${escapeHtml(item.id)}">Record update</button>
-          ${sourceUrl ? `<a class="button button-quiet" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Open listing</a>` : ""}
         </div>
-        <p class="risk-note">Scores use incomplete market inputs. Inspect the item, verify authenticity, and calculate every fee before deciding to bid.</p>
+        <p class="risk-note">A listing is never promoted from a source estimate alone. BidAI Pro requires real exact-model outcomes for a learned closing forecast and labels stale or incomplete inputs explicitly.</p>
       </div>`;
   }
 
@@ -618,9 +935,10 @@
   function renderStats() {
     const active = allItems().filter((item) => item.status === "active");
     const assessments = active.map(assess);
-    const upside = assessments.reduce((total, item) => total + Math.max(0, item.profitExpected), 0);
+    const forecasted = assessments.filter((item) => item.hasForecast && item.profitExpected !== null);
+    const upside = forecasted.reduce((total, item) => total + Math.max(0, item.profitExpected), 0);
     const urgent = active.filter((item) => hoursRemaining(item) <= 12).length;
-    const confidence = assessments.length ? assessments.reduce((total, item) => total + item.confidence, 0) / assessments.length : 0;
+    const confidence = forecasted.length ? forecasted.reduce((total, item) => total + item.forecast.confidence, 0) / forecasted.length : 0;
     const observations = allItems().reduce((total, item) => total + (Array.isArray(item.observations) ? item.observations.length : 0), 0);
     $("[data-stat-upside]").textContent = money(upside);
     $("[data-stat-urgent]").textContent = String(urgent);
@@ -631,9 +949,18 @@
     $$('[data-research-count]').forEach((el) => { el.textContent = String(PUBLISHED_RESEARCH.items.length); });
     $$('[data-research-observed]').forEach((el) => {
       const observed = PUBLISHED_RESEARCH.observedAt ? new Date(PUBLISHED_RESEARCH.observedAt) : null;
-      el.textContent = observed && !Number.isNaN(observed.getTime())
+      const formatted = observed && !Number.isNaN(observed.getTime())
         ? observed.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
         : "No published pass";
+      const badge = el.closest(".snapshot-freshness");
+      if (badge) {
+        const freshness = freshnessFor({ observedAt: PUBLISHED_RESEARCH.observedAt });
+        badge.classList.remove("is-fresh", "is-aging", "is-stale", "is-invalid", "is-unknown");
+        badge.classList.add(freshness.className);
+        el.textContent = PUBLISHED_RESEARCH.observedAt ? `${formatted} · ${freshness.short}` : formatted;
+      } else {
+        el.textContent = formatted;
+      }
     });
     $$('[data-source-status]').forEach((el) => {
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
@@ -665,10 +992,11 @@
     const empty = $("[data-watch-empty]");
     grid.innerHTML = watched.map((item) => {
       const a = assess(item);
+      const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
       return `<article class="watch-card">
         <div class="watch-card-top"><span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span><div><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.category)} · ${timeLabel(item)}</p></div></div>
-        <div class="watch-card-metrics"><div><span>Current</span><strong>${money(item.currentBid)}</strong></div><div><span>Max bid</span><strong>${a.hasResaleEvidence ? money(a.maxBid) : "—"}</strong></div><div><span>Profit</span><strong>${a.hasResaleEvidence ? money(a.profitExpected) : "—"}</strong></div></div>
-        <div class="watch-card-actions"><button class="button button-primary" type="button" data-open-id="${escapeHtml(item.id)}">Open analysis</button><button class="button button-quiet" type="button" data-watch-id="${escapeHtml(item.id)}">Remove</button></div>
+        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient"}</strong></div><div><span>Safe ceiling</span><strong>${a.hasDecisionInputs ? money(a.maxBid) : "Incomplete"}</strong></div></div>
+        <div class="watch-card-actions"><button class="button button-primary" type="button" data-open-id="${escapeHtml(item.id)}">Open analysis</button>${sourceUrl ? `<a class="button button-dark" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Source listing ↗</a>` : ""}<button class="button button-quiet" type="button" data-watch-id="${escapeHtml(item.id)}">Remove</button></div>
       </article>`;
     }).join("");
     grid.hidden = watched.length === 0;
@@ -677,29 +1005,68 @@
   }
 
   function learningSamples() {
-    const userSamples = workspace.userItems.flatMap((item) => {
+    const calibrationHorizonHours = 6;
+    return allItems().flatMap((item) => {
       if (item.status !== "ended" || !(Number(item.finalPrice) > 0)) return [];
       const observations = Array.isArray(item.observations) ? item.observations : [];
-      const prior = observations.find((entry) => entry.status !== "ended" && Number(entry.expectedClose) > 0)
-        || observations.find((entry) => Number(entry.expectedClose) > 0);
-      const predicted = Number(prior?.expectedClose || item.expectedClose);
+      const endedAt = Date.parse(item.endsAt || "");
+      if (!Number.isFinite(endedAt)) return [];
+      const priorForecasts = observations
+        .filter((entry) => isVerifiedForecast(entry.forecast))
+        .filter((entry) => {
+          const observed = Date.parse(entry.observedAt || "");
+          const forecastAsOf = Date.parse(entry.forecast?.asOf || "");
+          const exactComparables = exactAuctionComparables({ ...item, observedAt: entry.forecast.asOf });
+          const hasEvidenceIds = Object.prototype.hasOwnProperty.call(entry.forecast, "evidenceIds");
+          const evidenceIds = hasEvidenceIds && Array.isArray(entry.forecast.evidenceIds)
+            ? new Set(entry.forecast.evidenceIds.map((id) => String(id).trim().toLowerCase()).filter(Boolean))
+            : null;
+          const comparableKeys = new Set(exactComparables.map((comparable) => comparableKey(comparable)));
+          const evidenceRevalidated = hasEvidenceIds
+            ? evidenceIds !== null
+              && evidenceIds.size >= 5
+              && [...evidenceIds].every((id) => comparableKeys.has(id))
+            : exactComparables.length >= 5;
+          return Number.isFinite(observed)
+            && forecastAsOf <= observed + 300000
+            && observed - forecastAsOf <= 7200000
+            && Number(entry.forecast?.low) >= Math.max(0, Number(entry.currentBid) || 0)
+            && observed <= endedAt
+            && forecastAsOf <= endedAt
+            && evidenceRevalidated;
+        })
+        .map((entry) => ({
+          forecast: entry.forecast,
+          horizonHours: (endedAt - Date.parse(entry.forecast.asOf)) / 3600000,
+        }))
+        .filter((entry) => entry.horizonHours >= 3 && entry.horizonHours <= 9)
+        .sort((a, b) => Math.abs(a.horizonHours - calibrationHorizonHours) - Math.abs(b.horizonHours - calibrationHorizonHours));
+      const prior = priorForecasts[0];
+      const predicted = Number(prior?.forecast?.expected || 0);
       if (!(predicted > 0)) return [];
-      return [{ category: item.category || "Unclassified", predicted, actual: Number(item.finalPrice), illustrative: false }];
+      return [{ category: item.category || "Unclassified", modelKey: item.modelKey || "", predicted, actual: Number(item.finalPrice), horizonHours: prior.horizonHours }];
     });
-    return [...ILLUSTRATIVE_OUTCOMES, ...userSamples];
   }
 
   function renderLearning() {
     const samples = learningSamples();
-    const userCount = samples.filter((sample) => !sample.illustrative).length;
+    if (!samples.length) {
+      $("[data-learning-summary]").innerHTML = `
+        <article class="learning-metric accent"><span>6-hour outcomes</span><strong>0</strong><small>waiting for matched forecast cycles</small></article>
+        <article class="learning-metric"><span>Typical 6-hour error</span><strong>—</strong><small>requires prior forecasts and outcomes</small></article>
+        <article class="learning-metric"><span>Prediction bias</span><strong>—</strong><small>no production sample yet</small></article>
+        <article class="learning-metric"><span>Within 15%</span><strong>—</strong><small>no production sample yet</small></article>`;
+      $("[data-learning-table]").innerHTML = '<tr><td colspan="5"><div class="no-history-state"><strong>No completed 6-hour forecast cycle yet</strong><p>A verified forecast captured three to nine hours before close must be paired with the real final price.</p></div></td></tr>';
+      return;
+    }
     const errors = samples.map((sample) => Math.abs(sample.actual - sample.predicted) / Math.max(1, sample.actual));
     const ratios = samples.map((sample) => sample.actual / Math.max(1, sample.predicted));
     const typicalError = median(errors);
     const bias = median(ratios) - 1;
     const within15 = samples.filter((sample) => Math.abs(sample.actual - sample.predicted) / Math.max(1, sample.actual) <= 0.15).length / Math.max(1, samples.length);
     $("[data-learning-summary]").innerHTML = `
-      <article class="learning-metric accent"><span>Ended outcomes</span><strong>${samples.length}</strong><small>${userCount} user · ${samples.length - userCount} illustrative</small></article>
-      <article class="learning-metric"><span>Typical final-price error</span><strong>${percent(typicalError)}</strong><small>median absolute percentage error</small></article>
+      <article class="learning-metric accent"><span>6-hour outcomes</span><strong>${samples.length}</strong><small>real recorded final prices</small></article>
+      <article class="learning-metric"><span>Typical 6-hour error</span><strong>${percent(typicalError)}</strong><small>median absolute percentage error</small></article>
       <article class="learning-metric"><span>Prediction bias</span><strong>${bias >= 0 ? "+" : ""}${percent(bias)}</strong><small>${bias > 0.02 ? "closes above forecast" : bias < -0.02 ? "closes below forecast" : "near neutral"}</small></article>
       <article class="learning-metric"><span>Within 15%</span><strong>${percent(within15)}</strong><small>share of expected closes in range</small></article>`;
     const groups = Object.groupBy
@@ -713,9 +1080,8 @@
       .map(([category, categorySamples]) => {
         const categoryError = median(categorySamples.map((sample) => Math.abs(sample.actual - sample.predicted) / Math.max(1, sample.actual)));
         const categoryBias = median(categorySamples.map((sample) => sample.actual / Math.max(1, sample.predicted))) - 1;
-        const userSamples = categorySamples.filter((sample) => !sample.illustrative).length;
-        const signal = userSamples === 0 ? "Demo only" : userSamples < 3 ? "Early" : categoryError <= 0.15 ? "Calibrated" : "Learning";
-        return `<tr><td><strong>${escapeHtml(category)}</strong></td><td>${categorySamples.length}</td><td><span class="calibration-bar"><i style="--width:${Math.min(100, categoryError * 300)}%"></i>${percent(categoryError)}</span></td><td>${categoryBias >= 0 ? "+" : ""}${percent(categoryBias)}</td><td><span class="signal-pill ${signal === "Calibrated" ? "candidate" : signal === "Demo only" ? "research" : "watch"}">${signal}</span></td></tr>`;
+        const signal = categorySamples.length < 3 ? "Early" : categoryError <= 0.15 ? "Calibrated" : "Learning";
+        return `<tr><td><strong>${escapeHtml(category)}</strong></td><td>${categorySamples.length}</td><td><span class="calibration-bar"><i style="--width:${Math.min(100, categoryError * 300)}%"></i>${percent(categoryError)}</span></td><td>${categoryBias >= 0 ? "+" : ""}${percent(categoryBias)}</td><td><span class="signal-pill ${signal === "Calibrated" ? "candidate" : "watch"}">${signal}</span></td></tr>`;
       }).join("");
   }
 
@@ -839,6 +1205,12 @@
     return Number.isNaN(parsed.getTime()) ? new Date(fallback).toISOString() : parsed.toISOString();
   }
 
+  function optionalDate(value) {
+    if (value === "" || value === null || value === undefined) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
   function normalizeSnapshot(record, index = 0, sourceName = "Manual entry") {
     const title = String(lookup(record, aliases.title) ?? record.title ?? "").trim();
     if (!title) return null;
@@ -846,30 +1218,41 @@
     const externalId = rawId || `snapshot-${index + 1}`;
     const currentBid = Math.max(0, parseMoney(lookup(record, aliases.currentBid) ?? record.currentBid));
     const finalPrice = Math.max(0, parseMoney(lookup(record, aliases.finalPrice) ?? record.finalPrice));
-    const shipping = Math.max(0, parseMoney(lookup(record, aliases.shipping) ?? record.shipping));
+    const rawShipping = lookup(record, aliases.shipping) ?? record.shipping;
+    const parsedShipping = parseOptionalMoney(rawShipping);
+    const shipping = parsedShipping === null ? null : Math.max(0, parsedShipping);
     const bidCount = Math.max(0, Math.round(Number(lookup(record, aliases.bidCount) ?? record.bidCount) || 0));
-    const endsAt = safeDate(lookup(record, aliases.endsAt) ?? record.endsAt, hoursFromNow(24));
+    const endsAt = optionalDate(lookup(record, aliases.endsAt) ?? record.endsAt);
     const observedAt = safeDate(lookup(record, aliases.observedAt) ?? record.observedAt, new Date().toISOString());
     const statusValue = String(lookup(record, aliases.status) ?? record.status ?? "active").toLowerCase();
-    const status = finalPrice > 0 || statusValue.includes("ended") || statusValue.includes("closed") || new Date(endsAt).getTime() <= Date.now() ? "ended" : "active";
+    const status = finalPrice > 0 || statusValue.includes("ended") || statusValue.includes("closed") || (endsAt && new Date(endsAt).getTime() <= Date.now()) ? "ended" : "active";
     const expectedProvided = parseMoney(lookup(record, aliases.expectedClose) ?? record.expectedClose);
-    const expectedClose = expectedProvided > 0
-      ? expectedProvided
-      : status === "ended" && finalPrice > 0
-        ? finalPrice
-        : projectFinalBid(currentBid, Math.max(0, (new Date(endsAt).getTime() - Date.now()) / 3600000), bidCount);
-    const resaleMedian = Math.max(0, parseMoney(lookup(record, aliases.resaleMedian) ?? record.resaleMedian));
-    const resaleLow = Math.max(0, parseMoney(lookup(record, aliases.resaleLow) ?? record.resaleLow)) || (resaleMedian ? resaleMedian * 0.82 : 0);
-    const resaleHigh = Math.max(0, parseMoney(lookup(record, aliases.resaleHigh) ?? record.resaleHigh)) || (resaleMedian ? resaleMedian * 1.18 : 0);
+    const expectedClose = expectedProvided > 0 ? expectedProvided : 0;
+    const modelKey = String(lookup(record, aliases.modelKey) ?? record.modelKey ?? "").trim();
+    const comparableSales = Array.isArray(record.comparableSales) ? record.comparableSales.slice(0, 50) : [];
+    const qualifyingComparableSales = comparableSales
+      .filter((entry) => modelKey && normalizedModelKey(entry?.modelKey || entry?.compGroup || entry?.similarItemKey) === normalizedModelKey(modelKey))
+      .filter((entry) => {
+        const ended = Date.parse(entry?.soldAt || entry?.endedAt || "");
+        return Number.isFinite(ended) && ended <= Date.parse(observedAt);
+      });
+    const comparablePrices = [...new Map(qualifyingComparableSales
+      .map((entry) => [comparableKey(entry), Number(entry?.soldPrice ?? entry?.finalPrice ?? entry?.price)])
+      .filter(([, value]) => value > 0)).values()];
+    const suppliedResaleMedian = Math.max(0, parseMoney(lookup(record, aliases.resaleMedian) ?? record.resaleMedian));
+    const resaleMedian = suppliedResaleMedian || quantile(comparablePrices, 0.5);
+    const resaleLow = Math.max(0, parseMoney(lookup(record, aliases.resaleLow) ?? record.resaleLow)) || quantile(comparablePrices, 0.2);
+    const resaleHigh = Math.max(0, parseMoney(lookup(record, aliases.resaleHigh) ?? record.resaleHigh)) || quantile(comparablePrices, 0.8);
     const identityConfidence = parseConfidence(lookup(record, aliases.identityConfidence) ?? record.identityConfidence, resaleMedian ? 0.42 : 0.35);
     const conditionConfidence = parseConfidence(lookup(record, aliases.conditionConfidence) ?? record.conditionConfidence, 0.35);
     const demand = parseScore(lookup(record, aliases.demand) ?? record.demand, 50);
     const rarity = parseScore(lookup(record, aliases.rarity) ?? record.rarity, 0);
-    const compCount = Math.max(0, Math.round(Number(lookup(record, aliases.compCount) ?? record.compCount) || (resaleMedian ? 1 : 0)));
+    const compCount = Math.max(0, Math.round(Number(lookup(record, aliases.compCount) ?? record.compCount) || comparablePrices.length));
     const compRecencyDays = Math.max(0, Math.round(Number(lookup(record, aliases.compRecencyDays) ?? record.compRecencyDays) || 365));
     const optionalNumber = (name) => {
       const value = lookup(record, aliases[name]) ?? record[name];
-      return value === "" || value === null || value === undefined ? undefined : Math.max(0, parseMoney(value));
+      const parsed = parseOptionalMoney(value);
+      return parsed === null ? undefined : Math.max(0, parsed);
     };
     const id = `user-${cleanKey(externalId) || cleanKey(title) || Date.now()}`;
     return {
@@ -879,6 +1262,8 @@
       url: String(lookup(record, aliases.url) ?? record.url ?? "").trim() || null,
       title,
       category: String(lookup(record, aliases.category) ?? record.category ?? "Unclassified").trim() || "Unclassified",
+      modelKey,
+      forecastBasis: String(lookup(record, aliases.forecastBasis) ?? record.forecastBasis ?? "").trim(),
       initials: initialsFor({ title }),
       accent: "silver",
       status,
@@ -904,9 +1289,19 @@
       outboundShipping: optionalNumber("outboundShipping"),
       repairReserve: optionalNumber("repairReserve"),
       returnReserve: optionalNumber("returnReserve"),
-      illustrative: false,
+      shippingKnown: shipping !== null,
+      comparableSales,
+      auctionComparables: Array.isArray(record.auctionComparables) ? record.auctionComparables.slice(0, 50) : [],
+      forecast: record.forecast && typeof record.forecast === "object" ? record.forecast : null,
       observedAt,
-      observations: [{ observedAt, currentBid: Math.max(currentBid, finalPrice || 0), bidCount, expectedClose, status }],
+      observations: [{
+        observedAt,
+        currentBid: Math.max(currentBid, finalPrice || 0),
+        bidCount,
+        expectedClose,
+        status,
+        ...(record.forecast && typeof record.forecast === "object" ? { forecast: record.forecast } : {}),
+      }],
       evidence: [
         { label: "Source", value: "User-provided snapshot" },
         { label: "Resale", value: resaleMedian ? "User estimate supplied" : "Needs sold comps" },
@@ -916,6 +1311,7 @@
   }
 
   function mergeSnapshot(snapshot) {
+    invalidateHistoricalIndex();
     const index = workspace.userItems.findIndex((item) => item.id === snapshot.id || cleanKey(item.externalId) === cleanKey(snapshot.externalId));
     if (index >= 0) {
       const existing = workspace.userItems[index];
@@ -962,6 +1358,7 @@
               bidCount: Math.max(0, Math.round(Number(entry.bidCount) || 0)),
               expectedClose: Math.max(0, Number(entry.expectedClose) || 0),
               status: entry.status === "ended" ? "ended" : "active",
+              ...(entry.forecast && typeof entry.forecast === "object" ? { forecast: entry.forecast } : {}),
             }));
           }
           const result = mergeSnapshot(snapshot);
@@ -993,6 +1390,7 @@
       title: item.title,
       externalId: item.externalId,
       category: item.category,
+      modelKey: item.modelKey || "",
       url: item.url || "",
       currentBid: item.currentBid,
       shipping: item.shipping,
@@ -1039,7 +1437,7 @@
       product: "BidAI Pro",
       formatVersion: 1,
       exportedAt: new Date().toISOString(),
-      sourcePolicy: "User-provided snapshots only; no automated ShopGoodwill access.",
+      sourcePolicy: "Production records from published feeds and user-provided snapshots only.",
       settings: workspace.settings,
       watchIds: workspace.watchIds,
       items: workspace.userItems,
@@ -1050,8 +1448,7 @@
 
   function downloadTemplate() {
     const csv = [
-      "id,title,category,url,current_bid,shipping,bid_count,ends_at,expected_close,resale_low,resale_median,resale_high,demand,rarity,identity_confidence,condition_confidence,final_price,status,observed_at",
-      'SGW-123456,"Vintage camera body and lens",Cameras & optics,https://example.com/listing/123456,125,14.95,8,2026-08-05T19:00:00,210,300,375,450,82,35,0.88,0.62,,active,2026-08-01T20:00:00',
+      "id,title,category,model_key,url,current_bid,shipping,bid_count,ends_at,source_estimate,resale_low,resale_median,resale_high,demand,rarity,identity_confidence,condition_confidence,final_price,status,observed_at",
     ].join("\r\n");
     downloadBlob(csv, "bidaipro-snapshot-template.csv", "text/csv;charset=utf-8");
     toast("CSV template downloaded.");
@@ -1116,6 +1513,7 @@
       fillSnapshotForm(updateButton.dataset.updateId);
       return;
     }
+    if (event.target.closest("[data-direct-listing]")) return;
     const row = event.target.closest("[data-select-id]");
     if (row) {
       selectedId = row.dataset.selectId;
@@ -1140,7 +1538,8 @@
     if (event.target.closest("[data-clear-workspace]")) {
       if (window.confirm("Clear imported snapshots, observation history, and your watchlist from this browser?")) {
         workspace = { userItems: [], watchIds: [], settings: { ...workspace.settings } };
-        selectedId = "demo-gold-ring";
+        invalidateHistoricalIndex();
+        selectedId = PUBLISHED_RESEARCH.items[0]?.id || "";
         saveWorkspace();
         renderStats();
         toast("Private workspace data cleared.");
@@ -1162,6 +1561,7 @@
       $("#global-search")?.focus();
     }
     if (event.key === "Escape") closeMenu();
+    if (event.target.closest?.("[data-direct-listing], [data-watch-id]")) return;
     const row = event.target.closest?.("[data-select-id]");
     if (row && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
