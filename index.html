@@ -125,8 +125,8 @@
             <div class="view-intro">
               <div>
                 <span class="section-kicker"><i></i> AUCTION COMMAND CENTER</span>
-                <h2 id="opportunities-heading">Know the exit before you place the bid.</h2>
-                <p>Get a direct YES or NO: test precious-metal pawn profit first, then allow retail resale only when both real price evidence and independent demand proof clear the target.</p>
+                <h2 id="opportunities-heading">Every item. Every exit. Every dollar.</h2>
+                <p>BidAI Pro ranks the strongest evidence-backed profit opportunities first, then opens a complete underwriting dossier covering landed cost, pawn cash, online resale, demand, sale speed, profit scenarios, bid ceilings, comparables, risks, and every missing fact.</p>
               </div>
               <div class="snapshot-mode" role="status">
                 <span class="mode-dot" aria-hidden="true"></span>
@@ -168,6 +168,10 @@
 
             <div class="metric-grid" aria-label="Opportunity summary">
               <article class="summary-metric">
+                <div class="metric-icon lime" aria-hidden="true">✓</div>
+                <div><span>Approved now</span><strong data-stat-approved>0</strong><small>Listings with a target-safe YES</small></div>
+              </article>
+              <article class="summary-metric">
                 <div class="metric-icon lime" aria-hidden="true">↗</div>
                 <div><span>Top profit now</span><strong data-stat-upside>$0</strong><small>Best modeled exit at the observed bid</small></div>
               </article>
@@ -177,8 +181,12 @@
                 <button class="summary-card-hitbox" type="button" data-quick-mode="closing" aria-label="Show auctions closing within five minutes"></button>
               </article>
               <article class="summary-metric">
-                <div class="metric-icon blue" aria-hidden="true">◎</div>
-                <div><span>Evidence confidence</span><strong data-stat-confidence>0%</strong><small>Average confidence for modeled exits</small></div>
+                <div class="metric-icon blue" aria-hidden="true">Au</div>
+                <div><span>Pawn underwritten</span><strong data-stat-pawn-qualified>0</strong><small>Fresh metal, purity, and weight evidence</small></div>
+              </article>
+              <article class="summary-metric">
+                <div class="metric-icon blue" aria-hidden="true">D</div>
+                <div><span>Retail demand pass</span><strong data-stat-retail-qualified>0</strong><small>Independent demand clears threshold</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon neutral" aria-hidden="true">≋</div>
@@ -186,12 +194,23 @@
               </article>
             </div>
 
+            <section class="ranking-doctrine" aria-label="Ranking methodology">
+              <div><span>PROFIT RANKING DOCTRINE</span><strong>YES first. Closest evidence-backed misses next. Unknowns last.</strong></div>
+              <ol>
+                <li><b>1</b><span>Pawn-safe precious metals</span></li>
+                <li><b>2</b><span>Retail-safe with proven demand</span></li>
+                <li><b>3</b><span>Qualified route, margin too low</span></li>
+                <li><b>4</b><span>Price found, demand failed</span></li>
+                <li><b>5</b><span>Insufficient evidence</span></li>
+              </ol>
+            </section>
+
             <div class="decision-layout">
               <section class="queue-panel" aria-labelledby="queue-heading">
                 <div class="panel-head queue-head">
                   <div>
-                    <span class="section-kicker"><i></i> PAWN-FIRST EXIT RANKING</span>
-                    <h3 id="queue-heading">Best exits first</h3>
+                    <span class="section-kicker"><i></i> EVIDENCE-WEIGHTED PROFIT RANKING</span>
+                    <h3 id="queue-heading">Highest profit likelihood first</h3>
                     <div class="queue-mode-switch" role="group" aria-label="Opportunity view">
                       <button class="is-active" type="button" data-quick-mode="profit" aria-pressed="true">Top profit</button>
                       <button type="button" data-quick-mode="pawn" aria-pressed="false">Pawn-first metals</button>
@@ -241,7 +260,7 @@
                   </div>
                 </div>
                 <div class="queue-labels" aria-hidden="true">
-                  <span>ITEM / BEST EXIT</span><span>OBSERVED / CLOSE</span><span>TARGET-SAFE / BREAK-EVEN</span><span>LIKELY PROFIT NOW</span><span>SOURCE</span>
+                  <span>RANK / ITEM / BEST EXIT</span><span>OBSERVED / LANDED</span><span>SAFE / BREAK-EVEN</span><span>PROFIT DECISION</span><span>OPEN</span>
                 </div>
                 <div class="opportunity-list" data-opportunity-list></div>
                 <div class="queue-pagination" data-queue-pagination hidden>
@@ -256,7 +275,7 @@
                 </div>
               </section>
 
-              <aside class="detail-panel" data-opportunity-detail aria-label="Selected opportunity details"></aside>
+              <aside class="detail-panel" id="item-dossier" data-opportunity-detail aria-label="Complete selected item underwriting dossier"></aside>
             </div>
           </section>
 

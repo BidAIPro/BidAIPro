@@ -112,6 +112,9 @@ test("a target-safe pawn route is recommended before an also-profitable online r
   assert.ok(result.pawnBreakEvenBid > result.pawnMaxBid);
   assert.ok(result.pawnProfitAtCurrentBid > 0);
   assert.equal(result.decisionVerdict, "YES");
+  assert.ok(result.rankingScore >= 50);
+  assert.ok(result.bidHeadroom > 0);
+  assert.ok(result.researchCoverageScore > 0);
   assert.equal(model.recommendationLabel(result.recommendationState), "YES · Pawn profit");
 });
 
@@ -140,6 +143,21 @@ test("a popular non-metal item can use the online route without a metal estimate
   assert.equal(result.onlinePopularityKnown, true);
   assert.ok(result.onlinePopularityScore > 0);
   assert.ok(result.onlineSaleLikelihood > 0);
+});
+
+test("plated-metal wording rejects a stored solid-gold pawn estimate", () => {
+  const model = loadModel();
+  const item = baseItem({
+    title: "6.4g 925 Sterling Rhodium Plate / 14K Rose Gold Plate CZ Ring",
+    comparableSales: [],
+    resaleMarket: null,
+  });
+  const result = model.assess(item);
+  assert.equal(result.metalEvidenceTitleConflict, true);
+  assert.equal(result.hasMetalEstimate, false);
+  assert.equal(result.hasPawnEstimate, false);
+  assert.equal(result.pawnCashEstimate, null);
+  assert.equal(result.recommendationState, "no-evidence");
 });
 
 test("a matched specialty guide supplies retail price and yearly demand without becoming a pawn quote", () => {
@@ -173,12 +191,25 @@ test("a matched specialty guide supplies retail price and yearly demand without 
   assert.equal(result.rawMarketMedian, 400);
   assert.equal(result.resaleMedian, 340);
   assert.equal(result.specialtyAnnualSalesVolume, 1_840);
+  assert.equal(result.specialtyRetailerBuyValue, 250);
+  assert.equal(result.specialtyRetailSellValue, 420);
   assert.equal(result.retailDemandPass, true);
   assert.equal(result.onlinePopularityKnown, true);
   assert.ok(result.onlinePopularityScore > 0);
   assert.equal(result.exitType, "online-resale");
   assert.equal(result.recommendationState, "retail-safe");
   assert.match(result.retailChannel, /PriceCharting/);
+});
+
+test("an evidence-backed item above every ceiling remains rankable without becoming a YES", () => {
+  const model = loadModel();
+  const result = model.assess(baseItem({ currentBid: 2_000 }));
+  assert.equal(result.recommendationState, "no-margin");
+  assert.equal(result.decisionVerdict, "NO");
+  assert.ok(result.maxBid > 0);
+  assert.ok(result.bidHeadroom < 0);
+  assert.ok(result.rankingScore > 0);
+  assert.ok(result.rankingScore < 50);
 });
 
 test("matched used offers provide raw average and median without inventing sell-through", () => {
@@ -311,4 +342,6 @@ test("an unsupported item receives zero ceilings instead of an invented exit", (
   assert.equal(result.maxBid, 0);
   assert.equal(result.breakEvenBid, 0);
   assert.equal(result.decisionProfitAtCurrentBid, null);
+  assert.equal(result.rankingScore, 0);
+  assert.equal(result.bidHeadroom, -result.currentBid);
 });

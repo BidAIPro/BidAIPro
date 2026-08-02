@@ -148,6 +148,8 @@ The default batch limits are 40 broad-market targets and 20 specialty targets. B
 
 The browser independently evaluates two strict gates for every item. The pawn gate exists only when valid fresh precious-metal evidence supplies spot price, source-stated purity, and source-stated weight. Used-retail prices, active listings, and dealer buy guides cannot become pawn estimates. The retail gate first establishes price from qualifying completed sales, a matched specialty guide, five sufficiently matched used offers, or five multi-merchant new-retail offers after the stronger replacement-cost haircut. It then requires a separate demand score of at least 55/100 by default.
 
+ShopGoodwill title parsing rejects plated, filled, vermeil, overlay, bonded, clad, washed, rolled, and electroplated metal descriptions before generating a melt scenario. The browser repeats that negative-wording check against stored `metalEstimate` records, so an older or externally supplied solid-metal estimate cannot pass when the listing title explicitly describes a non-solid finish. Separately stated sterling may still be modeled as silver when gold-plated accents are excluded.
+
 Retail demand evidence can be: validated sold-versus-active counts and optional time-to-sale; reported specialty-market annual unit volume; or sufficient recent exact-model completed-sale frequency. Three completed sales within 90 days establish a demand signal but score only 50/100 by default, so they do not pass alone. Five recent sales score above the default threshold. Active listings, merchant count, auction bids, product ratings, and reviews never count as completed-sale demand.
 
 The recommendation hierarchy is:
@@ -159,6 +161,10 @@ The recommendation hierarchy is:
 5. Return **NO · Evidence missing** when neither route qualifies.
 
 Each route exposes its own likely cash or sale value, profit at the observed bid, target-safe ceiling, and modeled break-even bid. Pawn liquidity and online resale popularity remain separate signals. The selected route controls ranking, but the alternative route remains visible for comparison.
+
+The queue applies that hierarchy before any score: pawn-safe YES, retail-safe YES, qualified-but-over-ceiling NO, demand-failed NO, and evidence-missing NO. A relative 0–100 ranking score orders records inside a tier. Approved routes receive scores of at least 50; a margin-failed route is capped at 49, a demand-failed route is capped at 24, and a record without a qualified route scores 0. The score cannot turn a NO into a YES.
+
+The selected record renders as a complete underwriting dossier above the queue. It shows the raw listing facts, weighted research coverage, unresolved inputs, acquisition stack, pawn range, retail range, net proceeds, demand proof, sale velocity, target-safe and break-even bids, profit at key bid levels, retained bid changes, attached comparable transactions, source links, listing-specific risks, and a pre-bid verification checklist. Missing values stay labeled unavailable instead of being inferred from unrelated categories.
 
 The GitHub-hosted workflow has two schedules: one hourly discovery pass for every configured source, and one five-minute wake-up that runs only sources with a known auction inside the final 30 minutes. When a known auction enters its final five minutes, that workflow run remains active and polls the source every 30 seconds through close, with a one-minute final-result grace period. The next hourly ShopGoodwill pass also retries unresolved outcomes that ended within the prior 24 hours, up to 500 per run, so one delayed scheduled start does not automatically discard the final price. Up to four optional Tasks start concurrently; their Datasets are imported sequentially to keep history merges atomic. GitHub Actions scheduled starts can be delayed, so the 30-second interval is best effort and depends on the source responding within that interval.
 

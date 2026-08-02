@@ -524,14 +524,14 @@ function metalEstimateFor(record, quotes) {
   let metal = null;
   let purityLabel = "";
   let purityFraction = null;
-  if (/\bgold\b/.test(normalized) && !/\b(?:gold[ -]?(?:plated|filled|tone)|vermeil|gp|g\.p\.|hge|rgep)\b/.test(normalized)) {
+  if (/\bgold\b/.test(normalized) && !/\b(?:gold[ -]?(?:plate(?:d)?|filled|tone|overlay|bonded|clad|electroplate(?:d)?|wash(?:ed)?|over)|rolled[ -]?gold|vermeil|gp|g\.p\.|hge|rgep)\b/.test(normalized)) {
     const karat = normalized.match(/\b(10|14|18|22|24)\s*k(?:t|arat)?\b/);
     if (karat) {
       metal = "gold";
       purityLabel = `${karat[1]}k`;
       purityFraction = Number(karat[1]) / 24;
     }
-  } else if (/\bsilver\b/.test(normalized) && !/\b(?:silver[ -]?(?:plated|tone)|silverplate|epns)\b/.test(normalized)) {
+  } else if (/\b(?:silver|sterling)\b/.test(normalized) && !/\b(?:silver[ -]?(?:plate(?:d)?|tone|overlay|clad|electroplate(?:d)?)|silverplate|epns)\b/.test(normalized)) {
     if (/\b(?:sterling|925|\.925)\b/.test(normalized)) {
       metal = "silver";
       purityLabel = "sterling / .925";

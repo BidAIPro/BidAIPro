@@ -455,6 +455,55 @@ test("source-described gold weight receives a live melt ceiling without becoming
   assert.equal(item.intrinsicValueEvidence, undefined);
 });
 
+test("gold plate wording cannot create solid-gold melt value and separately stated sterling remains silver", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "shopgoodwill-plated-metal-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url) => {
+      if (String(url) === "https://api.gold-api.com/price/XAU") {
+        return new Response(JSON.stringify({ currency: "USD", price: 3100, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://api.gold-api.com/price/XAG") {
+        return new Response(JSON.stringify({ currency: "USD", price: 35, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://buyerapi.shopgoodwill.com/api/ItemDetail/GetItemDetailModelByItemId/272052014") {
+        return new Response(JSON.stringify({
+          itemId: 272052014,
+          title: "6.4g 925 Sterling Rhodium Plate / 14K Rose Gold Plate CZ Ring",
+          currentPrice: 65,
+          numberOfBids: 2,
+          endTime: "2099-08-02T04:08:05",
+          serverTime: "2099-08-01T04:08:05",
+          category: "Jewelry",
+        }), { status: 200 });
+      }
+      throw new Error("Unexpected URL: " + url);
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "false",
+        BIDAI_SHOPGOODWILL_MODE: "items",
+        BIDAI_SHOPGOODWILL_ITEM_IDS: "272052014",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const item = (await readEnvelope(join(fixture.data, "live-snapshots.js"))).items[0];
+  assert.equal(item.metalEstimate.metal, "silver");
+  assert.equal(item.metalEstimate.purityLabel, "sterling / .925");
+  assert.equal(item.metalEstimate.grossWeightGrams, 6.4);
+  assert.ok(item.metalEstimate.meltCeiling > 6.6 && item.metalEstimate.meltCeiling < 6.7);
+});
+
 test("authorization guard makes no request and leaves published data unchanged", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
