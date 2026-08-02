@@ -61,9 +61,11 @@ Profit and safe-ceiling calculations expose inbound shipping, tax, buyer premium
 
 ## Automatic refreshes
 
-The repository includes a scheduled GitHub Actions pipeline that can merge structured results from multiple Apify collectors, Apify Datasets, and authorized HTTPS JSON feeds. It normalizes current bids and ended outcomes, preserves observation history by marketplace, and republishes the data file only when something changed. The workflow checks every five minutes; configured collectors are run adaptively every six hours, hourly, every 15 minutes, or every five minutes as their nearest active listing approaches its close.
+The repository includes a scheduled GitHub Actions pipeline that runs in GitHub's cloud even when your computer is off. ShopGoodwill is built in: the hourly discovery pass reads the real public bid catalog, imports up to the source's 10,000-result broad-search cap, and adds priority discovery for footwear, watches, rings and jewelry, hats, collectibles, electronics, and authenticated-sneaker wording. It does not require an Apify account or a private feed secret. The dashboard displays real listing thumbnails and lets you filter those resale verticals and source-stated authentication claims.
 
-For a production multi-market setup, configure these GitHub Actions secrets:
+Every source is checked hourly, known auctions inside 30 minutes are checked every five minutes, and a GitHub runner stays active to poll item details every 30 seconds inside the final five-minute window. Bid history keeps the first observation and only strictly higher bids; unchanged and lower prices do not create snapshots. Final status and price may still be recorded so the learning loop receives the real outcome.
+
+After pushing, open **Actions > Refresh authorized auction data > Run workflow** once if you do not want to wait for the next hourly discovery. For additional marketplaces, configure these GitHub Actions secrets:
 
 - `BIDAI_SOURCE_CONFIG_JSON` — a JSON array describing up to 20 marketplace sources and their Apify Task, Dataset, or authorized feed;
 - `BIDAI_APIFY_TOKEN` — required when a configured private Dataset is read or an Apify Task is started;
@@ -71,8 +73,8 @@ For a production multi-market setup, configure these GitHub Actions secrets:
 
 Each configured Apify Task is a collector that you create and authorize in Apify. BidAI Pro can start that task when its marketplace is due, wait for a successful run, import the resulting Dataset, and retain unmatched records from every other market. The original single-source `BIDAI_APIFY_DATASET_ID` and `BIDAI_FEED_URL` secrets remain supported.
 
-Setup, the multi-source secret format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Until a real source is configured, the workflow performs a guarded no-op and the checked-in point-in-time research pass remains visible. The interface never fills an unconnected marketplace with fabricated listings.
+Setup, the built-in ShopGoodwill source, the multi-source secret format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Apify Datasets are paged in 5,000-record batches and the normalized catalog retains up to 50,000 real listings. The checked-in four-item research pass is the pre-refresh baseline; the first successful cloud catalog run replaces that tiny visible sample with thousands of live records. The interface never fills an unconnected marketplace with fabricated listings.
 
 ## Data-source boundary
 
-This repository does not automate bidding. Its checked-in ShopGoodwill records are labeled point-in-time manual research snapshots. Scheduled collection is delegated to the Apify Tasks or HTTPS feeds that the repository owner configures; BidAI Pro performs adaptive orchestration, normalization, retention, learning, and direct source linking. Recommendations are decision support, not guarantees; verify authenticity, condition, taxes, fees, shipping, and resale restrictions before bidding.
+This repository does not automate bidding. ShopGoodwill discovery and near-close checks use the same public buyer catalog services that support its browse and item pages; additional markets are delegated to Apify Tasks or HTTPS feeds that the repository owner configures. BidAI Pro performs adaptive orchestration, normalization, retention, learning, and direct source linking. “Source-stated authentication” means only that the listing used explicit wording such as “authenticated” or “COA”; it is not an independent authentication. Recommendations are decision support, not guarantees; verify authenticity, condition, taxes, fees, shipping, and resale restrictions before bidding.

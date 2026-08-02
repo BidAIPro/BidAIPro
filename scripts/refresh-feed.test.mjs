@@ -40,7 +40,6 @@ async function readEnvelope(path) {
 test("Apify mode authenticates, keeps stable history, and lets the newest row win", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
-
   const outputPath = join(fixture.data, "live-snapshots.js");
   const priorEnvelope = {
     observedAt: "2026-08-01T10:00:00.000Z",
@@ -241,6 +240,156 @@ test("Apify mode authenticates, keeps stable history, and lets the newest row wi
   assert.equal(await readFile(outputPath, "utf8"), firstOutput, "Repeated identical data should be byte-stable");
 });
 
+test("Apify Dataset ingestion follows pagination beyond the first 5,000 real records", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "paginated-fetch.mjs");
+  await writeFile(preloadPath, `
+    const makeRecord = (index) => ({
+      id: "catalog-" + index,
+      title: "Catalog listing " + index,
+      currentBid: index + 1,
+      observedAt: "2026-08-02T12:00:00.000Z"
+    });
+    globalThis.fetch = async (url) => {
+      const parsed = new URL(String(url));
+      const offset = Number(parsed.searchParams.get("offset") || 0);
+      const payload = offset === 0
+        ? Array.from({ length: 5000 }, (_, index) => makeRecord(index))
+        : offset === 5000 ? [makeRecord(5000)] : [];
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "true",
+        BIDAI_APIFY_DATASET_ID: "large-catalog",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const envelope = await readEnvelope(join(fixture.data, "live-snapshots.js"));
+  assert.equal(envelope.items.length, 5001);
+  assert.ok(envelope.items.some((item) => item.externalId === "catalog-5000"));
+});
+
+test("the built-in ShopGoodwill catalog pages real listings and preserves source-only authentication claims", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "shopgoodwill-catalog-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url) !== "https://buyerapi.shopgoodwill.com/api/Search/ItemListing") {
+        throw new Error("Unexpected ShopGoodwill URL: " + url);
+      }
+      if (options.method !== "POST") throw new Error("Catalog request must use POST");
+      if (options.headers?.origin !== "https://shopgoodwill.com") throw new Error("Missing source origin");
+      const request = JSON.parse(options.body);
+      const makeItem = (index) => ({
+        itemId: 270000000 + index,
+        title: index === 1 ? "Nike Air Jordan Sneakers W/ COA" : "Real catalog listing " + index,
+        currentPrice: index + 10,
+        numBids: index,
+        endTime: "2026-08-02T04:08:05",
+        imageURL: "https://shopgoodwillimages.azureedge.net/production\\\\item-" + index + ".jpeg",
+        categoryName: index === 1 ? "Shoes" : "Collectibles",
+        catFullName: index === 1 ? "Clothing > Shoes" : "Collectibles > General",
+      });
+      const items = request.page === 1
+        ? Array.from({ length: 40 }, (_, index) => makeItem(index + 1))
+        : request.page === 2 ? [makeItem(41)] : [];
+      return new Response(JSON.stringify({
+        searchResults: { items, itemCount: 41 },
+        maxTotalRecords: 10000,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "false",
+        BIDAI_SHOPGOODWILL_MODE: "catalog",
+        BIDAI_SHOPGOODWILL_CATALOG_LIMIT: "41",
+        BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "0",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const envelope = await readEnvelope(join(fixture.data, "live-snapshots.js"));
+  assert.equal(envelope.sourceMode, "shopgoodwill-public-catalog");
+  assert.equal(envelope.items.length, 41);
+  const footwear = envelope.items.find((item) => item.externalId === "270000001");
+  assert.ok(footwear);
+  assert.equal(footwear.sourceKey, "shopgoodwill");
+  assert.equal(footwear.url, "https://shopgoodwill.com/item/270000001");
+  assert.equal(footwear.category, "Clothing > Shoes");
+  assert.equal(footwear.resaleVertical, "Footwear & Sneakers");
+  assert.equal(footwear.authenticationStatus, "source-stated");
+  assert.match(footwear.authenticationEvidence, /independently verify/i);
+  assert.equal(footwear.bidCount, 1);
+  assert.equal(footwear.endsAt, "2026-08-02T11:08:05.000Z");
+  assert.equal(footwear.imageUrl, "https://shopgoodwillimages.azureedge.net/production/item-1.jpeg");
+  assert.equal("forecast" in footwear, false, "Catalog volume must not fabricate a profitability forecast");
+});
+
+test("the ShopGoodwill close check records a final outcome from the item-detail service", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "shopgoodwill-detail-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url) !== "https://buyerapi.shopgoodwill.com/api/ItemDetail/GetItemDetailModelByItemId/272052012") {
+        throw new Error("Unexpected ShopGoodwill detail URL: " + url);
+      }
+      if (options.method) throw new Error("Item detail request must use GET");
+      return new Response(JSON.stringify({
+        itemId: 272052012,
+        title: "Final Talbots Watch",
+        currentPrice: 72.5,
+        numberOfBids: 9,
+        endTime: "2026-08-02T04:08:05",
+        serverTime: "2026-08-02T04:08:20",
+        isItemEndTimeExpire: true,
+        category: "Watches",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "false",
+        BIDAI_SHOPGOODWILL_MODE: "items",
+        BIDAI_SHOPGOODWILL_ITEM_IDS: "272052012",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const envelope = await readEnvelope(join(fixture.data, "live-snapshots.js"));
+  assert.equal(envelope.items[0].status, "ended");
+  assert.equal(envelope.items[0].finalPrice, 72.5);
+  assert.equal(envelope.items[0].bidCount, 9);
+  assert.equal(envelope.items[0].resaleVertical, "Watches");
+});
+
 test("authorization guard makes no request and leaves published data unchanged", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
@@ -337,6 +486,58 @@ test("generic HTTPS feed mode remains available when no Apify dataset is configu
   assert.equal(envelope.items[0].marketplaceFee, null);
   assert.equal(envelope.items[0].feeKnown, false);
   assert.equal("forecast" in envelope.items[0], false, "The importer must not fabricate a forecast");
+});
+
+test("unchanged and lower bids create no new snapshot while a higher bid is retained", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const outputPath = join(fixture.data, "live-snapshots.js");
+  const feedUrl = "https://feeds.example.invalid/bid-increases-only.json";
+  const preloadPath = join(fixture.root, "bid-increase-fetch.mjs");
+  await writeFile(preloadPath, `
+    const payload = JSON.parse(Buffer.from(process.env.BIDAI_TEST_PAYLOAD, "base64").toString("utf8"));
+    globalThis.fetch = async () => new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  `, "utf8");
+  const runPayload = async (currentBid, observedAt) => runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "true",
+        BIDAI_APIFY_DATASET_ID: "",
+        BIDAI_FEED_URL: feedUrl,
+        BIDAI_TEST_PAYLOAD: Buffer.from(JSON.stringify({
+          items: [{
+            id: "strict-bid-history",
+            title: "Strict bid history listing",
+            url: "https://example.com/strict-bid-history",
+            currentBid,
+            bidCount: currentBid === 100 ? 2 : 3,
+            observedAt,
+          }],
+        })).toString("base64"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal((await runPayload(100, "2026-08-02T10:00:00Z")).code, 0);
+  const first = await readFile(outputPath, "utf8");
+  assert.equal((await runPayload(100, "2026-08-02T11:00:00Z")).code, 0);
+  assert.equal(await readFile(outputPath, "utf8"), first, "An unchanged bid must not alter the published snapshot file");
+
+  assert.equal((await runPayload(125, "2026-08-02T12:00:00Z")).code, 0);
+  const afterIncrease = await readFile(outputPath, "utf8");
+  const increased = await readEnvelope(outputPath);
+  assert.deepEqual(increased.items[0].observations.map((point) => point.currentBid), [100, 125]);
+  assert.equal(increased.items[0].observedAt, "2026-08-02T12:00:00.000Z");
+
+  assert.equal((await runPayload(110, "2026-08-02T13:00:00Z")).code, 0);
+  assert.equal(await readFile(outputPath, "utf8"), afterIncrease, "A lower bid must not alter the published snapshot file");
 });
 
 test("generic evidence is normalized and under-supported exact-model forecasts cannot publish money", async (t) => {

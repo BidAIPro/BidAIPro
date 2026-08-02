@@ -22,7 +22,7 @@ GitHub Pages cannot run a database, scheduled monitor, secret API keys, or a con
 The static site is designed to become the control surface for a separate, permissioned intelligence service:
 
 ```text
-Apify Tasks, authorized feeds, or user exports
+ShopGoodwill public catalog, Apify Tasks, authorized feeds, or user exports
                   |
                   v
      Adaptive multi-source scheduler
@@ -47,7 +47,7 @@ Apify Tasks, authorized feeds, or user exports
          BidAI Pro dashboard
 ```
 
-The included workflow supplies the adaptive scheduler and normalized snapshot store. A fuller production service can add:
+The included workflow supplies built-in ShopGoodwill discovery, the adaptive scheduler, and the normalized snapshot store. A fuller production service can add:
 
 - a durable job queue for higher source counts and long-running collectors;
 - a SQL database for listings, snapshots, outcomes, comparable sales, predictions, and model versions;
@@ -57,7 +57,7 @@ The included workflow supplies the adaptive scheduler and normalized snapshot st
 
 ## Learning loop
 
-Each listing should have a stable source ID. Repeated observations are appended with timestamps, and a forecast stored on an observation is treated as an immutable point-in-time prediction. When the auction ends, its actual final price is joined without rewriting that forecast.
+Each listing should have a stable source ID. The first observation and only later strictly higher bids are appended with timestamps; unchanged and lower prices are discarded. A forecast stored on an observation is treated as an immutable point-in-time prediction. When the auction ends, its actual final price is joined without rewriting that forecast.
 
 The dashboard reports one fixed-horizon calibration sample per ended listing: the eligible verified forecast nearest six hours before close, limited to a three-to-nine-hour window. Source estimates, post-close forecasts, and forecasts whose five-outcome exact-model evidence cannot be revalidated are excluded. Category-level calibration then measures the typical difference between those approximately six-hour predictions and actual closes.
 
@@ -77,4 +77,4 @@ The closing-price forecast estimates whether the user is likely to win at that m
 
 The product should show a distribution and evidence quality rather than promise profit. Missing shipping, uncertain identity, unverified precious-metal content, thin comparable sales, or authenticity risk should force a research label or lower bid ceiling.
 
-Automatic collection should be enabled only for a source the operator is authorized to access programmatically. The GitHub Pages application makes no cross-origin marketplace requests; configured Apify Tasks and feeds collect server-side, and the browser reads only normalized real records committed by the workflow.
+The GitHub Pages application makes no cross-origin marketplace requests. GitHub Actions performs the built-in ShopGoodwill public-catalog calls and any configured Apify/feed calls server-side; the browser reads only normalized real records committed by the workflow. Authentication wording from a source is preserved as a claim, never upgraded to an independent verification.

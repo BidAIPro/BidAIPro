@@ -55,6 +55,100 @@ test("authorization guard leaves the published multi-market file unchanged", asy
   assert.equal(await readFile(fixture.outputPath, "utf8"), original);
 });
 
+test("the hourly workflow loads the built-in ShopGoodwill catalog without external feed secrets", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "mock-built-in-shopgoodwill-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url, options = {}) => {
+      if (String(url) !== "https://buyerapi.shopgoodwill.com/api/Search/ItemListing") {
+        throw new Error("Unexpected built-in request: " + url);
+      }
+      const request = JSON.parse(options.body);
+      if (request.page !== 1) throw new Error("Only one catalog page was expected");
+      return new Response(JSON.stringify({
+        searchResults: {
+          itemCount: 1,
+          items: [{
+            itemId: 271234567,
+            title: "Authenticated sneaker catalog listing W/ COA",
+            currentPrice: 55,
+            numBids: 6,
+            endTime: "2026-08-03T04:08:05",
+            catFullName: "Clothing > Shoes",
+          }],
+        },
+        maxTotalRecords: 10000,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+  `, "utf8");
+
+  const result = await runNode([join(fixture.scripts, "refresh-all-sources.mjs")], {
+    cwd: fixture.root,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
+      BIDAI_SOURCE_AUTHORIZED: "false",
+      BIDAI_SHOPGOODWILL_ENABLED: "true",
+      BIDAI_SHOPGOODWILL_CATALOG_LIMIT: "1",
+      BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "0",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "9 * * * *",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  const envelope = await readEnvelope(fixture.outputPath);
+  assert.equal(envelope.items.length, 1);
+  assert.equal(envelope.items[0].externalId, "271234567");
+  assert.equal(envelope.items[0].sourceKey, "shopgoodwill");
+});
+
+test("the five-minute wake skips sources whose auctions are more than 30 minutes away", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const now = Date.now();
+  const original = `${OUTPUT_PREFIX}${JSON.stringify({
+    observedAt: new Date(now).toISOString(),
+    sourceMode: "published",
+    sourceNotes: [],
+    items: [{
+      id: "distant-listing",
+      externalId: "distant-listing",
+      sourceKey: "shopgoodwill",
+      source: "ShopGoodwill",
+      sourceUrl: "https://shopgoodwill.com/item/distant",
+      title: "Distant listing",
+      currentBid: 25,
+      status: "active",
+      endsAt: new Date(now + 2 * 60 * 60_000).toISOString(),
+      observedAt: new Date(now).toISOString(),
+      observations: [],
+    }],
+  })};\n`;
+  await writeFile(fixture.outputPath, original, "utf8");
+  const preloadPath = join(fixture.root, "reject-distant-fetch.mjs");
+  await writeFile(preloadPath, "globalThis.fetch = async () => { throw new Error('distant source must not be fetched'); };\n", "utf8");
+
+  const result = await runNode([join(fixture.scripts, "refresh-all-sources.mjs")], {
+    cwd: fixture.root,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
+      BIDAI_SOURCE_AUTHORIZED: "true",
+      BIDAI_APIFY_DATASET_ID: "shopgoodwill-data",
+      BIDAI_SOURCE_KEY_OVERRIDE: "shopgoodwill",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(await readFile(fixture.outputPath, "utf8"), original);
+});
+
 test("two marketplace Datasets merge real records without cross-site ID collisions", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
@@ -91,6 +185,8 @@ test("two marketplace Datasets merge real records without cross-site ID collisio
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
       BIDAI_SOURCE_AUTHORIZED: "true",
       BIDAI_APIFY_TOKEN: "test-token",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "9 * * * *",
       BIDAI_SOURCE_CONFIG_JSON: JSON.stringify([
         { key: "shopgoodwill", name: "ShopGoodwill", datasetId: "shopgoodwill-data" },
         { key: "ebay", name: "eBay Auctions", datasetId: "ebay-data" },
@@ -157,6 +253,8 @@ test("a near-close source starts its Apify Task and imports the successful run D
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
       BIDAI_SOURCE_AUTHORIZED: "true",
       BIDAI_APIFY_TOKEN: "test-token",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *",
       BIDAI_SOURCE_CONFIG_JSON: JSON.stringify([
         { key: "shopgoodwill", name: "ShopGoodwill", taskId: "shopgoodwill-task" },
       ]),

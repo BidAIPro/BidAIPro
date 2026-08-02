@@ -2,7 +2,8 @@ name: Refresh authorized auction data
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "9 * * * *"
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -18,14 +19,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
+          package-manager-cache: false
 
       - name: Refresh due auction sources
         env:
@@ -36,6 +38,10 @@ jobs:
           BIDAI_FEED_URLS: ${{ secrets.BIDAI_FEED_URLS }}
           BIDAI_SOURCE_CONFIG_JSON: ${{ secrets.BIDAI_SOURCE_CONFIG_JSON }}
           BIDAI_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_SOURCE_AUTHORIZED }}
+          BIDAI_WORKFLOW_SCHEDULE: ${{ github.event.schedule }}
+          BIDAI_SHOPGOODWILL_ENABLED: "true"
+          BIDAI_SHOPGOODWILL_CATALOG_LIMIT: "10000"
+          BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "200"
         run: node scripts/refresh-all-sources.mjs
 
       - name: Commit changed snapshot data

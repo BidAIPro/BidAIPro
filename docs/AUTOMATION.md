@@ -1,16 +1,31 @@
 # Automated multi-market collection and ingestion
 
-BidAI Pro can orchestrate and merge real auction snapshots from multiple Apify Tasks, persistent Apify Datasets, and authorized HTTPS JSON feeds. It runs only when `BIDAI_SOURCE_AUTHORIZED` is exactly `true`; otherwise it makes no network request and leaves the published data unchanged.
+BidAI Pro can collect the real ShopGoodwill public catalog directly and merge it with snapshots from multiple Apify Tasks, persistent Apify Datasets, and authorized HTTPS JSON feeds. The built-in ShopGoodwill source is enabled in the included workflow and does not use a token. Optional external sources run only when `BIDAI_SOURCE_AUTHORIZED` is exactly `true`.
 
 The supported source modes are:
 
-1. **Apify Task plus Dataset:** BidAI Pro starts a preconfigured Task when that market is due, waits for the run to succeed, and imports the run's Dataset.
-2. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
-3. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
+1. **Built-in ShopGoodwill catalog:** the hourly pass reads the public bid search in 40-item pages, up to the source's 10,000-result broad-search cap, and adds dedicated discovery pools for footwear, watches, rings, hats, collectibles, electronics, and authenticated-sneaker wording. Near close, only known item-detail records are requested.
+2. **Apify Task plus Dataset:** BidAI Pro starts a preconfigured Task when that market is due, waits for the run to succeed, and imports the run's Dataset.
+3. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
+4. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
 
-BidAI Pro does not invent listing records or use marketplace search pages as data. Every visible automated listing must arrive from one of the configured sources and must retain its source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
+BidAI Pro does not invent listing records. Every visible automated listing must arrive from the built-in ShopGoodwill public catalog or one of the configured sources and must retain its canonical source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
 
-Direct source automation requires permission from the source operator. Configure this workflow only for an official API, licensed data feed, operator-approved endpoint, or another source you are authorized to access programmatically. The authorization switch is a deployment safeguard, not a substitute for that permission. Follow the feed owner's rate limits, data-retention requirements, and license terms.
+For any additional source, configure only an official API, licensed data feed, operator-approved endpoint, or another source you are authorized to access programmatically. The authorization switch is a deployment safeguard, not a substitute for that permission. Follow the feed owner's rate limits, data-retention requirements, and license terms.
+
+## Built-in ShopGoodwill source
+
+The workflow sets `BIDAI_SHOPGOODWILL_ENABLED=true`, `BIDAI_SHOPGOODWILL_CATALOG_LIMIT=10000`, and `BIDAI_SHOPGOODWILL_PRIORITY_LIMIT=200`. The first value activates the source; the second caps the broad nearest-close search; the third caps each priority search. The source service itself currently exposes at most 10,000 broad results to one search, so “all” means all records returned within that documented runtime cap plus the dedicated category searches—not a claim that every item in the marketplace is available through one query.
+
+The collector stores the source ID, title, category path, current bid, bid count, end time, image, and direct item URL. It deliberately leaves shipping and resale value unknown unless a trustworthy feed supplies them. Its model key is a conservative exact normalization of the complete source title, including size and variant wording; it never groups merely similar category items. A closing forecast remains unavailable until five completed listings share that exact normalized title. The collector does not fabricate sold comparables or resale profit, so a real item can remain **Research** until exact-title auction outcomes, completed resale evidence, and cost inputs exist.
+
+Authentication has three important boundaries:
+
+- catalog text with explicit wording such as `authenticated`, `certificate of authenticity`, `COA`, or a named authentication service is labeled `source-stated`;
+- that label records what the source listing says and is searchable/filterable in the interface;
+- it is never presented as independent authentication, and the user must verify the authenticator, paperwork, identifiers, item, and return terms.
+
+After pushing the workflow, open **Actions > Refresh authorized auction data > Run workflow** once for an immediate full discovery pass. No secret is required for the built-in source. To stop that source, change `BIDAI_SHOPGOODWILL_ENABLED` to `false` in `.github/workflows/refresh-auction-data.yml` and push the change.
 
 ## GitHub setup
 
@@ -63,9 +78,11 @@ Example secret value showing configuration shape only (replace every placeholder
 
 Keep `BIDAI_APIFY_TOKEN`, `BIDAI_SOURCE_CONFIG_JSON`, signed feed URLs, and all other credentials in GitHub Actions secrets. Do not add them to workflow YAML, source files, generated snapshots, screenshots, or documentation. The legacy single-source mode gives `BIDAI_APIFY_DATASET_ID` precedence over `BIDAI_FEED_URL`.
 
-The workflow wakes every five minutes. A configured Task runs only when one of its listings is due: every six hours more than 24 hours from close, hourly within 24 hours, every 15 minutes within six hours, and every five minutes within the final hour. A just-closed listing without a recorded final price continues at five-minute checks for the first hour, then hourly for the first day, so the learning loop can capture the outcome. Up to four due Tasks start concurrently; their Datasets are imported sequentially to keep history merges atomic. Dataset-only and feed-only sources are imported on every workflow wake. Adjust the schedule in `.github/workflows/refresh-auction-data.yml` or the external feed's rate limit when necessary.
+The GitHub-hosted workflow has two schedules: one hourly discovery pass for every configured source, and one five-minute wake-up that runs only sources with a known auction inside the final 30 minutes. When a known auction enters its final five minutes, that workflow run remains active and polls the source every 30 seconds through close, with a one-minute final-result grace period. The next hourly ShopGoodwill pass also retries unresolved outcomes that ended within the prior 24 hours, up to 500 per run, so one delayed scheduled start does not automatically discard the final price. Up to four optional Tasks start concurrently; their Datasets are imported sequentially to keep history merges atomic. GitHub Actions scheduled starts can be delayed, so the 30-second interval is best effort and depends on the source responding within that interval.
 
-If authorization is absent or has any value other than lowercase `true`, the orchestrator exits successfully without making a network request. Removing or changing that secret is the quickest way to stop ingestion. Removing all source configuration disables ingestion while leaving existing published snapshots intact.
+The snapshot rule is intentionally strict: the first observation is retained, and a later observation is appended only when its current bid is strictly higher than the highest stored bid. Unchanged or lower bids do not advance `observedAt`, do not add history, and produce a byte-identical published file when no other listing or outcome changed. A final status and final price may still be joined to the listing so the learning loop can score the auction outcome.
+
+If authorization is absent or has any value other than lowercase `true`, optional Apify and feed sources are skipped; the built-in ShopGoodwill source still runs while its workflow switch is `true`. Removing or changing the authorization secret stops optional sources. Disabling the built-in switch and removing all source configuration stops ingestion while leaving existing published snapshots intact.
 
 ## Flat item schema
 
@@ -93,7 +110,7 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | `intrinsicValueEvidence` | boolean | Optional intrinsic-value switch. It must normalize to `true` and be accompanied by a valid `valuationBasis`. |
 | `valuationBasis` | object | Optional timestamped 14K-gold valuation basis. It supports a conservative resale floor; it is not auction-close evidence. |
 
-Useful optional flat fields are `shipping`, `status`, `finalPrice`, `expectedClose`, `resaleLow`, `resaleMedian`, `resaleHigh`, `demand`, `rarity`, `identityConfidence`, `conditionConfidence`, `imageUrl`, `compCount`, `compRecencyDays`, `marketplaceFee`, `taxRate`, `buyerPremium`, `outboundShipping`, `repairReserve`, and `returnReserve`. `shippingKnown` and `feeKnown` may be supplied explicitly; otherwise the importer marks them true only when the corresponding numeric field was actually present and valid. Missing shipping, fees, and material cost reserves remain `null`, not zero.
+Useful optional flat fields are `shipping`, `status`, `finalPrice`, `expectedClose`, `resaleLow`, `resaleMedian`, `resaleHigh`, `demand`, `rarity`, `identityConfidence`, `conditionConfidence`, `imageUrl`, `resaleVertical`, `authenticationStatus`, `authenticationEvidence`, `riskSummary`, `compCount`, `compRecencyDays`, `marketplaceFee`, `taxRate`, `buyerPremium`, `outboundShipping`, `repairReserve`, and `returnReserve`. `shippingKnown` and `feeKnown` may be supplied explicitly; otherwise the importer marks them true only when the corresponding numeric field was actually present and valid. Missing shipping, fees, and material cost reserves remain `null`, not zero.
 
 Example Apify Dataset item:
 
@@ -250,20 +267,21 @@ window.BIDAI_LIVE_SNAPSHOTS = {
 
 The actual value is an object envelope with `observedAt`, `sourceMode`, `sourceNotes`, and `items`. Every feed item is marked as published research, and listing links are exposed under both `url` and `sourceUrl` for front-end compatibility. Comparable links are normalized to HTTP(S), URL fragments are removed, non-web schemes are discarded, and comparable text fields and arrays are bounded before publication.
 
-Before writing, it merges prior observations for matching stable IDs, sorts the history chronologically, removes duplicate timestamps, and keeps the most recent 250 observations per item. This gives the app a bid-development series even when the feed supplies only the latest observation. When a source supplies a forecast on the current record, the importer stores the same normalized forecast inside that current observation as an auditable point-in-time prediction. When the empirical model is eligible, its generated forecast is stored in the same way. Earlier supplied history points receive a forecast only when that history point carried its own source or previously generated forecast; the importer never backfills the current forecast into prior observations. Repeated observations therefore preserve which model version, range, sample, and confidence were actually available at each bid snapshot.
+Before writing, it merges prior observations for matching stable IDs, sorts the history chronologically, removes duplicate timestamps and non-increasing bids, and keeps the most recent 250 strictly increasing bid observations per item. When a source supplies a forecast on a qualifying higher-bid record, the importer stores the same normalized forecast inside that current observation as an auditable point-in-time prediction. When the empirical model is eligible, its generated forecast is stored in the same way. Earlier observations are never rewritten.
 
-Listings that disappear from a later feed response are retained instead of being deleted, including ended auctions and manually published research. This preserves final prices and earlier predictions for learning. Storage is capped at 5,000 items and responses are capped at 20 MB. Records are ordered by active state and newest observation, with stable ID as the deterministic tie-breaker; retained active listings whose end time has passed are reclassified as ended. Generic feed records receive the current capture timestamp when the endpoint does not provide one. Apify rows must provide `observedAt`, and the published envelope time comes from the newest row so an unchanged Dataset does not create meaningless refresh commits.
+Listings that disappear from a later feed response are retained instead of being deleted, including ended auctions and manually published research. Apify Datasets are read in 5,000-record pages and normalized storage is capped at 50,000 items; the 20 MB response limit applies to each page or generic-feed response. Records are ordered by active state and newest qualifying higher-bid observation, with stable ID as the deterministic tie-breaker. The published envelope time comes from the newest retained bid snapshot, so an unchanged Dataset does not create meaningless data commits.
 
 The workflow commits the file to `main` only when its content changes. That commit triggers the repository's normal GitHub Pages deployment flow. GitHub secrets are injected only into the refresh step and are never written to the generated file or logs. The generated browser data contains normalized listing fields, not the Apify token or feed credentials.
 
 ## Operational checks
 
-- Run `node scripts/refresh-all-sources.mjs` without secrets to confirm the guarded no-op path.
+- Run `node scripts/refresh-all-sources.mjs` without workflow variables to confirm the guarded no-op path.
+- Run it with `BIDAI_SHOPGOODWILL_ENABLED=true` and an hourly/manual event context to exercise the built-in source.
 - Run `node --test scripts/refresh-feed.test.mjs scripts/refresh-all-sources.test.mjs` before pushing ingestion changes.
 - Use **Run workflow** after changing the Dataset, endpoint, or schema.
 - Confirm the Apify Dataset contains flat item objects before enabling the schedule; a successful Actor run does not guarantee compatible output.
 - Confirm every production record carries the real auction URL; clicking a row intentionally opens that URL rather than a BidAI Pro detail route.
 - Use the same durable listing ID across repeated observations, numeric USD values, and a single string `imageUrl` rather than an image array.
 - Inspect the workflow summary before relying on new data.
-- Remove `BIDAI_SOURCE_AUTHORIZED` immediately if permission is withdrawn.
+- Remove `BIDAI_SOURCE_AUTHORIZED` immediately if permission for an optional source is withdrawn; disable the built-in workflow switch separately when needed.
 - Treat automated rankings as research support; verify identity, condition, fees, taxes, shipping, and resale evidence before bidding.

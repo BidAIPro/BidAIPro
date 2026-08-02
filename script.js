@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = "bidaipro.auction-workspace.v1";
   const MAX_IMPORT_ROWS = 5000;
+  const QUEUE_PAGE_SIZE = 250;
   const VIEW_TITLES = {
     opportunities: "Opportunities",
     watchlist: "Watchlist",
@@ -254,6 +255,7 @@
   let activeView = "opportunities";
   let selectedId = PUBLISHED_RESEARCH.items[0]?.id || workspace.userItems[0]?.id || "";
   let historicalIndexCache = null;
+  let visibleQueueLimit = QUEUE_PAGE_SIZE;
 
   function saveWorkspace() {
     try {
@@ -548,18 +550,18 @@
     const afterCloseHours = Number.isFinite(endTime) && endTime <= Date.now() ? (Date.now() - endTime) / 3600000 : null;
     const hours = hoursRemaining(item);
     const intervalMinutes = afterCloseHours !== null
-      ? (afterCloseHours <= 1 ? 5 : afterCloseHours <= 24 ? 60 : 360)
-      : hours <= 1 ? 5 : hours <= 6 ? 15 : hours <= 24 ? 60 : 360;
+      ? (afterCloseHours <= 1 / 60 ? 0.5 : 60)
+      : hours <= 5 / 60 ? 0.5 : hours <= 0.5 ? 5 : 60;
     const urgency = afterCloseHours !== null
-      ? (afterCloseHours <= 1 ? "critical" : "elevated")
-      : hours <= 1 ? "critical" : hours <= 6 ? "high" : hours <= 24 ? "elevated" : "standard";
+      ? (afterCloseHours <= 1 / 60 ? "critical" : "elevated")
+      : hours <= 5 / 60 ? "critical" : hours <= 0.5 ? "high" : "standard";
     const observedAt = Date.parse(observedAtFor(item) || "");
     const nextDueAt = Number.isFinite(observedAt) ? new Date(observedAt + intervalMinutes * 60000).toISOString() : null;
     return {
       intervalMinutes,
       label: afterCloseHours !== null
-        ? (intervalMinutes < 60 ? "Final check every 5 min" : intervalMinutes === 60 ? "Final check hourly" : "Final check every 6 hours")
-        : intervalMinutes < 60 ? `Every ${intervalMinutes} min` : intervalMinutes === 60 ? "Hourly" : "Every 6 hours",
+        ? (intervalMinutes === 0.5 ? "Final check every 30 sec" : "Final check hourly")
+        : intervalMinutes === 0.5 ? "Every 30 sec" : intervalMinutes < 60 ? `Every ${intervalMinutes} min` : "Hourly",
       urgency,
       nextDueAt,
       due: !nextDueAt || Date.parse(nextDueAt) <= Date.now(),
@@ -769,14 +771,18 @@
     const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
     const marketplace = marketplaceFor(item);
     const snapshotPlan = snapshotPlanFor(item);
+    const imageUrl = safeHttpUrl(item.imageUrl);
+    const authenticationBadge = item.authenticationStatus === "source-stated"
+      ? '<span class="status-pill authentication-source">AUTH CLAIM</span>'
+      : "";
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; ${sourceUrl ? `press Enter to open on ${escapeHtml(marketplace.name)}` : "source listing URL unavailable"}">
         <div class="item-cell">
-          <span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>
+          ${imageUrl ? `<img class="item-thumbnail" src="${escapeHtml(imageUrl)}" alt="" loading="lazy" decoding="async" />` : `<span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>`}
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.score};--score-color:${scoreColor(a.signal)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
@@ -882,6 +888,7 @@
       ? item.evidence
       : [
           { label: "Identity", value: item.identifiedAs || "Identity not yet verified" },
+          { label: "Authentication", value: item.authenticationEvidence || "No authentication evidence supplied" },
           { label: "Forecast", value: a.hasForecast ? `${a.forecast.exactModelCount} exact-model outcomes` : "Insufficient exact-model outcomes" },
           { label: "Costs", value: a.shippingKnown ? "Inbound shipping recorded" : "Inbound shipping missing" },
         ];
@@ -994,19 +1001,30 @@
     const query = String($("#global-search")?.value || "").trim().toLowerCase();
     const signal = $("#signal-filter")?.value || "all";
     const category = $("#category-filter")?.value || "all";
+    const vertical = $("#vertical-filter")?.value || "all";
+    const authentication = $("#authentication-filter")?.value || "all";
     const source = $("#source-filter")?.value || "all";
     return allItems()
       .filter((item) => {
-        const haystack = [item.title, item.category, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
+        const haystack = [item.title, item.category, item.resaleVertical, item.authenticationEvidence, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
         const assessment = assess(item);
         return (!query || haystack.includes(query)) &&
           (signal === "all" || assessment.signal === signal) &&
           (category === "all" || item.category === category) &&
+          (vertical === "all" || (item.resaleVertical || "Other") === vertical) &&
+          (authentication === "all" || (item.authenticationStatus || "not-supplied") === authentication) &&
           (source === "all" || item.sourceKey === source);
       })
       .sort((a, b) => {
         if (a.status !== b.status) return a.status === "active" ? -1 : 1;
-        return assess(b).score - assess(a).score;
+        const scoreDifference = assess(b).score - assess(a).score;
+        if (scoreDifference) return scoreDifference;
+        const aEnds = Date.parse(a.endsAt || "");
+        const bEnds = Date.parse(b.endsAt || "");
+        if (Number.isFinite(aEnds) && Number.isFinite(bEnds)) return aEnds - bEnds;
+        if (Number.isFinite(aEnds)) return -1;
+        if (Number.isFinite(bEnds)) return 1;
+        return String(a.title || "").localeCompare(String(b.title || ""));
       });
   }
 
@@ -1049,15 +1067,16 @@ function renderMarketplaceCoverage() {
     container.innerHTML = [...AUCTION_MARKETS, ...observedMarkets].map((market) => {
       const marketItems = items.filter((item) => item.sourceKey === market.key);
       const active = marketItems.filter((item) => item.status === "active");
+      const monitored = marketItems.filter((item) => item.status === "active" || !(Number(item.finalPrice) > 0));
       const observations = marketItems.reduce((total, item) => total + Math.max(1, Array.isArray(item.observations) ? item.observations.length : 0), 0);
       const latest = marketItems.map((item) => Date.parse(observedAtFor(item) || "")).filter(Number.isFinite).sort((a, b) => b - a)[0];
-      const plans = active.map(snapshotPlanFor).filter((plan) => plan.intervalMinutes);
+      const plans = monitored.map(snapshotPlanFor).filter((plan) => plan.intervalMinutes);
       const fastest = plans.length ? Math.min(...plans.map((plan) => plan.intervalMinutes)) : null;
       const connected = marketItems.length > 0;
       return `<article class="marketplace-card ${connected ? "is-connected" : "is-awaiting"}">
         <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${connected ? "REAL RECORDS CONNECTED" : "AWAITING AUTHORIZED FEED"}</small></div></div>
         <p>${escapeHtml(market.focus)}</p>
-        <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Snapshots</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : "6h") : "—"}</dd></div></dl>
+        <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Snapshots</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : "1h") : "—"}</dd></div></dl>
         <div class="marketplace-card-footer"><span>${latest ? `Latest ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "No listing data stored"}</span><a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div>
       </article>`;
     }).join("");
@@ -1100,6 +1119,7 @@ function renderMarketplaceCoverage() {
       let status = "Research snapshots loaded";
       if (!PUBLISHED_RESEARCH.items.length) status = "Awaiting research data";
       else if (connectedMarkets > 1) status = `${connectedMarkets} auction marketplaces connected`;
+      else if (mode.includes("shopgoodwill")) status = `${PUBLISHED_RESEARCH.items.length.toLocaleString("en-US")} ShopGoodwill listings loaded`;
       else if (mode.includes("apify")) status = "Apify dataset loaded";
       else if (mode.includes("authorized")) status = "Authorized feed loaded";
       else if (mode.includes("manual")) status = "Manual research pass loaded";
@@ -1112,14 +1132,26 @@ function renderMarketplaceCoverage() {
     populateCategories();
     populateSources();
     const items = filteredItems();
+    const visibleItems = items.slice(0, visibleQueueLimit);
     const list = $("[data-opportunity-list]");
     const empty = $("[data-queue-empty]");
     if (!items.some((item) => item.id === selectedId)) selectedId = items[0]?.id || "";
-    list.innerHTML = items.map(renderOpportunityRow).join("");
+    list.innerHTML = visibleItems.map(renderOpportunityRow).join("");
     empty.hidden = items.length > 0;
     list.hidden = items.length === 0;
+    const pagination = $("[data-queue-pagination]");
+    const count = $("[data-queue-visible-count]");
+    const loadMore = $("[data-load-more]");
+    if (pagination) pagination.hidden = items.length === 0;
+    if (count) count.textContent = `Showing ${visibleItems.length.toLocaleString()} of ${items.length.toLocaleString()} matching real listings`;
+    if (loadMore) loadMore.hidden = visibleItems.length >= items.length;
     renderDetail(items.find((item) => item.id === selectedId) || items[0]);
     renderStats();
+  }
+
+  function resetQueueAndRender() {
+    visibleQueueLimit = QUEUE_PAGE_SIZE;
+    renderOpportunities();
   }
 
   function renderWatchlist() {
@@ -1464,14 +1496,25 @@ function renderMarketplaceCoverage() {
     ));
     if (index >= 0) {
       const existing = workspace.userItems[index];
-      const history = [...(Array.isArray(existing.observations) ? existing.observations : []), ...snapshot.observations].slice(-250);
+      const bidIncreased = Number(snapshot.currentBid) > Number(existing.currentBid);
+      const nextSnapshot = bidIncreased ? snapshot : {
+        ...snapshot,
+        currentBid: existing.currentBid,
+        bidCount: existing.bidCount,
+        expectedClose: existing.expectedClose,
+        observedAt: existing.observedAt,
+        forecast: existing.forecast,
+      };
+      const history = bidIncreased
+        ? [...(Array.isArray(existing.observations) ? existing.observations : []), ...snapshot.observations].slice(-250)
+        : (Array.isArray(existing.observations) ? existing.observations : []);
       workspace.userItems[index] = {
         ...existing,
-        ...snapshot,
+        ...nextSnapshot,
         id: existing.id,
         observations: history,
         createdAt: existing.createdAt || existing.observedAt,
-        updatedAt: snapshot.observedAt,
+        updatedAt: bidIncreased ? snapshot.observedAt : existing.updatedAt,
       };
       return { id: existing.id, updated: true };
     }
@@ -1646,6 +1689,11 @@ function renderMarketplaceCoverage() {
       addSnapshot();
       return;
     }
+    if (event.target.closest("[data-load-more]")) {
+      visibleQueueLimit += QUEUE_PAGE_SIZE;
+      renderOpportunities();
+      return;
+    }
     const watchButton = event.target.closest("[data-watch-id]");
     if (watchButton) {
       event.stopPropagation();
@@ -1724,12 +1772,15 @@ function renderMarketplaceCoverage() {
   });
 
   $("#global-search").addEventListener("input", () => {
+    visibleQueueLimit = QUEUE_PAGE_SIZE;
     if (activeView !== "opportunities") setView("opportunities");
     else renderOpportunities();
   });
-  $("#signal-filter").addEventListener("change", renderOpportunities);
-  $("#category-filter").addEventListener("change", renderOpportunities);
-  $("#source-filter").addEventListener("change", renderOpportunities);
+  $("#signal-filter").addEventListener("change", resetQueueAndRender);
+  $("#category-filter").addEventListener("change", resetQueueAndRender);
+  $("#vertical-filter").addEventListener("change", resetQueueAndRender);
+  $("#authentication-filter").addEventListener("change", resetQueueAndRender);
+  $("#source-filter").addEventListener("change", resetQueueAndRender);
   $("#snapshot-file").addEventListener("change", (event) => {
     if (event.target.files?.length) importFiles(Array.from(event.target.files));
     event.target.value = "";

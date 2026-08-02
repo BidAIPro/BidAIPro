@@ -208,6 +208,27 @@
                       <select id="category-filter"><option value="all">All categories</option></select>
                     </label>
                     <label>
+                      <span class="sr-only">Filter by resale vertical</span>
+                      <select id="vertical-filter">
+                        <option value="all">All resale verticals</option>
+                        <option value="Footwear &amp; Sneakers">Footwear &amp; sneakers</option>
+                        <option value="Watches">Watches</option>
+                        <option value="Rings &amp; Jewelry">Rings &amp; jewelry</option>
+                        <option value="Hats &amp; Headwear">Hats &amp; headwear</option>
+                        <option value="Collectibles">Collectibles</option>
+                        <option value="Electronics">Electronics</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span class="sr-only">Filter by authentication evidence</span>
+                      <select id="authentication-filter">
+                        <option value="all">All authentication states</option>
+                        <option value="source-stated">Source-stated authentication</option>
+                        <option value="not-supplied">Authentication not supplied</option>
+                      </select>
+                    </label>
+                    <label>
                       <span class="sr-only">Filter by marketplace</span>
                       <select id="source-filter"><option value="all">All marketplaces</option></select>
                     </label>
@@ -217,6 +238,10 @@
                   <span>ITEM / SIGNAL</span><span>OBSERVED / CLOSE</span><span>SAFE CEILING</span><span>EXPECTED PROFIT</span><span>SOURCE</span>
                 </div>
                 <div class="opportunity-list" data-opportunity-list></div>
+                <div class="queue-pagination" data-queue-pagination hidden>
+                  <span data-queue-visible-count>Showing 0 listings</span>
+                  <button class="button button-quiet" type="button" data-load-more>Load 250 more</button>
+                </div>
                 <div class="empty-state" data-queue-empty hidden>
                   <span aria-hidden="true">⌕</span>
                   <h4>No listings match</h4>
@@ -298,13 +323,13 @@
 
             <div class="source-status-card">
               <div class="source-status-icon" aria-hidden="true">✓</div>
-              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published listing snapshots are available. The latest source observation was <span data-research-observed>not yet received</span>. Automated feeds refresh through GitHub Actions when configured; imported and direct records stay on this device.</p></div>
+              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published listing snapshots are available. The latest source observation was <span data-research-observed>not yet received</span>. The built-in ShopGoodwill catalog refreshes in GitHub Actions; optional feeds and direct records merge into the same evidence ledger.</p></div>
               <span class="status-chip"><i></i> PROVENANCE TRACKED</span>
             </div>
 
             <dl class="source-metadata source-metadata-grid" aria-label="Source pipeline metadata">
-              <div><dt>Ingestion mode</dt><dd>Multi-market feeds + direct records</dd></div>
-              <div><dt>Refresh cadence</dt><dd>Adaptive 5 min–6 hours</dd></div>
+              <div><dt>Ingestion mode</dt><dd>ShopGoodwill catalog + optional feeds</dd></div>
+              <div><dt>Refresh cadence</dt><dd>Hourly · 5 min · final 30 sec</dd></div>
               <div><dt>Latest observation</dt><dd data-research-observed>Awaiting first snapshot</dd></div>
               <div><dt>Published records</dt><dd data-research-count>0</dd></div>
               <div><dt>Marketplaces observed</dt><dd data-market-count>0</dd></div>
@@ -313,11 +338,11 @@
             <section class="apify-connector-card" aria-labelledby="apify-connector-heading">
               <div class="connector-card-head">
                 <div class="connector-identity">
-                  <span class="connector-mark" aria-hidden="true">AP</span>
+                    <span class="connector-mark" aria-hidden="true">SG</span>
                   <div>
                     <span class="section-kicker"><i></i> AUTOMATION BRIDGE</span>
-                    <h3 id="apify-connector-heading">Adaptive multi-market orchestrator</h3>
-                    <p>Run configured Apify Tasks when a marketplace is due, then merge their real Dataset results without exposing credentials to the public site.</p>
+                    <h3 id="apify-connector-heading">Built-in ShopGoodwill discovery</h3>
+                    <p>Pull the real public bid catalog in GitHub's cloud, prioritize resale categories, then merge optional marketplace feeds without exposing credentials to the public site.</p>
                   </div>
                 </div>
                 <span class="connector-installed"><i aria-hidden="true"></i> ORCHESTRATOR INSTALLED</span>
@@ -327,24 +352,24 @@
                 <li>
                   <span class="connector-step">01</span>
                   <span class="connector-flow-icon" aria-hidden="true">&#8599;</span>
-                  <div><strong>Authorized collectors</strong><p>Each configured marketplace Task writes normalized, source-linked auction records after its run.</p></div>
+                  <div><strong>Broad live catalog</strong><p>The hourly pass imports up to 10,000 nearest-closing real ShopGoodwill listings with canonical item links and images.</p></div>
                 </li>
                 <li>
                   <span class="connector-step">02</span>
                   <span class="connector-flow-icon" aria-hidden="true">&#9642;</span>
-                  <div><strong>Isolated Datasets</strong><p>Marketplace results stay separated by source key until the atomic BidAI merge.</p></div>
+                  <div><strong>Resale category discovery</strong><p>Dedicated searches reinforce footwear, watches, rings, hats, collectibles, electronics, and authentication wording.</p></div>
                 </li>
                 <li>
                   <span class="connector-step">03</span>
                   <span class="connector-flow-icon" aria-hidden="true">&#8635;</span>
-                  <div><strong>Adaptive BidAI import</strong><p>GitHub Actions checks every five minutes and increases collection frequency as auctions approach closing.</p></div>
+                  <div><strong>Adaptive BidAI import</strong><p>GitHub checks every source hourly, every five minutes inside 30 minutes, and every 30 seconds during the final five minutes.</p></div>
                 </li>
               </ol>
 
               <div class="connector-security">
                 <div>
                   <span class="security-mark" aria-hidden="true">&#9635;</span>
-                  <p><strong>Server-side secrets only.</strong> Your Apify token stays in GitHub Actions secrets and is never shipped to the browser.</p>
+                  <p><strong>Cloud-side collection.</strong> ShopGoodwill needs no token; optional feed credentials stay in GitHub Actions secrets and are never shipped to the browser.</p>
                 </div>
                 <a class="connector-docs-link" href="https://github.com/BidAIPro/BidAIPro/blob/main/docs/AUTOMATION.md" target="_blank" rel="noreferrer noopener">Open setup guide <span aria-hidden="true">&#8599;</span></a>
               </div>

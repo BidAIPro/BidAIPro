@@ -8,10 +8,27 @@ const AUTHORIZED_VALUE = "true";
 const OUTPUT_PREFIX = "window.BIDAI_LIVE_SNAPSHOTS = ";
 const MAX_HISTORY_POINTS = 250;
 const MAX_COMPARABLES = 50;
-const MAX_RETAINED_ITEMS = 5_000;
+const APIFY_PAGE_SIZE = 5_000;
+const MAX_RETAINED_ITEMS = 50_000;
 const MAX_RESPONSE_BYTES = 20_000_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const APIFY_API_ORIGIN = "https://api.apify.com";
+const SHOPGOODWILL_API_ORIGIN = "https://buyerapi.shopgoodwill.com";
+const SHOPGOODWILL_SEARCH_PATH = "/api/Search/ItemListing";
+const SHOPGOODWILL_ITEM_PATH = "/api/ItemDetail/GetItemDetailModelByItemId/";
+const SHOPGOODWILL_PAGE_SIZE = 40;
+const SHOPGOODWILL_MAX_CATALOG_ITEMS = 10_000;
+const SHOPGOODWILL_REQUEST_CONCURRENCY = 4;
+const SHOPGOODWILL_PRIORITY_SEARCH_LIMIT = 200;
+const SHOPGOODWILL_PRIORITY_SEARCHES = [
+  "authenticated sneakers",
+  "shoes",
+  "watches",
+  "rings",
+  "hats",
+  "collectibles",
+  "electronics",
+];
 const VERIFIED_FORECAST_STATUSES = new Set(["available", "ready", "verified"]);
 const SOURCE_DOMAINS = [
   ["shopgoodwill.com", "shopgoodwill"],
@@ -479,6 +496,419 @@ async function readJsonResponse(response) {
   return JSON.parse(new TextDecoder().decode(combined));
 }
 
+async function fetchJson(url, requestConfiguration) {
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: requestConfiguration.headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new Error("The authorized feed request failed.");
+  }
+  if (!response.ok) throw new Error(`The authorized feed returned HTTP ${response.status}.`);
+  try {
+    return await readJsonResponse(response);
+  } catch (error) {
+    if (String(error?.message || "").includes("exceeds the 20 MB limit")) throw error;
+    throw new Error("The authorized feed did not return valid JSON.");
+  }
+}
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchShopGoodwillJson(path, options = {}) {
+  const url = new URL(path, SHOPGOODWILL_API_ORIGIN);
+  let lastStatus = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers: {
+          accept: "application/json",
+          origin: "https://shopgoodwill.com",
+          referer: "https://shopgoodwill.com/",
+          ...(options.body ? { "content-type": "application/json" } : {}),
+          ...options.headers,
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch {
+      if (attempt === 2) throw new Error("The ShopGoodwill public catalog request failed.");
+      await sleep(500 * (attempt + 1));
+      continue;
+    }
+    if (response.ok) {
+      try {
+        return await readJsonResponse(response);
+      } catch (error) {
+        if (String(error?.message || "").includes("exceeds the 20 MB limit")) throw error;
+        throw new Error("The ShopGoodwill public catalog did not return valid JSON.");
+      }
+    }
+    lastStatus = response.status;
+    if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break;
+    const retryAfterSeconds = Number.parseInt(response.headers.get("retry-after") || "", 10);
+    await sleep(Number.isFinite(retryAfterSeconds)
+      ? Math.min(10_000, retryAfterSeconds * 1_000)
+      : 750 * (attempt + 1));
+  }
+  throw new Error(`The ShopGoodwill public catalog returned HTTP ${lastStatus}.`);
+}
+
+async function mapWithConcurrency(values, limit, mapper) {
+  const results = new Array(values.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+  return results;
+}
+
+function shopGoodwillSearchRequest(page, searchText = "") {
+  return {
+    searchText,
+    selectedGroup: searchText ? "Keyword" : "",
+    selectedCategoryIds: null,
+    selectedSellerIds: null,
+    lowPrice: "0",
+    highPrice: "999999",
+    searchBuyNowOnly: "0",
+    searchPickupOnly: false,
+    searchNoPickupOnly: false,
+    searchOneCentShippingOnly: false,
+    searchDescriptions: Boolean(searchText),
+    searchClosedAuctions: false,
+    closedAuctionEndingDate: new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" }),
+    closedAuctionDaysBack: "7",
+    searchCanadaShipping: false,
+    searchInternationalShippingOnly: false,
+    sortColumn: 1,
+    page,
+    pageSize: SHOPGOODWILL_PAGE_SIZE,
+    sortDescending: false,
+    savedSearchId: 0,
+    useBuyerPrefs: true,
+    searchUSOnlyShipping: false,
+    categoryLevelNo: 1,
+    isSize: false,
+    isMultipleCategoryIds: false,
+    partNumber: "",
+    catIds: "",
+    isWeddingCatagory: false,
+    sellerStore: "",
+  };
+}
+
+async function fetchShopGoodwillSearchPage(page, searchText = "") {
+  const payload = await fetchShopGoodwillJson(SHOPGOODWILL_SEARCH_PATH, {
+    method: "POST",
+    body: JSON.stringify(shopGoodwillSearchRequest(page, searchText)),
+  });
+  const items = payload?.searchResults?.items;
+  if (!Array.isArray(items)) throw new Error("The ShopGoodwill catalog response did not include listing items.");
+  return payload;
+}
+
+function zonedDateTimeToIso(value, timeZone = "America/Los_Angeles") {
+  const match = String(value || "").trim().match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?/,
+  );
+  if (!match) return timestamp(value);
+  const desired = {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+    second: Number(match[6]),
+    millisecond: Number(String(match[7] || "0").padEnd(3, "0")),
+  };
+  const desiredAsUtc = Date.UTC(
+    desired.year,
+    desired.month - 1,
+    desired.day,
+    desired.hour,
+    desired.minute,
+    desired.second,
+    desired.millisecond,
+  );
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  let candidate = desiredAsUtc;
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(candidate))
+      .filter(({ type }) => type !== "literal")
+      .map(({ type, value: partValue }) => [type, Number(partValue)]));
+    const representedAsUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+      desired.millisecond,
+    );
+    candidate += desiredAsUtc - representedAsUtc;
+  }
+  return new Date(candidate).toISOString();
+}
+
+function shopGoodwillCategory(record) {
+  const breadcrumb = Array.isArray(record?.categoryBreadCrumbs)
+    ? record.categoryBreadCrumbs
+        .map((entry) => text(pick(entry, "name", "label", "categoryName")))
+        .filter(Boolean)
+        .join(" > ")
+    : "";
+  return text(
+    pick(record, "catFullName", "categoryFullName", "categoryName", "category", "subcategory"),
+    breadcrumb || "Unclassified",
+  );
+}
+
+function resaleVerticalFor(record, category) {
+  const haystack = `${text(record?.title)} ${category}`.toLowerCase();
+  if (/\b(shoe|shoes|sneaker|sneakers|footwear|boots?|loafers?|heels?|sandals?)\b/.test(haystack)) return "Footwear & Sneakers";
+  if (/\b(watch|watches|timepiece|chronograph)\b/.test(haystack)) return "Watches";
+  if (/\b(ring|rings|jewelry|jewellery|gemstone|gold|silver|diamond|bracelet|necklace|earrings?)\b/.test(haystack)) return "Rings & Jewelry";
+  if (/\b(hat|hats|cap|caps|headwear|snapback|beanie)\b/.test(haystack)) return "Hats & Headwear";
+  if (/\b(collectible|collectibles|memorabilia|trading card|comic|figurine|action figure|antique|vintage)\b/.test(haystack)) return "Collectibles";
+  if (/\b(electronics?|computer|laptop|tablet|phone|camera|console|gaming|audio|stereo|receiver|speaker|headphones?)\b/.test(haystack)) return "Electronics";
+  return "Other";
+}
+
+function authenticationFor(record) {
+  const evidenceText = `${text(record?.title)} ${text(record?.description)}`;
+  const match = evidenceText.match(/\b(authenticated|authentication (?:card|certificate)|certificate of authenticity|coa(?: included| attached| authenticated)?|entrupy|real authentication)\b/i);
+  if (!match) return { status: "not-supplied", evidence: "No authentication evidence is supplied in the catalog record." };
+  return {
+    status: "source-stated",
+    evidence: `The source listing states “${match[0]}”; independently verify the document and item before bidding.`,
+  };
+}
+
+function shopGoodwillExactTitleModelKey(title) {
+  const normalizedTitle = text(title)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 160);
+  return normalizedTitle ? `shopgoodwill:title-exact-v1:${normalizedTitle}` : "";
+}
+
+function shopGoodwillRecord(record, capturedAt, detail = false) {
+  const externalId = text(pick(record, "itemId", "id"));
+  if (!externalId) return null;
+  const title = text(record?.title);
+  if (!title) return null;
+  const currentBid = money(pick(record, "currentPrice", "minimumBid", "startingPrice"));
+  const endsAt = zonedDateTimeToIso(record?.endTime);
+  const serverTime = zonedDateTimeToIso(record?.serverTime);
+  const ended = detail && (boolean(record?.isItemEndTimeExpire, false)
+    || (endsAt && serverTime && Date.parse(endsAt) <= Date.parse(serverTime)));
+  const category = shopGoodwillCategory(record);
+  const authentication = authenticationFor(record);
+  const bids = integer(pick(record, "numBids", "numberOfBids", "bidCount"));
+  const imageUrl = text(pick(record, "imageURL", "imageUrl", "thumbnailUrlString"))
+    .replaceAll("\\", "/");
+  return {
+    externalId,
+    source: "ShopGoodwill",
+    sourceKey: "shopgoodwill",
+    url: `https://shopgoodwill.com/item/${encodeURIComponent(externalId)}`,
+    imageUrl,
+    title,
+    category,
+    resaleVertical: resaleVerticalFor(record, category),
+    modelKey: shopGoodwillExactTitleModelKey(title),
+    forecastBasis: "Exact normalized ShopGoodwill title only; no broad-category or semantic substitutions.",
+    authenticationStatus: authentication.status,
+    authenticationEvidence: authentication.evidence,
+    currentBid,
+    bidCount: bids,
+    endsAt,
+    status: ended ? "ended" : "active",
+    ...(ended && currentBid > 0 ? { finalPrice: currentBid } : {}),
+    demand: Math.min(95, Math.round(35 + Math.log2(bids + 1) * 12)),
+    identifiedAs: authentication.status === "source-stated"
+      ? "Source-stated authentication; document and item still require independent verification"
+      : "Source listing title and category; identity and authenticity are not independently verified",
+    riskSummary: authentication.status === "source-stated"
+      ? "Authentication wording was supplied by the source listing, not independently verified by BidAI Pro. Confirm the authenticator, item identifiers, condition, and return options."
+      : "The catalog record does not supply authentication evidence. Confirm identity, condition, shipping, and return options before bidding.",
+    observedAt: capturedAt,
+  };
+}
+
+function deduplicateShopGoodwillRecords(records) {
+  const byId = new Map();
+  for (const record of records) {
+    if (!record?.externalId) continue;
+    const prior = byId.get(record.externalId);
+    if (!prior
+      || Number(record.currentBid) > Number(prior.currentBid)
+      || (Number(record.currentBid) === Number(prior.currentBid) && record.status === "ended" && prior.status !== "ended")) {
+      byId.set(record.externalId, record);
+    }
+  }
+  return [...byId.values()];
+}
+
+function shopGoodwillIds(environment, name) {
+  return [...new Set(String(environment[name] || "")
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter((value) => /^\d{1,20}$/.test(value)))];
+}
+
+async function fetchShopGoodwillDetails(itemIds, capturedAt) {
+  if (!itemIds.length) return [];
+  const payloads = await mapWithConcurrency(
+    itemIds,
+    SHOPGOODWILL_REQUEST_CONCURRENCY,
+    (itemId) => fetchShopGoodwillJson(`${SHOPGOODWILL_ITEM_PATH}${encodeURIComponent(itemId)}`),
+  );
+  return payloads
+    .map((record) => shopGoodwillRecord(record, capturedAt, true))
+    .filter(Boolean);
+}
+
+async function fetchShopGoodwillCatalog(environment) {
+  const capturedAt = new Date().toISOString();
+  const catalogLimit = boundedInteger(
+    environment.BIDAI_SHOPGOODWILL_CATALOG_LIMIT,
+    SHOPGOODWILL_MAX_CATALOG_ITEMS,
+    1,
+    SHOPGOODWILL_MAX_CATALOG_ITEMS,
+  );
+  const priorityLimit = boundedInteger(
+    environment.BIDAI_SHOPGOODWILL_PRIORITY_LIMIT,
+    SHOPGOODWILL_PRIORITY_SEARCH_LIMIT,
+    0,
+    1_000,
+  );
+  const first = await fetchShopGoodwillSearchPage(1);
+  const sourceCap = boundedInteger(first?.maxTotalRecords, SHOPGOODWILL_MAX_CATALOG_ITEMS, 1, SHOPGOODWILL_MAX_CATALOG_ITEMS);
+  const sourceCount = boundedInteger(first?.searchResults?.itemCount, catalogLimit, 0, Number.MAX_SAFE_INTEGER);
+  const broadLimit = Math.min(catalogLimit, sourceCap, sourceCount || catalogLimit);
+  const broadPages = Math.max(1, Math.ceil(broadLimit / SHOPGOODWILL_PAGE_SIZE));
+  const remainingPages = Array.from({ length: Math.max(0, broadPages - 1) }, (_, index) => index + 2);
+  const broadPayloads = [first, ...await mapWithConcurrency(
+    remainingPages,
+    SHOPGOODWILL_REQUEST_CONCURRENCY,
+    (page) => fetchShopGoodwillSearchPage(page),
+  )];
+  const broadRecords = broadPayloads
+    .flatMap((payload) => payload.searchResults.items)
+    .slice(0, broadLimit)
+    .map((record) => shopGoodwillRecord(record, capturedAt, false))
+    .filter(Boolean);
+
+  const priorityRecords = [];
+  if (priorityLimit > 0) {
+    const pagesPerSearch = Math.ceil(priorityLimit / SHOPGOODWILL_PAGE_SIZE);
+    const requests = SHOPGOODWILL_PRIORITY_SEARCHES.flatMap((searchText) => (
+      Array.from({ length: pagesPerSearch }, (_, index) => ({ searchText, page: index + 1 }))
+    ));
+    const priorityPayloads = await mapWithConcurrency(
+      requests,
+      SHOPGOODWILL_REQUEST_CONCURRENCY,
+      ({ page, searchText }) => fetchShopGoodwillSearchPage(page, searchText),
+    );
+    for (let searchIndex = 0; searchIndex < SHOPGOODWILL_PRIORITY_SEARCHES.length; searchIndex += 1) {
+      const offset = searchIndex * pagesPerSearch;
+      const records = priorityPayloads
+        .slice(offset, offset + pagesPerSearch)
+        .flatMap((payload) => payload.searchResults.items)
+        .slice(0, priorityLimit);
+      priorityRecords.push(...records
+        .map((record) => shopGoodwillRecord(record, capturedAt, false))
+        .filter(Boolean));
+    }
+  }
+
+  const recoveryRecords = await fetchShopGoodwillDetails(
+    shopGoodwillIds(environment, "BIDAI_SHOPGOODWILL_OUTCOME_IDS"),
+    capturedAt,
+  );
+  const records = deduplicateShopGoodwillRecords([...broadRecords, ...priorityRecords, ...recoveryRecords]);
+  if (!records.length) throw new Error("The ShopGoodwill public catalog contained no active bid listings.");
+  return {
+    generatedAt: capturedAt,
+    sourceMode: "shopgoodwill-public-catalog",
+    sourceNotes: [
+      `Loaded ${records.length.toLocaleString("en-US")} real ShopGoodwill bid listings, ordered toward the nearest closes.`,
+      `The broad search is limited to ${sourceCap.toLocaleString("en-US")} results by the source service; priority searches add footwear, watches, rings, hats, collectibles, and electronics coverage.`,
+      "Authentication is never inferred: only explicit source wording is labeled as source-stated, and still requires independent verification.",
+    ],
+    items: records,
+  };
+}
+
+async function fetchShopGoodwillItems(environment) {
+  const itemIds = shopGoodwillIds(environment, "BIDAI_SHOPGOODWILL_ITEM_IDS");
+  if (!itemIds.length) throw new Error("No valid ShopGoodwill item IDs were supplied for the adaptive close check.");
+  const capturedAt = new Date().toISOString();
+  const records = await fetchShopGoodwillDetails(itemIds, capturedAt);
+  if (!records.length) throw new Error("The ShopGoodwill adaptive close check returned no listing records.");
+  return {
+    generatedAt: capturedAt,
+    sourceMode: "shopgoodwill-adaptive-close",
+    sourceNotes: [
+      `Checked ${records.length.toLocaleString("en-US")} known ShopGoodwill listing${records.length === 1 ? "" : "s"} near close.`,
+      "Bid observations are retained only when the observed price is strictly higher; final outcome metadata may still be recorded.",
+    ],
+    items: records,
+  };
+}
+
+async function fetchPayload(requestConfiguration) {
+  if (requestConfiguration.sourceMode === "shopgoodwill-public-catalog") {
+    return requestConfiguration.shopGoodwillMode === "items"
+      ? fetchShopGoodwillItems(requestConfiguration.environment)
+      : fetchShopGoodwillCatalog(requestConfiguration.environment);
+  }
+  if (requestConfiguration.sourceMode !== "apify-dataset") {
+    return fetchJson(requestConfiguration.feedUrl, requestConfiguration);
+  }
+
+  const records = [];
+  for (let offset = 0; offset < MAX_RETAINED_ITEMS; offset += APIFY_PAGE_SIZE) {
+    const pageUrl = new URL(requestConfiguration.feedUrl);
+    if (offset) pageUrl.searchParams.set("offset", String(offset));
+    const page = await fetchJson(pageUrl, requestConfiguration);
+    if (!Array.isArray(page)) throw new Error("The Apify Dataset response must be a JSON array.");
+    records.push(...page.slice(0, MAX_RETAINED_ITEMS - records.length));
+    if (page.length < APIFY_PAGE_SIZE || records.length >= MAX_RETAINED_ITEMS) break;
+  }
+  return records;
+}
+
 function bearerToken(value, label) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
@@ -492,6 +922,18 @@ function feedRequestConfiguration(environment) {
   const sourceLabelOverride = text(environment.BIDAI_SOURCE_LABEL_OVERRIDE);
   const sourceKeyOverride = normalizeSourceKey(environment.BIDAI_SOURCE_KEY_OVERRIDE);
   const apifyDatasetId = text(environment.BIDAI_APIFY_DATASET_ID);
+  const shopGoodwillMode = text(environment.BIDAI_SHOPGOODWILL_MODE).toLowerCase();
+  if (["catalog", "items"].includes(shopGoodwillMode)) {
+    return {
+      feedUrl: null,
+      headers: { accept: "application/json" },
+      sourceMode: "shopgoodwill-public-catalog",
+      sourceLabel: "ShopGoodwill",
+      sourceKey: "shopgoodwill",
+      shopGoodwillMode,
+      environment,
+    };
+  }
   if (apifyDatasetId) {
     if (!/^[a-zA-Z0-9._~-]{1,200}$/.test(apifyDatasetId)) {
       throw new Error("BIDAI_APIFY_DATASET_ID must be an Apify dataset ID or username~dataset-name.");
@@ -501,7 +943,7 @@ function feedRequestConfiguration(environment) {
     feedUrl.searchParams.set("format", "json");
     feedUrl.searchParams.set("clean", "true");
     feedUrl.searchParams.set("desc", "1");
-    feedUrl.searchParams.set("limit", String(MAX_RETAINED_ITEMS));
+    feedUrl.searchParams.set("limit", String(APIFY_PAGE_SIZE));
 
     const headers = { accept: "application/json" };
     const token = bearerToken(environment.BIDAI_APIFY_TOKEN, "BIDAI_APIFY_TOKEN");
@@ -629,9 +1071,17 @@ function mergeObservations(...collections) {
       byTimestamp.set(observation.observedAt, merged);
     }
   }
-  return [...byTimestamp.values()]
-    .sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt))
-    .slice(-MAX_HISTORY_POINTS);
+  const chronological = [...byTimestamp.values()]
+    .sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt));
+  const increases = [];
+  let highestBid = Number.NEGATIVE_INFINITY;
+  for (const observation of chronological) {
+    const bid = Number(observation.currentBid);
+    if (!Number.isFinite(bid) || bid <= highestBid) continue;
+    increases.push(observation);
+    highestBid = bid;
+  }
+  return increases.slice(-MAX_HISTORY_POINTS);
 }
 
 function externalIdentityKey(value, sourceKey = "") {
@@ -658,6 +1108,27 @@ function retentionOrder(a, b) {
 function reconcileRetainedStatus(item) {
   if (item?.status !== "active" || !item?.endsAt || Date.parse(item.endsAt) > Date.now()) return item;
   return { ...item, status: "ended" };
+}
+
+function compactShopGoodwillItem(item) {
+  if (item?.sourceKey !== "shopgoodwill") return item;
+  const compact = { ...item };
+  for (const [field, value] of Object.entries(compact)) {
+    if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) delete compact[field];
+  }
+  if (compact.shippingKnown === false) delete compact.shippingKnown;
+  if (compact.feeKnown === false) delete compact.feeKnown;
+  if (compact.authenticationStatus === "not-supplied") delete compact.authenticationStatus;
+  if (compact.authenticationEvidence === "No authentication evidence is supplied in the catalog record.") {
+    delete compact.authenticationEvidence;
+  }
+  if (compact.identifiedAs === "Source listing title and category; identity and authenticity are not independently verified") {
+    delete compact.identifiedAs;
+  }
+  if (compact.riskSummary === "The catalog record does not supply authentication evidence. Confirm identity, condition, shipping, and return options before bidding.") {
+    delete compact.riskSummary;
+  }
+  return compact;
 }
 
 function hasVerifiedForecast(forecast, context = {}) {
@@ -908,12 +1379,12 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     sourceKey: true,
     url: hasOwn(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"),
     sourceUrl: hasOwn(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url"),
-    imageUrl: hasOwn(record, "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url"),
-    category: hasOwn(record, "category", "department", "type"),
+    imageUrl: hasOwn(record, "imageUrl", "image_url", "imageURL", "thumbnailUrl", "thumbnail_url"),
+    category: hasOwn(record, "category", "categoryName", "catFullName", "department", "type"),
     currentBid: hasOwn(record, "currentBid", "current_bid", "currentPrice", "current_price", "price", "bidAmount", "bid_amount", "finalPrice", "final_price", "soldPrice", "sold_price"),
-    shipping: hasOwn(record, "shipping", "shippingCost", "shipping_cost"),
-    shippingKnown: hasOwn(record, "shipping", "shippingCost", "shipping_cost", "shippingKnown", "shipping_known"),
-    bidCount: hasOwn(record, "bidCount", "bid_count", "bids"),
+    shipping: hasOwn(record, "shipping", "shippingCost", "shipping_cost", "shippingPrice"),
+    shippingKnown: hasOwn(record, "shipping", "shippingCost", "shipping_cost", "shippingPrice", "shippingKnown", "shipping_known"),
+    bidCount: hasOwn(record, "bidCount", "bid_count", "bids", "numBids", "numberOfBids"),
     endsAt: hasOwn(record, "endsAt", "ends_at", "endTime", "end_time", "closeTime", "close_time"),
     expectedClose: hasOwn(record, "expectedClose", "expected_close", "predictedFinal", "predicted_final"),
     resaleLow: comparableSalesSupplied || hasOwn(record, "resaleLow", "resale_low"),
@@ -924,6 +1395,10 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     rarity: hasOwn(record, "rarity", "rarityScore", "rarity_score"),
     identityConfidence: hasOwn(record, "identityConfidence", "identity_confidence"),
     conditionConfidence: hasOwn(record, "conditionConfidence", "condition_confidence"),
+    resaleVertical: hasOwn(record, "resaleVertical", "resale_vertical"),
+    authenticationStatus: hasOwn(record, "authenticationStatus", "authentication_status"),
+    authenticationEvidence: hasOwn(record, "authenticationEvidence", "authentication_evidence"),
+    riskSummary: hasOwn(record, "riskSummary", "risk_summary"),
     compCount: comparableSalesSupplied || hasOwn(record, "compCount", "comp_count", "comparableCount", "comparable_count"),
     compRecencyDays: hasOwn(record, "compRecencyDays", "comp_recency_days"),
     modelKey: hasOwn(record, "modelKey", "model_key", "compGroup", "comp_group", "similarItemKey", "similar_item_key"),
@@ -948,7 +1423,7 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   const expectedClose = money(rawExpectedClose, null);
   const normalized = {
     title,
-    category: text(pick(record, "category", "department", "type"), "Unclassified"),
+    category: text(pick(record, "category", "catFullName", "categoryName", "department", "type"), "Unclassified"),
     url: httpUrl(pick(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url")),
     endsAt,
   };
@@ -960,7 +1435,7 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   const defaults = {
     observedAt,
     currentBid: bid,
-    bidCount: integer(pick(record, "bidCount", "bid_count", "bids")),
+    bidCount: integer(pick(record, "bidCount", "bid_count", "bids", "numBids", "numberOfBids")),
     expectedClose,
     endsAt,
   };
@@ -992,7 +1467,7 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
   const rawResaleMedian = pick(record, "resaleMedian", "resale_median", "resaleValue", "resale_value");
   const rawResaleHigh = pick(record, "resaleHigh", "resale_high");
   const rawCompCount = pick(record, "compCount", "comp_count", "comparableCount", "comparable_count");
-  const rawShipping = pick(record, "shipping", "shippingCost", "shipping_cost");
+  const rawShipping = pick(record, "shipping", "shippingCost", "shipping_cost", "shippingPrice");
   const normalizedShipping = money(rawShipping, null);
   const rawMarketplaceFee = pick(record, "marketplaceFee", "marketplace_fee");
   const normalizedMarketplaceFee = percentage(rawMarketplaceFee, null);
@@ -1014,9 +1489,12 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     sourceKey,
     url: normalized.url,
     sourceUrl: normalized.url,
-    imageUrl: httpUrl(pick(record, "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url")),
+    imageUrl: httpUrl(pick(record, "imageUrl", "image_url", "imageURL", "thumbnailUrl", "thumbnail_url")),
     title: normalized.title,
     category: normalized.category,
+    resaleVertical: text(pick(record, "resaleVertical", "resale_vertical"), "Other"),
+    authenticationStatus: text(pick(record, "authenticationStatus", "authentication_status"), "not-supplied"),
+    authenticationEvidence: text(pick(record, "authenticationEvidence", "authentication_evidence"), "No authentication evidence supplied."),
     status,
     currentBid: bid,
     shipping: normalizedShipping,
@@ -1042,6 +1520,7 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     ...(forecast ? { forecast } : {}),
     ...(intrinsicEvidenceSupplied ? { intrinsicValueEvidence, valuationBasis } : {}),
     identifiedAs: text(pick(record, "identifiedAs", "identified_as"), "Feed-provided identity; verify before bidding"),
+    riskSummary: text(pick(record, "riskSummary", "risk_summary")),
     publishedResearch: true,
     marketplaceFee: normalizedMarketplaceFee,
     feeKnown: normalizedMarketplaceFee !== null
@@ -1103,7 +1582,16 @@ async function readPreviousEnvelope() {
 async function writeAtomically(envelope) {
   await mkdir(outputDirectory, { recursive: true });
   const temporaryPath = join(outputDirectory, `.live-snapshots.${process.pid}.${Date.now()}.tmp`);
-  const serialized = JSON.stringify(envelope, null, 2)
+  const serialized = [
+    "{",
+    `  \"observedAt\": ${JSON.stringify(envelope.observedAt)},`,
+    `  \"sourceMode\": ${JSON.stringify(envelope.sourceMode)},`,
+    `  \"sourceNotes\": ${JSON.stringify(envelope.sourceNotes)},`,
+    "  \"items\": [",
+    envelope.items.map((item) => `    ${JSON.stringify(item)}`).join(",\n"),
+    "  ]",
+    "}",
+  ].join("\n")
     .replaceAll("<", "\\u003c")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
@@ -1119,32 +1607,16 @@ async function writeAtomically(envelope) {
 }
 
 async function run() {
-  if (process.env.BIDAI_SOURCE_AUTHORIZED !== AUTHORIZED_VALUE) {
+  const shopGoodwillMode = text(process.env.BIDAI_SHOPGOODWILL_MODE).toLowerCase();
+  if (process.env.BIDAI_SOURCE_AUTHORIZED !== AUTHORIZED_VALUE
+    && !["catalog", "items"].includes(shopGoodwillMode)) {
     console.log("[refresh-feed] No-op: BIDAI_SOURCE_AUTHORIZED must be exactly 'true'. No network request was made.");
     return;
   }
 
   const requestConfiguration = feedRequestConfiguration(process.env);
 
-  let response;
-  try {
-    response = await fetch(requestConfiguration.feedUrl, {
-      headers: requestConfiguration.headers,
-      redirect: "error",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-  } catch {
-    throw new Error("The authorized feed request failed.");
-  }
-  if (!response.ok) throw new Error(`The authorized feed returned HTTP ${response.status}.`);
-
-  let payload;
-  try {
-    payload = await readJsonResponse(response);
-  } catch (error) {
-    if (String(error?.message || "").includes("exceeds the 20 MB limit")) throw error;
-    throw new Error("The authorized feed did not return valid JSON.");
-  }
+  const payload = await fetchPayload(requestConfiguration);
 
   const records = extractRecords(payload);
   if (!records.length) throw new Error("The authorized feed contained no item records.");
@@ -1225,6 +1697,16 @@ async function run() {
     const retainedId = previous?.id || item.id;
     const duplicate = mergedById.get(retainedId);
     const priorState = duplicate || previous;
+    const bidIncreased = !priorState || Number(item.currentBid) > Number(priorState.currentBid);
+    const snapshotItem = bidIncreased ? item : {
+      ...item,
+      currentBid: priorState.currentBid,
+      bidCount: priorState.bidCount,
+      expectedClose: priorState.expectedClose,
+      observedAt: priorState.observedAt,
+      ...(priorState.forecast ? { forecast: priorState.forecast } : {}),
+    };
+    if (!bidIncreased && !priorState.forecast) delete snapshotItem.forecast;
     const incomingObservations = item.observations.map((observation) => ({
       ...observation,
       ...(!item._fieldPresence?.currentBid && priorState?.currentBid !== undefined
@@ -1241,7 +1723,7 @@ async function run() {
     const merged = {
       ...(previous || {}),
       ...(duplicate || {}),
-      ...item,
+      ...snapshotItem,
       id: retainedId,
       observations: mergeObservations(previous?.observations, duplicate?.observations, incomingObservations),
       comparableSales: mergeComparableEvidence(
@@ -1260,15 +1742,15 @@ async function run() {
         merged[field] = priorState[field];
       }
     }
-    const immutableForecastSource = duplicate?.observedAt === item.observedAt && duplicate?.forecast
+    const immutableForecastSource = duplicate?.observedAt === snapshotItem.observedAt && duplicate?.forecast
       ? duplicate
-      : (previous?.observedAt === item.observedAt && previous?.forecast ? previous : null);
+      : (previous?.observedAt === snapshotItem.observedAt && previous?.forecast ? previous : null);
     if (immutableForecastSource) {
       merged.forecast = immutableForecastSource.forecast;
       merged._forecastSnapshotLocked = true;
     } else {
       delete merged._forecastSnapshotLocked;
-      if (!Object.prototype.hasOwnProperty.call(item, "forecast")) delete merged.forecast;
+      if (!Object.prototype.hasOwnProperty.call(snapshotItem, "forecast")) delete merged.forecast;
     }
     mergedById.set(retainedId, merged);
   }
@@ -1284,13 +1766,19 @@ async function run() {
     .sort(retentionOrder)
     .slice(0, MAX_RETAINED_ITEMS);
   const items = applyEmpiricalClosingForecasts(retainedItems)
-    .map(({ _forecastSnapshotLocked: _locked, ...item }) => item);
+    .map(({ _forecastSnapshotLocked: _locked, ...item }) => item)
+    .map(compactShopGoodwillItem);
   const incomingNotes = pick(payload, "sourceNotes", "source_notes", "notes");
   const sourceNotes = (Array.isArray(incomingNotes) ? incomingNotes : [])
     .map((note) => text(note))
     .filter(Boolean);
+  const publishedObservedAt = items.reduce((latest, item) => {
+    const observedAt = timestamp(item?.observedAt);
+    if (!observedAt) return latest;
+    return !latest || Date.parse(observedAt) > Date.parse(latest) ? observedAt : latest;
+  }, previousEnvelope.observedAt || null);
   const envelope = {
-    observedAt: capturedAt,
+    observedAt: publishedObservedAt,
     sourceMode: text(pick(payload, "sourceMode", "source_mode"), requestConfiguration.sourceMode),
     sourceNotes: sourceNotes.length
       ? [...sourceNotes, "Prior unmatched records are retained for outcome and bid-history learning."]
