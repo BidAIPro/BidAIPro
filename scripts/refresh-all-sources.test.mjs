@@ -149,6 +149,73 @@ test("the five-minute wake skips sources whose auctions are more than 30 minutes
   assert.equal(await readFile(fixture.outputPath, "utf8"), original);
 });
 
+test("a configurable normal cadence refreshes a distant listing after its last successful check", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const now = Date.now();
+  const checkedAt = new Date(now - 20 * 60_000).toISOString();
+  await writeFile(fixture.outputPath, `${OUTPUT_PREFIX}${JSON.stringify({
+    observedAt: checkedAt,
+    lastCheckedAt: checkedAt,
+    sourceMode: "published",
+    sourceNotes: [],
+    items: [{
+      id: "shopgoodwill-distant-refresh",
+      externalId: "81234567",
+      sourceKey: "shopgoodwill",
+      source: "ShopGoodwill",
+      sourceUrl: "https://shopgoodwill.com/item/81234567",
+      url: "https://shopgoodwill.com/item/81234567",
+      title: "Distant electronics listing",
+      currentBid: 40,
+      bidCount: 4,
+      status: "active",
+      endsAt: new Date(now + 3 * 60 * 60_000).toISOString(),
+      observedAt: checkedAt,
+      lastCheckedAt: checkedAt,
+      observations: [{ observedAt: checkedAt, currentBid: 40, bidCount: 4, status: "active" }],
+    }],
+  })};\n`, "utf8");
+  const preloadPath = join(fixture.root, "mock-configurable-normal-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url) => {
+      if (!String(url).includes("/datasets/shopgoodwill-normal/items")) throw new Error("Unexpected request: " + url);
+      return new Response(JSON.stringify([{
+        externalId: "81234567",
+        title: "Distant electronics listing",
+        url: "https://shopgoodwill.com/item/81234567",
+        currentBid: 40,
+        bidCount: 4,
+        endsAt: ${JSON.stringify(new Date(now + 3 * 60 * 60_000).toISOString())},
+        observedAt: new Date().toISOString()
+      }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+  `, "utf8");
+
+  const result = await runNode([join(fixture.scripts, "refresh-all-sources.mjs")], {
+    cwd: fixture.root,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
+      BIDAI_SOURCE_AUTHORIZED: "true",
+      BIDAI_SHOPGOODWILL_ENABLED: "false",
+      BIDAI_APIFY_DATASET_ID: "shopgoodwill-normal",
+      BIDAI_SOURCE_KEY_OVERRIDE: "shopgoodwill",
+      BIDAI_SOURCE_LABEL_OVERRIDE: "ShopGoodwill",
+      BIDAI_NORMAL_REFRESH_MINUTES: "15",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  const envelope = await readEnvelope(fixture.outputPath);
+  assert.equal(envelope.items[0].observedAt, checkedAt, "No price change should preserve the price-change timestamp");
+  assert.ok(Date.parse(envelope.items[0].lastCheckedAt) > Date.parse(checkedAt));
+  assert.deepEqual(envelope.items[0].observations.map((point) => point.currentBid), [40]);
+});
+
 test("two marketplace Datasets merge real records without cross-site ID collisions", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));

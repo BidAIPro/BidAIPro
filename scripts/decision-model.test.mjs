@@ -118,6 +118,24 @@ test("a target-safe pawn route is recommended before an also-profitable online r
   assert.equal(model.recommendationLabel(result.recommendationState), "YES · Pawn profit");
 });
 
+test("snapshot cadence is configurable outside the locked final five and one minute windows", () => {
+  const model = loadModel();
+  model.setCloudControl({ normalMinutes: 120, nearCloseMinutes: 10 });
+  const now = Date.now();
+  const plan = (millisecondsRemaining) => model.snapshotPlanFor({
+    status: "active",
+    endsAt: new Date(now + millisecondsRemaining).toISOString(),
+    lastCheckedAt: new Date(now).toISOString(),
+  });
+
+  assert.equal(plan(2 * 60 * 60_000).intervalMinutes, 120);
+  assert.equal(plan(20 * 60_000).intervalMinutes, 10);
+  assert.equal(plan(4 * 60_000).intervalMinutes, 0.5);
+  assert.equal(plan(50_000).intervalMinutes, 1 / 12);
+  assert.match(plan(4 * 60_000).label, /30 sec/);
+  assert.match(plan(50_000).label, /5 sec/);
+});
+
 test("online resale becomes the recommendation when pawn misses the target-safe ceiling", () => {
   const model = loadModel();
   const result = model.assess(baseItem({ currentBid: 350 }));

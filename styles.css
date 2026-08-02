@@ -3209,6 +3209,533 @@ select {
   }
 }
 
+/* Cloud controls, source connections, and modal underwriting */
+.research-pass-actions,
+.view-intro-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.research-pass-action {
+  min-height: 38px;
+  padding: 0 13px;
+  color: #334039;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(30, 45, 36, 0.15);
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.research-pass-action.primary {
+  color: #15200f;
+  background: var(--lime);
+  border-color: #a5cc5d;
+}
+
+.decision-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.queue-panel {
+  order: 0;
+}
+
+.detail-panel {
+  display: none;
+  order: 1;
+}
+
+.queue-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.queue-head > div:first-child {
+  min-width: 0;
+}
+
+.queue-head h3 {
+  max-width: none;
+}
+
+.filter-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.filter-row label,
+.filter-row select {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .filter-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.cloud-refresh-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(520px, 1.35fr);
+  gap: 18px 28px;
+  margin: 16px 0;
+  padding: 22px;
+  overflow: hidden;
+  color: #f8fbf7;
+  background:
+    radial-gradient(circle at 94% 4%, rgba(199, 243, 109, 0.15), transparent 28%),
+    linear-gradient(135deg, #0d1511, #18231c);
+  border: 1px solid #26352c;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(15, 24, 19, 0.15);
+}
+
+.cloud-refresh-lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.refresh-orbit {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  color: #182310;
+  background: var(--lime);
+  border-radius: 12px;
+  font-size: 22px;
+  font-weight: 900;
+  place-items: center;
+}
+
+.cloud-refresh-card .section-kicker {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.cloud-refresh-card h3 {
+  margin: 5px 0 6px;
+  font-size: 20px;
+  letter-spacing: -0.035em;
+}
+
+.cloud-refresh-card p {
+  max-width: 540px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.cloud-refresh-card > dl {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 10px;
+}
+
+.cloud-refresh-card > dl div {
+  min-width: 0;
+  padding: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.cloud-refresh-card > dl div:last-child {
+  border-right: 0;
+}
+
+.cloud-refresh-card dt,
+.cloud-refresh-card dd {
+  margin: 0;
+}
+
+.cloud-refresh-card dt {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cloud-refresh-card dd {
+  margin-top: 5px;
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.cloud-refresh-card .locked {
+  background: rgba(199, 243, 109, 0.07);
+}
+
+.cloud-refresh-card .locked dd {
+  color: var(--lime);
+}
+
+.cloud-refresh-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 9px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.cloud-refresh-actions > div {
+  min-width: 220px;
+  margin-right: auto;
+}
+
+.cloud-refresh-actions strong,
+.cloud-refresh-actions small {
+  display: block;
+}
+
+.cloud-refresh-actions strong {
+  font-size: 10px;
+}
+
+.cloud-refresh-actions small {
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 8px;
+}
+
+.cloud-refresh-actions .button-quiet {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.marketplace-card-footer > div {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.marketplace-card-footer button {
+  padding: 0;
+  color: #315313;
+  background: transparent;
+  border: 0;
+  font-size: 7px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.marketplace-card-footer button:hover,
+.marketplace-card-footer button:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+dialog {
+  color: var(--ink);
+}
+
+dialog::backdrop {
+  background: rgba(5, 10, 7, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+body:has(dialog[open]) {
+  overflow: hidden;
+}
+
+.analysis-modal,
+.control-dialog {
+  padding: 0;
+  overflow: hidden;
+  background: #f8f7f1;
+  border: 1px solid #49544d;
+  border-radius: 16px;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.38);
+}
+
+.analysis-modal {
+  width: min(96vw, 1500px);
+  max-width: none;
+  height: min(92vh, 980px);
+  max-height: none;
+}
+
+.analysis-modal-bar,
+.control-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 18px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(199, 243, 109, 0.12), transparent 30%),
+    #101813;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.analysis-modal-bar span,
+.control-dialog-head span {
+  color: rgba(255, 255, 255, 0.47);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+}
+
+.analysis-modal-bar h2,
+.control-dialog-head h2 {
+  margin: 3px 0 0;
+  font-size: 17px;
+  letter-spacing: -0.03em;
+}
+
+.control-dialog-head p {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 8px;
+}
+
+.analysis-modal-bar button,
+.control-dialog-head button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  font-size: 22px;
+  line-height: 1;
+  place-items: center;
+  cursor: pointer;
+}
+
+.analysis-modal-content {
+  height: calc(100% - 70px);
+  overflow: auto;
+  background: #f4f3ed;
+}
+
+.analysis-modal-content .detail-top {
+  padding: 22px 26px 19px;
+}
+
+.analysis-modal-content .detail-body {
+  padding: 20px 26px 32px;
+}
+
+.control-dialog {
+  width: min(92vw, 760px);
+  max-width: none;
+}
+
+.cloud-control-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  padding: 22px;
+}
+
+.cloud-control-form label,
+.cloud-control-form label > span,
+.cloud-control-form label > small {
+  display: block;
+}
+
+.cloud-control-form label > span {
+  margin-bottom: 6px;
+  color: #3e4943;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cloud-control-form input,
+.cloud-control-form select {
+  width: 100%;
+  min-height: 43px;
+  padding: 0 12px;
+  color: #111713;
+  background: #fff;
+  border: 1px solid #ccd1ca;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.cloud-control-form label > small {
+  margin-top: 5px;
+  color: #78817b;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.cloud-control-form .span-2,
+.locked-cadence,
+.control-dialog-actions {
+  grid-column: 1 / -1;
+}
+
+.locked-cadence {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  color: #243018;
+  background: #edf6dd;
+  border: 1px solid #c9dca7;
+  border-radius: 9px;
+}
+
+.locked-cadence span {
+  color: #5f762f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+}
+
+.locked-cadence strong {
+  font-size: 9px;
+}
+
+.locked-cadence small {
+  color: #687452;
+  font-size: 7px;
+}
+
+.control-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.control-dialog button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+@media (max-width: 1050px) {
+  .cloud-refresh-card {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-refresh-card > dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .cloud-refresh-card > dl div:nth-child(3) {
+    border-right: 0;
+  }
+
+  .cloud-refresh-card > dl div:nth-child(n + 4) {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}
+
+@media (max-width: 640px) {
+  .research-pass-actions,
+  .view-intro-actions,
+  .cloud-refresh-actions,
+  .control-dialog-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .research-pass-action,
+  .view-intro-actions .button,
+  .cloud-refresh-actions .button,
+  .control-dialog-actions .button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .cloud-refresh-card {
+    padding: 16px;
+  }
+
+  .cloud-refresh-card > dl {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-refresh-card > dl div,
+  .cloud-refresh-card > dl div:nth-child(3) {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .cloud-refresh-card > dl div:last-child {
+    border-bottom: 0;
+  }
+
+  .cloud-refresh-actions > div {
+    min-width: 0;
+    margin: 0 0 4px;
+  }
+
+  .analysis-modal {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .analysis-modal-content .detail-top,
+  .analysis-modal-content .detail-body {
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+
+  .control-dialog {
+    width: calc(100vw - 20px);
+  }
+
+  .cloud-control-form {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    max-height: calc(100dvh - 125px);
+    overflow: auto;
+    padding: 16px;
+  }
+
+  .cloud-control-form .span-2,
+  .locked-cadence,
+  .control-dialog-actions {
+    grid-column: auto;
+  }
+
+  .locked-cadence {
+    grid-template-columns: 1fr;
+  }
+
+  .marketplace-card-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 /* Complete underwriting dossier and evidence-weighted ranking */
 .metric-grid {
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -6123,4 +6650,18 @@ select {
     grid-row: 1 / span 3;
     flex-direction: column;
   }
+}
+
+/* The list is the primary workspace; the full dossier opens in the modal. */
+.decision-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.queue-panel {
+  order: 0;
+}
+
+.detail-panel {
+  display: none;
+  order: 1;
 }

@@ -2,6 +2,8 @@
   "use strict";
 
   const STORAGE_KEY = "bidaipro.auction-workspace.v1";
+  const CLOUD_CONTROL_KEY = "bidaipro.cloud-refresh.v1";
+  const CLOUD_TOKEN_KEY = "bidaipro.github-token.session";
   const MAX_IMPORT_ROWS = 5000;
   const QUEUE_PAGE_SIZE = 250;
   const VIEW_TITLES = {
@@ -30,6 +32,14 @@
     pawnTestingReserve: 10,
   };
 
+  const DEFAULT_CLOUD_CONTROL = {
+    repository: "BidAIPro/BidAIPro",
+    normalMinutes: 60,
+    nearCloseMinutes: 5,
+    sourceConfigs: [],
+    lastDispatchAt: null,
+  };
+
   const AUCTION_MARKETS = [
     { key: "shopgoodwill", name: "ShopGoodwill", domain: "shopgoodwill.com", homeUrl: "https://shopgoodwill.com/", focus: "Donated goods, jewelry, collectibles, electronics" },
     { key: "ebay", name: "eBay Auctions", domain: "ebay.com", homeUrl: "https://www.ebay.com/", focus: "General merchandise and worldwide collectibles" },
@@ -46,10 +56,11 @@
   const PUBLISHED_RESEARCH = (() => {
     const payload = window.BIDAI_LIVE_SNAPSHOTS;
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
-      return { observedAt: null, sourceMode: "unavailable", items: [] };
+      return { observedAt: null, lastCheckedAt: null, sourceMode: "unavailable", items: [] };
     }
     return {
       observedAt: payload.observedAt || null,
+      lastCheckedAt: payload.lastCheckedAt || payload.observedAt || null,
       sourceMode: payload.sourceMode || "published-research",
       items: payload.items.filter((item) => item && item.id && item.title),
     };
@@ -141,12 +152,6 @@
       focus: "Feed-provided auction source",
     };
   };
-  const openSourceListing = (value) => {
-    const sourceUrl = safeHttpUrl(value);
-    if (!sourceUrl) return false;
-    window.location.assign(sourceUrl);
-    return true;
-  };
   const money = (value, digits = 0) => new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -225,12 +230,17 @@
     const observations = Array.isArray(item?.observations) ? item.observations : [];
     return item?.observedAt || observations.at(-1)?.observedAt || null;
   };
+  const checkedAtFor = (item) => item?.lastCheckedAt || observedAtFor(item);
+  const newestIsoTimestamp = (...values) => values
+    .map((value) => ({ value, time: Date.parse(value || "") }))
+    .filter((entry) => Number.isFinite(entry.time))
+    .sort((a, b) => b.time - a.time)[0]?.value || null;
   const freshnessFor = (item) => {
-    const observedAt = observedAtFor(item);
-    const timestamp = Date.parse(observedAt || "");
-    if (!Number.isFinite(timestamp)) return { className: "is-unknown", label: "Observation time unknown", short: "unknown age", observedAt: null };
+    const checkedAt = checkedAtFor(item);
+    const timestamp = Date.parse(checkedAt || "");
+    if (!Number.isFinite(timestamp)) return { className: "is-unknown", label: "Check time unknown", short: "unknown age", checkedAt: null, observedAt: observedAtFor(item) };
     const ageMinutes = (Date.now() - timestamp) / 60000;
-    if (ageMinutes < -5) return { className: "is-invalid", label: "Future-dated snapshot", short: "clock error", observedAt };
+    if (ageMinutes < -5) return { className: "is-invalid", label: "Future-dated check", short: "clock error", checkedAt, observedAt: observedAtFor(item) };
     const normalizedAgeMinutes = Math.max(0, ageMinutes);
     const short = normalizedAgeMinutes < 2
       ? "just now"
@@ -240,8 +250,8 @@
           ? `${Math.round(normalizedAgeMinutes / 60)}h ago`
           : `${Math.round(normalizedAgeMinutes / 1440)}d ago`;
     const className = normalizedAgeMinutes <= 45 ? "is-fresh" : normalizedAgeMinutes <= 120 ? "is-aging" : "is-stale";
-    const label = className === "is-fresh" ? "Fresh snapshot" : className === "is-aging" ? "Delayed snapshot" : "Stale snapshot";
-    return { className, label, short, observedAt };
+    const label = className === "is-fresh" ? "Recently checked" : className === "is-aging" ? "Check delayed" : "Check overdue";
+    return { className, label, short, checkedAt, observedAt: observedAtFor(item) };
   };
 
   function loadWorkspace() {
@@ -258,7 +268,111 @@
     }
   }
 
+  function loadCloudControl() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(CLOUD_CONTROL_KEY) || "null");
+      const merged = { ...DEFAULT_CLOUD_CONTROL, ...(stored && typeof stored === "object" ? stored : {}) };
+      merged.repository = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(merged.repository || ""))
+        ? String(merged.repository)
+        : DEFAULT_CLOUD_CONTROL.repository;
+      merged.normalMinutes = [15, 30, 60, 120, 240, 360].includes(Number(merged.normalMinutes)) ? Number(merged.normalMinutes) : 60;
+      merged.nearCloseMinutes = [5, 10, 15].includes(Number(merged.nearCloseMinutes)) ? Number(merged.nearCloseMinutes) : 5;
+      merged.sourceConfigs = Array.isArray(merged.sourceConfigs) ? merged.sourceConfigs : [];
+      return merged;
+    } catch (_error) {
+      return { ...DEFAULT_CLOUD_CONTROL };
+    }
+  }
+
+  function saveCloudControl() {
+    try {
+      localStorage.setItem(CLOUD_CONTROL_KEY, JSON.stringify(cloudControl));
+    } catch (_error) {
+      toast("Cloud refresh preferences could not be saved in this browser.", "error");
+    }
+  }
+
+  function cloudToken() {
+    try {
+      return window.sessionStorage.getItem(CLOUD_TOKEN_KEY) || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function rememberCloudToken(token) {
+    try {
+      if (token) window.sessionStorage.setItem(CLOUD_TOKEN_KEY, token);
+      else window.sessionStorage.removeItem(CLOUD_TOKEN_KEY);
+    } catch (_error) {
+      throw new Error("This browser blocked session-only token storage.");
+    }
+  }
+
+  function validRepository(value) {
+    return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(value || "").trim());
+  }
+
+  async function githubApiRequest(path, { method = "GET", body, allow404 = false, repository = cloudControl.repository, token = cloudToken() } = {}) {
+    if (!validRepository(repository)) throw new Error("Enter the GitHub repository as owner/repository.");
+    if (!token) throw new Error("Enter a fine-grained GitHub token to control the cloud refresh.");
+    const response = await fetch(`https://api.github.com/repos/${repository}${path}`, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    if (allow404 && response.status === 404) return { status: 404, data: null };
+    const payload = response.status === 204 ? null : await response.json().catch(() => null);
+    if (!response.ok) {
+      const detail = payload?.message ? `: ${payload.message}` : "";
+      throw new Error(`GitHub returned ${response.status}${detail}`);
+    }
+    return { status: response.status, data: payload };
+  }
+
+  async function upsertActionsVariable(name, value, credentials = {}) {
+    const encodedName = encodeURIComponent(name);
+    const updated = await githubApiRequest(`/actions/variables/${encodedName}`, {
+      ...credentials,
+      method: "PATCH",
+      body: { name, value: String(value) },
+      allow404: true,
+    });
+    if (updated.status !== 404) return;
+    await githubApiRequest("/actions/variables", {
+      ...credentials,
+      method: "POST",
+      body: { name, value: String(value) },
+    });
+  }
+
+  async function readActionsVariable(name, credentials = {}) {
+    const result = await githubApiRequest(`/actions/variables/${encodeURIComponent(name)}`, {
+      ...credentials,
+      allow404: true,
+    });
+    return result.status === 404 ? null : result.data?.value ?? null;
+  }
+
+  async function dispatchCloudRefresh(credentials = {}) {
+    await githubApiRequest("/actions/workflows/refresh-auction-data.yml/dispatches", {
+      ...credentials,
+      method: "POST",
+      body: { ref: "main" },
+    });
+    cloudControl.lastDispatchAt = new Date().toISOString();
+    saveCloudControl();
+    renderStats();
+    toast("Cloud snapshot refresh requested. GitHub will update the published checks when the run finishes.");
+  }
+
   let workspace = loadWorkspace();
+  let cloudControl = loadCloudControl();
   let activeView = "opportunities";
   let selectedId = "";
   let historicalIndexCache = null;
@@ -558,18 +672,22 @@
     const afterCloseHours = Number.isFinite(endTime) && endTime <= Date.now() ? (Date.now() - endTime) / 3600000 : null;
     const hours = hoursRemaining(item);
     const intervalMinutes = afterCloseHours !== null
-      ? (afterCloseHours <= 1 / 60 ? 0.5 : 60)
-      : hours <= 5 / 60 ? 0.5 : hours <= 0.5 ? 5 : 60;
+      ? (afterCloseHours <= 1 / 60 ? 1 / 12 : cloudControl.normalMinutes)
+      : hours <= 1 / 60 ? 1 / 12
+        : hours <= 5 / 60 ? 0.5
+          : hours <= 0.5 ? cloudControl.nearCloseMinutes : cloudControl.normalMinutes;
     const urgency = afterCloseHours !== null
       ? (afterCloseHours <= 1 / 60 ? "critical" : "elevated")
       : hours <= 5 / 60 ? "critical" : hours <= 0.5 ? "high" : "standard";
-    const observedAt = Date.parse(observedAtFor(item) || "");
-    const nextDueAt = Number.isFinite(observedAt) ? new Date(observedAt + intervalMinutes * 60000).toISOString() : null;
+    const checkedAt = Date.parse(checkedAtFor(item) || "");
+    const nextDueAt = Number.isFinite(checkedAt) ? new Date(checkedAt + intervalMinutes * 60000).toISOString() : null;
     return {
       intervalMinutes,
       label: afterCloseHours !== null
-        ? (intervalMinutes === 0.5 ? "Final check every 30 sec" : "Final check hourly")
-        : intervalMinutes === 0.5 ? "Every 30 sec" : intervalMinutes < 60 ? `Every ${intervalMinutes} min` : "Hourly",
+        ? (intervalMinutes <= 1 / 12 ? "Final check every 5 sec" : `Final check every ${intervalMinutes} min`)
+        : intervalMinutes <= 1 / 12 ? "Every 5 sec"
+          : intervalMinutes === 0.5 ? "Every 30 sec"
+            : intervalMinutes < 60 ? `Every ${intervalMinutes} min` : intervalMinutes === 60 ? "Hourly" : `Every ${intervalMinutes / 60} hr`,
       urgency,
       nextDueAt,
       due: !nextDueAt || Date.parse(nextDueAt) <= Date.now(),
@@ -1292,14 +1410,14 @@
               ? `${money(a.rawMarketMedian)} new-retail median · ${Math.round(a.retailReplacementHaircut * 100)}% resale haircut`
               : "No defensible online price evidence";
     return `
-      <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; ${sourceUrl ? `press Enter to open on ${escapeHtml(marketplace.name)}` : "source listing URL unavailable"}">
+      <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open the profitability analysis${sourceUrl ? `; use the source link to visit ${escapeHtml(marketplace.name)}` : "; source listing URL unavailable"}">
         <div class="item-cell">
           ${rank ? `<span class="profit-rank" title="Profit likelihood rank">#${rank}</span>` : ""}
           ${imageUrl ? `<img class="item-thumbnail" src="${escapeHtml(imageUrl)}" alt="" loading="lazy" decoding="async" />` : `<span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>`}
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
@@ -1512,7 +1630,7 @@
     else if (!a.hasPawnEstimate) missingIntelligence.push("Pawn value is withheld because fresh precious-metal spot, purity, and weight evidence is incomplete or inapplicable.");
     if (!a.hasResaleEvidence) missingIntelligence.push("Online resale price is withheld until enough closely matched real market observations are connected.");
     if (a.hasResaleEvidence && !a.retailDemandPass) missingIntelligence.push(`Retail demand does not clear the required ${a.minimumRetailDemandScore.toFixed(0)}/100 threshold.`);
-    if (["is-stale", "is-invalid", "is-unknown"].includes(freshness.className)) missingIntelligence.push(`The auction snapshot is ${freshness.short}; refresh it before relying on the observed bid.`);
+    if (["is-stale", "is-invalid", "is-unknown"].includes(freshness.className)) missingIntelligence.push(`The auction was last checked ${freshness.short}; refresh it before relying on the observed bid.`);
     const dueDiligence = [
       "Open the source listing and match every photo, marking, serial number, included accessory, and stated defect to the modeled identity.",
       a.shippingKnown ? `Confirm the recorded ${money(a.shipping)} inbound shipping and any handling charge still apply to your destination.` : `Replace the ${money(a.shipping)} shipping assumption with the actual destination quote before bidding.`,
@@ -1783,7 +1901,8 @@
           <div class="source-metadata-grid">
             <div><span>Marketplace</span><strong>${escapeHtml(marketplace.name)}</strong><small>${escapeHtml(item.source || marketplace.domain || "Feed-provided source")}</small></div>
             <div><span>Listing ID</span><strong>${escapeHtml(item.externalId || item.id)}</strong></div>
-            <div><span>Observed</span><strong>${escapeHtml(formatDateTime(freshness.observedAt))}</strong><small>${escapeHtml(freshness.short)} · ${escapeHtml(freshness.label)}</small></div>
+            <div><span>Bid last changed</span><strong>${escapeHtml(formatDateTime(freshness.observedAt))}</strong><small>retained only when the bid increases</small></div>
+            <div><span>Last checked</span><strong>${escapeHtml(formatDateTime(freshness.checkedAt))}</strong><small>${escapeHtml(freshness.short)} · ${escapeHtml(freshness.label)}</small></div>
             <div><span>Scheduled end</span><strong>${escapeHtml(formatDateTime(item.endsAt))}</strong><small>${escapeHtml(timeLabel(item))}</small></div>
             <div><span>Snapshot policy</span><strong>${escapeHtml(snapshotPlan.label)}</strong><small>${snapshotPlan.nextDueAt ? `${snapshotPlan.due ? "Due now" : `Next ${escapeHtml(formatDateTime(snapshotPlan.nextDueAt))}`}` : "Outcome capture complete"}</small></div>
             <div><span>Bid count</span><strong>${Number(item.bidCount) || 0}</strong></div>
@@ -1815,7 +1934,8 @@
         const closingWithinFiveMinutes = assessment.hours >= 0 && assessment.hours <= 5 / 60;
         const matchesMode = queueMode === "closing"
           ? item.status === "active" && closingWithinFiveMinutes
-          : queueMode === "pawn" ? assessment.hasPawnEstimate : true;
+          : queueMode === "pawn" ? assessment.hasPawnEstimate
+            : queueMode === "thin" ? !assessment.decisionApproved && (assessment.pawnLikelyProfitable || assessment.retailLikelyProfitable) : true;
         return (!query || haystack.includes(query)) &&
           matchesMode &&
           (signal === "all" || assessment.signal === signal) &&
@@ -1889,15 +2009,15 @@ function renderMarketplaceCoverage() {
       const active = marketItems.filter((item) => item.status === "active");
       const monitored = marketItems.filter((item) => item.status === "active" || !(Number(item.finalPrice) > 0));
       const observations = marketItems.reduce((total, item) => total + Math.max(1, Array.isArray(item.observations) ? item.observations.length : 0), 0);
-      const latest = marketItems.map((item) => Date.parse(observedAtFor(item) || "")).filter(Number.isFinite).sort((a, b) => b - a)[0];
+      const latest = marketItems.map((item) => Date.parse(checkedAtFor(item) || "")).filter(Number.isFinite).sort((a, b) => b - a)[0];
       const plans = monitored.map(snapshotPlanFor).filter((plan) => plan.intervalMinutes);
       const fastest = plans.length ? Math.min(...plans.map((plan) => plan.intervalMinutes)) : null;
       const connected = marketItems.length > 0;
       return `<article class="marketplace-card ${connected ? "is-connected" : "is-awaiting"}">
         <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${connected ? "REAL RECORDS CONNECTED" : "AWAITING AUTHORIZED FEED"}</small></div></div>
         <p>${escapeHtml(market.focus)}</p>
-        <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Snapshots</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : "1h") : "—"}</dd></div></dl>
-        <div class="marketplace-card-footer"><span>${latest ? `Latest ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "No listing data stored"}</span><a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div>
+        <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Bid changes</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest <= 1 / 12 ? "5s" : fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : `${fastest / 60}h`) : "—"}</dd></div></dl>
+        <div class="marketplace-card-footer"><span>${latest ? `Checked ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "No listing data stored"}</span><div>${!connected ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Connect source</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
       </article>`;
     }).join("");
   }
@@ -1914,31 +2034,43 @@ function renderMarketplaceCoverage() {
     const approved = assessments.filter((item) => item.decisionApproved).length;
     const pawnUnderwritten = assessments.filter((item) => item.hasPawnEstimate).length;
     const retailDemandQualified = assessments.filter((item) => item.retailDemandPass).length;
+    const thinPositive = assessments.filter((item) => !item.decisionApproved && (item.pawnLikelyProfitable || item.retailLikelyProfitable)).length;
     $$('[data-stat-approved]').forEach((el) => { el.textContent = approved.toLocaleString("en-US"); });
     $$('[data-stat-pawn-qualified]').forEach((el) => { el.textContent = pawnUnderwritten.toLocaleString("en-US"); });
     $$('[data-stat-retail-qualified]').forEach((el) => { el.textContent = retailDemandQualified.toLocaleString("en-US"); });
+    $$('[data-stat-thin-positive]').forEach((el) => { el.textContent = thinPositive.toLocaleString("en-US"); });
     $("[data-stat-upside]").textContent = money(upside);
     $("[data-stat-urgent]").textContent = String(urgent);
     if ($("[data-stat-confidence]")) $("[data-stat-confidence]").textContent = percent(confidence);
-    $("[data-stat-observations]").textContent = observations.toLocaleString("en-US");
+    if ($("[data-stat-observations]")) $("[data-stat-observations]").textContent = observations.toLocaleString("en-US");
     $$('[data-opportunity-count]').forEach((el) => { el.textContent = String(active.length); });
     $$('[data-watch-count]').forEach((el) => { el.textContent = String(workspace.watchIds.length); });
     $$('[data-research-count]').forEach((el) => { el.textContent = String(PUBLISHED_RESEARCH.items.length); });
     $$('[data-market-count]').forEach((el) => { el.textContent = String(connectedMarkets); });
     $$('[data-research-observed]').forEach((el) => {
-      const observed = PUBLISHED_RESEARCH.observedAt ? new Date(PUBLISHED_RESEARCH.observedAt) : null;
+      const observed = PUBLISHED_RESEARCH.lastCheckedAt ? new Date(PUBLISHED_RESEARCH.lastCheckedAt) : null;
       const formatted = observed && !Number.isNaN(observed.getTime())
         ? observed.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
         : "No published pass";
       const badge = el.closest(".snapshot-freshness");
       if (badge) {
-        const freshness = freshnessFor({ observedAt: PUBLISHED_RESEARCH.observedAt });
+        const freshness = freshnessFor({ lastCheckedAt: PUBLISHED_RESEARCH.lastCheckedAt, observedAt: PUBLISHED_RESEARCH.observedAt });
         badge.classList.remove("is-fresh", "is-aging", "is-stale", "is-invalid", "is-unknown");
         badge.classList.add(freshness.className);
-        el.textContent = PUBLISHED_RESEARCH.observedAt ? `${formatted} · ${freshness.short}` : formatted;
+        el.textContent = PUBLISHED_RESEARCH.lastCheckedAt ? `${formatted} · ${freshness.short}` : formatted;
       } else {
         el.textContent = formatted;
       }
+    });
+    $$('[data-cloud-last-checked]').forEach((el) => {
+      el.textContent = PUBLISHED_RESEARCH.lastCheckedAt ? formatDateTime(PUBLISHED_RESEARCH.lastCheckedAt) : "No successful cloud check yet";
+    });
+    $$('[data-cloud-normal-cadence]').forEach((el) => {
+      el.textContent = cloudControl.normalMinutes === 60 ? "Every hour" : cloudControl.normalMinutes < 60 ? `Every ${cloudControl.normalMinutes} minutes` : `Every ${cloudControl.normalMinutes / 60} hours`;
+    });
+    $$('[data-cloud-closing-cadence]').forEach((el) => { el.textContent = `Every ${cloudControl.nearCloseMinutes} minutes`; });
+    $$('[data-cloud-dispatch-state]').forEach((el) => {
+      el.textContent = cloudControl.lastDispatchAt ? `Refresh requested ${formatDateTime(cloudControl.lastDispatchAt)}` : "Ready for a manual cloud refresh";
     });
     $$('[data-source-status]').forEach((el) => {
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
@@ -1959,7 +2091,8 @@ function renderMarketplaceCoverage() {
     populateSources();
     const queueTitle = queueMode === "closing"
       ? "Closing within five minutes"
-      : queueMode === "pawn" ? "Pawn-first precious metals" : "Highest profit likelihood first";
+      : queueMode === "pawn" ? "Pawn-first precious metals"
+        : queueMode === "thin" ? "Likely positive, but below the safety target" : "Highest profit likelihood first";
     if ($("#queue-heading")) $("#queue-heading").textContent = queueTitle;
     $$('[data-quick-mode]').forEach((button) => {
       const active = button.dataset.quickMode === queueMode;
@@ -1983,6 +2116,7 @@ function renderMarketplaceCoverage() {
     const selectedItem = items.find((item) => item.id === selectedId) || items[0];
     const selectedRank = selectedItem ? items.findIndex((item) => item.id === selectedItem.id) + 1 : null;
     renderDetail(selectedItem, selectedRank, items.length);
+    if ($("#item-analysis-modal")?.open) syncAnalysisModal();
     renderStats();
   }
 
@@ -1992,7 +2126,7 @@ function renderMarketplaceCoverage() {
   }
 
   function setQueueMode(mode) {
-    if (!["profit", "pawn", "closing"].includes(mode)) return;
+    if (!["profit", "pawn", "thin", "closing"].includes(mode)) return;
     queueMode = mode;
     selectedId = "";
     visibleQueueLimit = QUEUE_PAGE_SIZE;
@@ -2146,8 +2280,154 @@ function renderMarketplaceCoverage() {
     selectedId = id;
     setView("opportunities");
     window.setTimeout(() => {
-      $("#item-dossier")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      openAnalysisModal();
     }, 80);
+  }
+
+  function syncAnalysisModal() {
+    const source = $("[data-opportunity-detail]");
+    const target = $("[data-item-modal-content]");
+    const item = allItems().find((candidate) => candidate.id === selectedId);
+    if (!source || !target || !item) return false;
+    target.innerHTML = source.innerHTML;
+    const heading = $("#analysis-modal-heading");
+    if (heading) heading.textContent = item.title;
+    return true;
+  }
+
+  function openAnalysisModal() {
+    const dialog = $("#item-analysis-modal");
+    if (!dialog || !syncAnalysisModal()) return;
+    if (!dialog.open) dialog.showModal();
+    dialog.querySelector("[data-close-dialog]")?.focus();
+  }
+
+  function fillCloudForm() {
+    const form = $("#cloud-control-form");
+    if (!form) return;
+    form.elements.repository.value = cloudControl.repository;
+    form.elements.normalMinutes.value = String(cloudControl.normalMinutes);
+    form.elements.nearCloseMinutes.value = String(cloudControl.nearCloseMinutes);
+    form.elements.token.value = cloudToken();
+  }
+
+  function openCloudControl() {
+    fillCloudForm();
+    const dialog = $("#refresh-control-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+  }
+
+  function populateSourceConnectionForm(marketKey = "") {
+    const form = $("#source-connect-form");
+    if (!form) return;
+    form.elements.marketKey.innerHTML = AUCTION_MARKETS
+      .map((market) => `<option value="${escapeHtml(market.key)}">${escapeHtml(market.name)}</option>`)
+      .join("");
+    const selectedMarket = AUCTION_MARKETS.some((market) => market.key === marketKey) ? marketKey : AUCTION_MARKETS[0].key;
+    form.elements.marketKey.value = selectedMarket;
+    const existing = cloudControl.sourceConfigs.find((config) => config.key === selectedMarket);
+    const connectionType = existing?.taskId ? "taskId" : existing?.datasetId ? "datasetId" : existing?.feedUrl ? "feedUrl" : "taskId";
+    form.elements.connectionType.value = connectionType;
+    form.elements.connectionValue.value = existing?.[connectionType] || "";
+    form.elements.repository.value = cloudControl.repository;
+    form.elements.token.value = cloudToken();
+  }
+
+  function openSourceConnection(marketKey) {
+    populateSourceConnectionForm(marketKey);
+    const dialog = $("#source-connect-dialog");
+    if (dialog && !dialog.open) dialog.showModal();
+  }
+
+  function cloudCredentialsFrom(form) {
+    const repository = String(form.elements.repository.value || "").trim();
+    const token = String(form.elements.token.value || "").trim();
+    if (!validRepository(repository)) throw new Error("Enter the repository as owner/repository.");
+    if (!token) throw new Error("A GitHub token is required. It stays in this browser tab only.");
+    rememberCloudToken(token);
+    cloudControl.repository = repository;
+    saveCloudControl();
+    return { repository, token };
+  }
+
+  async function saveCloudSchedule(event, refreshAfter = false) {
+    event?.preventDefault();
+    const form = $("#cloud-control-form");
+    const submitters = $$("button", form);
+    submitters.forEach((button) => { button.disabled = true; });
+    try {
+      const credentials = cloudCredentialsFrom(form);
+      const normalMinutes = Number(form.elements.normalMinutes.value);
+      const nearCloseMinutes = Number(form.elements.nearCloseMinutes.value);
+      if (![15, 30, 60, 120, 240, 360].includes(normalMinutes)) throw new Error("Choose a valid normal refresh interval.");
+      if (![5, 10, 15].includes(nearCloseMinutes)) throw new Error("Choose a valid final-30-minute interval.");
+      await upsertActionsVariable("BIDAI_NORMAL_REFRESH_MINUTES", normalMinutes, credentials);
+      await upsertActionsVariable("BIDAI_NEAR_CLOSE_REFRESH_MINUTES", nearCloseMinutes, credentials);
+      cloudControl.normalMinutes = normalMinutes;
+      cloudControl.nearCloseMinutes = nearCloseMinutes;
+      saveCloudControl();
+      renderStats();
+      if (refreshAfter) await dispatchCloudRefresh(credentials);
+      else toast("Cloud refresh schedule saved. Locked closing cadences remain unchanged.");
+      $("#refresh-control-dialog")?.close();
+    } catch (error) {
+      toast(error.message || "Cloud schedule could not be saved.", "error");
+    } finally {
+      submitters.forEach((button) => { button.disabled = false; });
+    }
+  }
+
+  async function refreshNow() {
+    if (!cloudToken()) {
+      openCloudControl();
+      return;
+    }
+    try {
+      await dispatchCloudRefresh();
+    } catch (error) {
+      toast(error.message || "Cloud refresh could not be requested.", "error");
+      openCloudControl();
+    }
+  }
+
+  async function saveSourceConnection(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const buttons = $$("button", form);
+    buttons.forEach((button) => { button.disabled = true; });
+    try {
+      const credentials = cloudCredentialsFrom(form);
+      const key = normalizeMarketKey(form.elements.marketKey.value);
+      const market = AUCTION_MARKETS.find((candidate) => candidate.key === key);
+      const connectionType = form.elements.connectionType.value;
+      const connectionValue = String(form.elements.connectionValue.value || "").trim();
+      if (!market || !["taskId", "datasetId", "feedUrl"].includes(connectionType)) throw new Error("Choose a supported marketplace connection.");
+      if (connectionType === "feedUrl" && !/^https:\/\//i.test(connectionValue)) throw new Error("The feed must use an HTTPS URL.");
+      if (connectionType !== "feedUrl" && !/^[A-Za-z0-9._~-]{1,200}$/.test(connectionValue)) throw new Error("Enter a valid Apify Task or Dataset ID.");
+      const remoteValue = await readActionsVariable("BIDAI_SOURCE_CONFIG_JSON", credentials);
+      let sourceConfigs = cloudControl.sourceConfigs;
+      if (remoteValue) {
+        try {
+          const parsed = JSON.parse(remoteValue);
+          if (!Array.isArray(parsed)) throw new Error("not an array");
+          sourceConfigs = parsed;
+        } catch (_error) {
+          throw new Error("The repository's BIDAI_SOURCE_CONFIG_JSON variable is not a valid JSON array.");
+        }
+      }
+      const nextConfig = { key: market.key, name: market.name, [connectionType]: connectionValue };
+      sourceConfigs = [...sourceConfigs.filter((config) => normalizeMarketKey(config?.key) !== market.key), nextConfig].slice(0, 20);
+      await upsertActionsVariable("BIDAI_SOURCE_CONFIG_JSON", JSON.stringify(sourceConfigs), credentials);
+      cloudControl.sourceConfigs = sourceConfigs;
+      saveCloudControl();
+      await dispatchCloudRefresh(credentials);
+      $("#source-connect-dialog")?.close();
+      toast(`${market.name} connection saved. It will show connected after real records are ingested.`);
+    } catch (error) {
+      toast(error.message || "The marketplace connection could not be saved.", "error");
+    } finally {
+      buttons.forEach((button) => { button.disabled = false; });
+    }
   }
 
   function closeMenu() {
@@ -2321,6 +2601,7 @@ function renderMarketplaceCoverage() {
       auctionComparables: Array.isArray(record.auctionComparables) ? record.auctionComparables.slice(0, 50) : [],
       forecast: record.forecast && typeof record.forecast === "object" ? record.forecast : null,
       observedAt,
+      lastCheckedAt: observedAt,
       observations: [{
         observedAt,
         currentBid: Math.max(currentBid, finalPrice || 0),
@@ -2353,6 +2634,7 @@ function renderMarketplaceCoverage() {
         bidCount: existing.bidCount,
         expectedClose: existing.expectedClose,
         observedAt: existing.observedAt,
+        lastCheckedAt: newestIsoTimestamp(snapshot.observedAt, existing.lastCheckedAt, existing.observedAt),
         forecast: existing.forecast,
       };
       const history = bidIncreased
@@ -2528,14 +2810,44 @@ function renderMarketplaceCoverage() {
     window.BIDAI_TEST_API = Object.freeze({
       assess,
       recommendationLabel,
+      snapshotPlanFor,
       setSettings(settings = {}) {
         workspace.settings = { ...DEFAULT_SETTINGS, ...settings };
+      },
+      setCloudControl(settings = {}) {
+        cloudControl = { ...DEFAULT_CLOUD_CONTROL, ...settings };
       },
     });
     return;
   }
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
+    const closeDialogButton = event.target.closest("[data-close-dialog]");
+    if (closeDialogButton) {
+      $("#" + closeDialogButton.dataset.closeDialog)?.close();
+      return;
+    }
+    if (event.target.matches?.("dialog")) {
+      event.target.close();
+      return;
+    }
+    if (event.target.closest("[data-refresh-now]")) {
+      await refreshNow();
+      return;
+    }
+    if (event.target.closest("[data-open-refresh-control]")) {
+      openCloudControl();
+      return;
+    }
+    if (event.target.closest("[data-refresh-from-dialog]")) {
+      await saveCloudSchedule(event, true);
+      return;
+    }
+    const connectSourceButton = event.target.closest("[data-connect-source]");
+    if (connectSourceButton) {
+      openSourceConnection(connectSourceButton.dataset.connectSource);
+      return;
+    }
     const quickModeButton = event.target.closest("[data-quick-mode]");
     if (quickModeButton) {
       setQueueMode(quickModeButton.dataset.quickMode);
@@ -2579,10 +2891,7 @@ function renderMarketplaceCoverage() {
     if (event.target.closest("[data-direct-listing]")) return;
     const row = event.target.closest("[data-select-id]");
     if (row) {
-      if (!openSourceListing(row.dataset.sourceUrl)) {
-        selectedId = row.dataset.selectId;
-        renderOpportunities();
-      }
+      openItem(row.dataset.selectId);
       return;
     }
     if (event.target.closest("[data-export-workspace]")) {
@@ -2630,10 +2939,7 @@ function renderMarketplaceCoverage() {
     const row = event.target.closest?.("[data-select-id]");
     if (row && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
-      if (!openSourceListing(row.dataset.sourceUrl)) {
-        selectedId = row.dataset.selectId;
-        renderOpportunities();
-      }
+      openItem(row.dataset.selectId);
     }
   });
 
@@ -2653,6 +2959,11 @@ function renderMarketplaceCoverage() {
   });
   $("#snapshot-form").addEventListener("submit", handleManualSnapshot);
   $("#settings-form").addEventListener("submit", saveSettings);
+  $("#cloud-control-form").addEventListener("submit", saveCloudSchedule);
+  $("#source-connect-form").addEventListener("submit", saveSourceConnection);
+  $("#source-connect-form").elements.marketKey.addEventListener("change", (event) => {
+    populateSourceConnectionForm(event.target.value);
+  });
 
   const dropZone = $("[data-drop-zone]");
   ["dragenter", "dragover"].forEach((name) => dropZone.addEventListener(name, (event) => {

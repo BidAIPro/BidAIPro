@@ -602,7 +602,7 @@ test("generic HTTPS feed mode remains available when no Apify dataset is configu
   assert.equal("forecast" in envelope.items[0], false, "The importer must not fabricate a forecast");
 });
 
-test("unchanged and lower bids create no new snapshot while a higher bid is retained", async (t) => {
+test("every check advances lastCheckedAt while only higher bids advance the price curve", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
   const outputPath = join(fixture.data, "live-snapshots.js");
@@ -640,18 +640,33 @@ test("unchanged and lower bids create no new snapshot while a higher bid is reta
   );
 
   assert.equal((await runPayload(100, "2026-08-02T10:00:00Z")).code, 0);
-  const first = await readFile(outputPath, "utf8");
+  let envelope = await readEnvelope(outputPath);
+  assert.equal(envelope.items[0].observedAt, "2026-08-02T10:00:00.000Z");
+  assert.equal(envelope.items[0].lastCheckedAt, "2026-08-02T10:00:00.000Z");
   assert.equal((await runPayload(100, "2026-08-02T11:00:00Z")).code, 0);
-  assert.equal(await readFile(outputPath, "utf8"), first, "An unchanged bid must not alter the published snapshot file");
+  envelope = await readEnvelope(outputPath);
+  assert.equal(envelope.items[0].observedAt, "2026-08-02T10:00:00.000Z", "An unchanged bid must preserve the last price-change time");
+  assert.equal(envelope.items[0].lastCheckedAt, "2026-08-02T11:00:00.000Z", "An unchanged bid must still record a successful check");
+  assert.deepEqual(envelope.items[0].observations.map((point) => point.currentBid), [100]);
 
   assert.equal((await runPayload(125, "2026-08-02T12:00:00Z")).code, 0);
-  const afterIncrease = await readFile(outputPath, "utf8");
   const increased = await readEnvelope(outputPath);
   assert.deepEqual(increased.items[0].observations.map((point) => point.currentBid), [100, 125]);
   assert.equal(increased.items[0].observedAt, "2026-08-02T12:00:00.000Z");
+  assert.equal(increased.items[0].lastCheckedAt, "2026-08-02T12:00:00.000Z");
 
   assert.equal((await runPayload(110, "2026-08-02T13:00:00Z")).code, 0);
-  assert.equal(await readFile(outputPath, "utf8"), afterIncrease, "A lower bid must not alter the published snapshot file");
+  const afterLowerBid = await readEnvelope(outputPath);
+  assert.equal(afterLowerBid.items[0].currentBid, 125, "A lower reported bid must never roll price backward");
+  assert.equal(afterLowerBid.items[0].observedAt, "2026-08-02T12:00:00.000Z");
+  assert.equal(afterLowerBid.items[0].lastCheckedAt, "2026-08-02T13:00:00.000Z");
+  assert.deepEqual(afterLowerBid.items[0].observations.map((point) => point.currentBid), [100, 125]);
+  assert.equal(afterLowerBid.lastCheckedAt, "2026-08-02T13:00:00.000Z");
+
+  assert.equal((await runPayload(115, "2026-08-02T11:30:00Z")).code, 0);
+  const afterOutOfOrderCheck = await readEnvelope(outputPath);
+  assert.equal(afterOutOfOrderCheck.items[0].currentBid, 125);
+  assert.equal(afterOutOfOrderCheck.items[0].lastCheckedAt, "2026-08-02T13:00:00.000Z", "An older check must not roll lastCheckedAt backward");
 });
 
 test("generic evidence is normalized and under-supported exact-model forecasts cannot publish money", async (t) => {
@@ -772,7 +787,7 @@ test("BidAI Pro generates and snapshots an exact-model time-to-close forecast fr
     };
   });
   const payload = {
-    generatedAt: "2026-08-02T12:00:00Z",
+    generatedAt: "2030-08-02T12:00:00Z",
     items: [
       {
         id: "target-model-x",
@@ -1006,14 +1021,14 @@ test("a sparse final refresh preserves the evidence and forecast snapshot needed
       modelKey: "gold:14k:20g",
       currentBid: 100,
       shipping: 12,
-      endsAt: "2026-08-02T18:00:00Z",
-      observedAt: "2026-08-02T12:00:00Z",
+      endsAt: "2030-08-02T18:00:00Z",
+      observedAt: "2030-08-02T12:00:00Z",
       resaleLow: 800,
       resaleMedian: 900,
       resaleHigh: 1000,
       intrinsicValueEvidence: true,
       valuationBasis: {
-        referenceObservedAt: "2026-08-02T11:30:00Z",
+        referenceObservedAt: "2030-08-02T11:30:00Z",
         currency: "USD",
         unit: "gram",
         purity: "14k",
@@ -1033,13 +1048,13 @@ test("a sparse final refresh preserves the evidence and forecast snapshot needed
   assert.equal(first.observations[0].forecast.evidenceHash, first.forecast.evidenceHash);
 
   const finalPayload = {
-    generatedAt: "2026-08-02T19:00:00Z",
+    generatedAt: "2030-08-02T19:00:00Z",
     items: [{
       id: "gold-target",
       title: "Exact 14k gold target",
       finalPrice: 250,
-      endsAt: "2026-08-02T18:00:00Z",
-      observedAt: "2026-08-02T19:00:00Z",
+      endsAt: "2030-08-02T18:00:00Z",
+      observedAt: "2030-08-02T19:00:00Z",
       status: "ended",
     }],
   };

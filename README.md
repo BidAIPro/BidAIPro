@@ -28,7 +28,7 @@ Open `index.html` in a browser. There is no install or build step.
 You can:
 
 - review the checked-in point-in-time ShopGoodwill research pass, with each listing timestamped and linked back to its source;
-- inspect a full-width underwriting dossier for every record, including profit rank, item facts, research coverage, unresolved intelligence, pawn and retail exits, dealer references, demand, sale speed, bid ladder, every cost, bid history, comparables, risks, and a pre-bid checklist;
+- click any record to open a complete underwriting popup, including profit rank, item facts, research coverage, unresolved intelligence, pawn and retail exits, dealer references, demand, sale speed, bid ladder, every cost, bid history, comparables, risks, and a pre-bid checklist;
 - open any record directly on its source site and audit every retained input against the original listing;
 - record a single auction snapshot;
 - import repeated CSV or JSON snapshots to build price history;
@@ -72,19 +72,23 @@ The default retail demand threshold is 55/100 and is adjustable. A retail route 
 
 Profit and ceiling calculations expose inbound shipping, tax, buyer premium, marketplace fees, outbound shipping, repair/testing reserve, and return/loss reserve. The **target-safe ceiling** preserves the configured minimum profit and margin using the conservative exit case. The higher **modeled break-even bid** uses the likely exit case and marks where estimated profit reaches zero; it is a boundary, not a recommended bid. Both are always visible and become `$0` when no defensible real-price evidence exists. If the source omits inbound shipping, the calculation uses the clearly labeled, user-configurable $25 conservative estimate instead of silently assuming zero.
 
-The evidence-weighted queue always orders active records by decision tier: pawn-safe YES, retail-safe YES, evidence-qualified but over-ceiling NO, price-without-demand NO, then insufficient-evidence NO. Within each tier it uses a disclosed 0–100 relative ranking score, projected profit, demand, and research coverage. A sub-50 ranking score never overrides a NO. The selected item opens above the queue as a complete dossier, and **Closing ≤ 5 min** preserves the same ranking inside the five-minute window.
+The evidence-weighted queue always orders active records by decision tier: pawn-safe YES, retail-safe YES, evidence-qualified but over-ceiling NO, price-without-demand NO, then insufficient-evidence NO. Within each tier it uses a disclosed 0–100 relative ranking score, projected profit, demand, and research coverage. A sub-50 ranking score never overrides a NO. Clicking a row opens its complete dossier in a popup, while the separate source-listing control goes directly to the real auction. **Closing ≤ 5 min** preserves the same ranking inside the five-minute window.
 
 ## Automatic refreshes
 
-The repository includes a scheduled GitHub Actions pipeline that runs in GitHub's cloud even when your computer is off. ShopGoodwill is built in: the hourly discovery pass reads the real public bid catalog, imports up to the source's 10,000-result broad-search cap, and adds priority discovery for footwear, watches, rings and jewelry, hats, collectibles, electronics, and authenticated-sneaker wording. It does not require an Apify account or a private feed secret. The dashboard displays real listing thumbnails and lets you filter those resale verticals and source-stated authentication claims.
+The repository includes a scheduled GitHub Actions pipeline that runs in GitHub's cloud even when your computer is off. ShopGoodwill is built in: each due discovery pass reads the real public bid catalog, imports up to the source's 10,000-result broad-search cap, and adds priority discovery for footwear, watches, rings and jewelry, hats, collectibles, electronics, and authenticated-sneaker wording. It does not require an Apify account or a private feed secret. The dashboard displays real listing thumbnails and lets you filter those resale verticals and source-stated authentication claims.
 
-Every source is checked hourly, known auctions inside 30 minutes are checked every five minutes, and a GitHub runner stays active to poll item details every 30 seconds inside the final five-minute window. Bid history keeps the first observation and only strictly higher bids; unchanged and lower prices do not create snapshots. Final status and price may still be recorded so the learning loop receives the real outcome.
+The normal check interval is configurable from 15 minutes to six hours, and the inside-30-minute interval is configurable from five to 15 minutes. The final five minutes are permanently locked to 30-second checks, and the final minute is permanently locked to five-second checks. GitHub's five-minute schedule wakes a runner, which stays active for these sub-minute item checks. Bid history keeps the first observation and only strictly higher bids; unchanged and lower prices do not add price points, but every successful request advances the separate `lastCheckedAt` time so the UI can prove when pricing was most recently checked. Final status and price may still be recorded so the learning loop receives the real outcome. GitHub scheduled starts and source response time can delay any best-effort interval.
 
-After pushing, open **Actions > Refresh authorized auction data > Run workflow** once if you do not want to wait for the next hourly discovery. For additional marketplaces, configure these GitHub Actions secrets:
+After pushing, use **Sources > Refresh now** or open **Actions > Refresh authorized auction data > Run workflow** if you do not want to wait for the next discovery pass. The in-app control uses a fine-grained GitHub token with repository **Actions: write** and **Variables: write** permissions; the token remains in the current browser session and is not saved in the repository or `localStorage`.
 
-- `BIDAI_SOURCE_CONFIG_JSON` — a JSON array describing up to 20 marketplace sources and their Apify Task, Dataset, or authorized feed;
+For additional marketplaces, use the **Connect source** button on a marketplace card to save an authorized Apify Task ID, Dataset ID, or non-secret HTTPS feed URL as the `BIDAI_SOURCE_CONFIG_JSON` repository variable. A card becomes connected only after real records are successfully ingested. The controls do not invent an endpoint or bypass provider authorization. Configure sensitive credentials as GitHub Actions secrets:
+
 - `BIDAI_APIFY_TOKEN` — required when a configured private Dataset is read or an Apify Task is started;
-- `BIDAI_SOURCE_AUTHORIZED=true` — the exact permission-gate value required before collection or import is attempted.
+- `BIDAI_SOURCE_CONFIG_JSON` — use a secret instead of the UI variable when the JSON contains a signed or otherwise sensitive feed URL;
+- `BIDAI_SOURCE_AUTHORIZED=true` — required for secret-based optional source configuration; a non-empty repository variable is authorized by the workflow explicitly.
+
+The schedule controls write two non-sensitive repository variables: `BIDAI_NORMAL_REFRESH_MINUTES` and `BIDAI_NEAR_CLOSE_REFRESH_MINUTES`. They cannot change the locked final-five-minute or final-minute rules.
 
 To populate real resale medians and velocity, configure an approved completed-sales provider:
 
@@ -108,7 +112,7 @@ Each missing credential is an independent no-op. Credentials remain in GitHub Ac
 
 Each configured Apify Task is a collector that you create and authorize in Apify. BidAI Pro can start that task when its marketplace is due, wait for a successful run, import the resulting Dataset, and retain unmatched records from every other market. The original single-source `BIDAI_APIFY_DATASET_ID` and `BIDAI_FEED_URL` secrets remain supported.
 
-Setup, the built-in ShopGoodwill source, the completed-sales contract, the multi-source secret format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Apify Datasets are paged in 5,000-record batches and the normalized catalog retains up to 50,000 real listings. The interface never fills an unconnected marketplace or resale channel with fabricated listings or prices.
+Setup, the built-in ShopGoodwill source, the completed-sales contract, the multi-source configuration format, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Apify Datasets are paged in 5,000-record batches and the normalized catalog retains up to 50,000 real listings. The interface never fills an unconnected marketplace or resale channel with fabricated listings or prices.
 
 ## Data-source boundary
 

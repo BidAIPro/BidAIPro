@@ -129,6 +129,13 @@ function timestamp(value, fallback = null) {
   return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
 }
 
+function newestTimestamp(...values) {
+  return values
+    .map((value) => timestamp(value))
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null;
+}
+
 function httpUrl(value) {
   const raw = text(value);
   if (!raw) return null;
@@ -1740,6 +1747,7 @@ function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized fe
     repairReserve: money(pick(record, "repairReserve", "repair_reserve"), null),
     returnReserve: money(pick(record, "returnReserve", "return_reserve"), null),
     observedAt,
+    lastCheckedAt: observedAt,
     observations: mergeObservations(history, currentObservation ? [currentObservation] : []),
     feedOrder: index,
     _fieldPresence: fieldPresence,
@@ -1757,17 +1765,18 @@ function extractRecords(payload) {
 
 function normalizeEnvelope(value) {
   if (Array.isArray(value)) {
-    return { observedAt: null, sourceMode: "legacy-array", sourceNotes: [], items: value };
+    return { observedAt: null, lastCheckedAt: null, sourceMode: "legacy-array", sourceNotes: [], items: value };
   }
   if (value && typeof value === "object" && Array.isArray(value.items)) {
     return {
       observedAt: timestamp(value.observedAt),
+      lastCheckedAt: timestamp(value.lastCheckedAt, value.observedAt),
       sourceMode: text(value.sourceMode, "published-research"),
       sourceNotes: Array.isArray(value.sourceNotes) ? value.sourceNotes.map((note) => text(note)).filter(Boolean) : [],
       items: value.items,
     };
   }
-  return { observedAt: null, sourceMode: "unavailable", sourceNotes: [], items: [] };
+  return { observedAt: null, lastCheckedAt: null, sourceMode: "unavailable", sourceNotes: [], items: [] };
 }
 
 async function readPreviousEnvelope() {
@@ -1794,6 +1803,7 @@ async function writeAtomically(envelope) {
   const serialized = [
     "{",
     `  \"observedAt\": ${JSON.stringify(envelope.observedAt)},`,
+    `  \"lastCheckedAt\": ${JSON.stringify(envelope.lastCheckedAt)},`,
     `  \"sourceMode\": ${JSON.stringify(envelope.sourceMode)},`,
     `  \"sourceNotes\": ${JSON.stringify(envelope.sourceNotes)},`,
     "  \"items\": [",
@@ -1913,6 +1923,7 @@ async function run() {
       bidCount: priorState.bidCount,
       expectedClose: priorState.expectedClose,
       observedAt: priorState.observedAt,
+      lastCheckedAt: newestTimestamp(item.observedAt, priorState.lastCheckedAt, priorState.observedAt),
       ...(priorState.forecast ? { forecast: priorState.forecast } : {}),
     };
     if (!bidIncreased && !priorState.forecast) delete snapshotItem.forecast;
@@ -1987,8 +1998,14 @@ async function run() {
     if (!observedAt) return latest;
     return !latest || Date.parse(observedAt) > Date.parse(latest) ? observedAt : latest;
   }, previousEnvelope.observedAt || null);
+  const publishedLastCheckedAt = items.reduce((latest, item) => {
+    const checkedAt = timestamp(item?.lastCheckedAt, item?.observedAt);
+    if (!checkedAt) return latest;
+    return !latest || Date.parse(checkedAt) > Date.parse(latest) ? checkedAt : latest;
+  }, previousEnvelope.lastCheckedAt || previousEnvelope.observedAt || null);
   const envelope = {
     observedAt: publishedObservedAt,
+    lastCheckedAt: publishedLastCheckedAt,
     sourceMode: text(pick(payload, "sourceMode", "source_mode"), requestConfiguration.sourceMode),
     sourceNotes: sourceNotes.length
       ? [...sourceNotes, "Prior unmatched records are retained for outcome and bid-history learning."]

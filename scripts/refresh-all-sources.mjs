@@ -7,10 +7,11 @@ import { runInNewContext } from "node:vm";
 const AUTHORIZED_VALUE = "true";
 const MAX_SOURCES = 20;
 const MAX_PARALLEL_COLLECTORS = 4;
-const HOURLY_SCHEDULE = "9 * * * *";
 const FINAL_WINDOW_MS = 5 * 60_000;
+const FINAL_MINUTE_WINDOW_MS = 60_000;
 const NEAR_CLOSE_WINDOW_MS = 30 * 60_000;
 const FINAL_POLL_INTERVAL_MS = 30_000;
+const FINAL_MINUTE_POLL_INTERVAL_MS = 5_000;
 const FINAL_RESULT_GRACE_MS = 60_000;
 const OUTCOME_RECOVERY_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_OUTCOME_RECOVERY_ITEMS = 500;
@@ -20,6 +21,16 @@ const OUTPUT_PREFIX = "window.BIDAI_LIVE_SNAPSHOTS = ";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const refreshScript = join(root, "scripts", "refresh-feed.mjs");
 const snapshotPath = join(root, "data", "live-snapshots.js");
+
+function boundedMinutes(value, fallback, minimum, maximum) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, Math.round(parsed))) : fallback;
+}
+
+const NORMAL_REFRESH_MINUTES = boundedMinutes(process.env.BIDAI_NORMAL_REFRESH_MINUTES, 60, 15, 360);
+const NEAR_CLOSE_REFRESH_MINUTES = boundedMinutes(process.env.BIDAI_NEAR_CLOSE_REFRESH_MINUTES, 5, 5, 15);
+const NORMAL_REFRESH_INTERVAL_MS = NORMAL_REFRESH_MINUTES * 60_000;
+const NEAR_CLOSE_REFRESH_INTERVAL_MS = NEAR_CLOSE_REFRESH_MINUTES * 60_000;
 
 function text(value, fallback = "") {
   const normalized = String(value ?? "").normalize("NFKC").trim();
@@ -112,14 +123,16 @@ function snapshotIntervalMs(item, now) {
   const end = Date.parse(item?.endsAt || "");
   if (item?.status === "ended" && Number(item?.finalPrice) > 0) return Number.POSITIVE_INFINITY;
   if (Number.isFinite(end) && end <= now) {
-    return now - end <= FINAL_RESULT_GRACE_MS ? FINAL_POLL_INTERVAL_MS : 60 * 60_000;
+    return now - end <= FINAL_RESULT_GRACE_MS ? FINAL_MINUTE_POLL_INTERVAL_MS : NORMAL_REFRESH_INTERVAL_MS;
   }
-  if (item?.status === "ended") return 60 * 60_000;
-  if (!Number.isFinite(end)) return 60 * 60_000;
+  if (item?.status === "ended") return NORMAL_REFRESH_INTERVAL_MS;
+  if (!Number.isFinite(end)) return NORMAL_REFRESH_INTERVAL_MS;
   const remaining = end - now;
-  return remaining <= FINAL_WINDOW_MS
-    ? FINAL_POLL_INTERVAL_MS
-    : remaining <= NEAR_CLOSE_WINDOW_MS ? 5 * 60_000 : 60 * 60_000;
+  return remaining <= FINAL_MINUTE_WINDOW_MS
+    ? FINAL_MINUTE_POLL_INTERVAL_MS
+    : remaining <= FINAL_WINDOW_MS
+      ? FINAL_POLL_INTERVAL_MS
+      : remaining <= NEAR_CLOSE_WINDOW_MS ? NEAR_CLOSE_REFRESH_INTERVAL_MS : NORMAL_REFRESH_INTERVAL_MS;
 }
 
 function itemsForSource(config, items) {
@@ -139,18 +152,10 @@ function itemsForSource(config, items) {
 
 function taskIsDue(config, items, now) {
   if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" || process.env.BIDAI_FORCE_COLLECTORS === "true") return true;
-  if (process.env.BIDAI_WORKFLOW_SCHEDULE === HOURLY_SCHEDULE) return true;
   const relevant = itemsForSource(config, items);
-  if (process.env.GITHUB_EVENT_NAME === "schedule") {
-    return relevant.some((item) => {
-      if (Number(item?.finalPrice) > 0) return false;
-      const end = Date.parse(item?.endsAt || "");
-      return Number.isFinite(end) && end - now <= NEAR_CLOSE_WINDOW_MS && now - end <= FINAL_RESULT_GRACE_MS;
-    });
-  }
   if (!relevant.length) return true;
   return relevant.some((item) => {
-    const observed = Date.parse(item?.observedAt || "");
+    const observed = Date.parse(item?.lastCheckedAt || item?.observedAt || "");
     const interval = snapshotIntervalMs(item, now);
     return !Number.isFinite(observed) || now - observed >= interval;
   });
@@ -212,7 +217,15 @@ function shopGoodwillOutcomeIds(config, items, now = Date.now()) {
 
 function shopGoodwillRefreshMode(existingItems) {
   if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch") return "catalog";
-  if (process.env.BIDAI_WORKFLOW_SCHEDULE === HOURLY_SCHEDULE) return "catalog";
+  const now = Date.now();
+  const catalogItems = itemsForSource({ key: "shopgoodwill" }, existingItems);
+  const catalogDue = !catalogItems.length || catalogItems.some((item) => {
+    const end = Date.parse(item?.endsAt || "");
+    if (Number.isFinite(end) && end - now <= NEAR_CLOSE_WINDOW_MS && now - end <= FINAL_RESULT_GRACE_MS) return false;
+    const checkedAt = Date.parse(item?.lastCheckedAt || item?.observedAt || "");
+    return !Number.isFinite(checkedAt) || now - checkedAt >= NORMAL_REFRESH_INTERVAL_MS;
+  });
+  if (catalogDue) return "catalog";
   return itemsForSource({ key: "shopgoodwill" }, existingItems).length ? "items" : "catalog";
 }
 
@@ -385,7 +398,12 @@ async function run() {
       Math.max(...endingTimes) + FINAL_RESULT_GRACE_MS,
     );
     if (now >= finalDeadline) break;
-    const nextCycleAt = lastCycleStartedAt + FINAL_POLL_INTERVAL_MS;
+    const closestEndingAt = Math.min(...endingTimes);
+    const remainingToClosestEnd = closestEndingAt - now;
+    const pollInterval = remainingToClosestEnd <= FINAL_MINUTE_WINDOW_MS
+      ? FINAL_MINUTE_POLL_INTERVAL_MS
+      : FINAL_POLL_INTERVAL_MS;
+    const nextCycleAt = lastCycleStartedAt + pollInterval;
     if (nextCycleAt > now) await sleep(Math.min(nextCycleAt - now, finalDeadline - now));
     lastCycleStartedAt = Date.now();
     existingItems = await readExistingItems();

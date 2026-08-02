@@ -145,12 +145,13 @@
               </div>
               <dl class="research-pass-stats">
                 <div><dt>Published snapshots</dt><dd data-research-count>0</dd></div>
-                <div><dt>Snapshot observed</dt><dd data-research-observed>No source observation</dd></div>
+                <div><dt>Last cloud check</dt><dd data-research-observed>No source check</dd></div>
                 <div><dt>Forecast inputs</dt><dd>History + comparable evidence</dd></div>
               </dl>
-              <button class="research-pass-action" type="button" data-view-target="sources">
-                Open source ledger <span aria-hidden="true">→</span>
-              </button>
+              <div class="research-pass-actions">
+                <button class="research-pass-action primary" type="button" data-refresh-now>Refresh now <span aria-hidden="true">↻</span></button>
+                <button class="research-pass-action" type="button" data-view-target="sources">Open source ledger <span aria-hidden="true">→</span></button>
+              </div>
             </section>
 
             <div class="source-integrity-banner">
@@ -160,7 +161,7 @@
                 <p>Review the listing source, observation age, comparable sales, identity confidence, condition risk, and every cost before acting.</p>
               </div>
               <div class="snapshot-freshness" role="status">
-                <span>Latest source observation</span>
+                <span>Latest successful check</span>
                 <strong data-research-observed>Awaiting first snapshot</strong>
               </div>
               <button type="button" data-view-target="sources">Audit inputs <span aria-hidden="true">→</span></button>
@@ -190,7 +191,8 @@
               </article>
               <article class="summary-metric">
                 <div class="metric-icon neutral" aria-hidden="true">≋</div>
-                <div><span>Price observations</span><strong data-stat-observations>0</strong><small>Historical snapshots retained</small></div>
+                <div><span>Likely positive, below target</span><strong data-stat-thin-positive>0</strong><small>Potential profit, but safety target failed</small></div>
+                <button class="summary-card-hitbox" type="button" data-quick-mode="thin" aria-label="Show likely positive items that remain below the safety target"></button>
               </article>
             </div>
 
@@ -214,6 +216,7 @@
                     <div class="queue-mode-switch" role="group" aria-label="Opportunity view">
                       <button class="is-active" type="button" data-quick-mode="profit" aria-pressed="true">Top profit</button>
                       <button type="button" data-quick-mode="pawn" aria-pressed="false">Pawn-first metals</button>
+                      <button type="button" data-quick-mode="thin" aria-pressed="false">Likely + / below target</button>
                       <button type="button" data-quick-mode="closing" aria-pressed="false">Closing ≤ 5 min</button>
                     </div>
                   </div>
@@ -343,22 +346,41 @@
                 <h2 id="sources-heading">Trace every number to its source.</h2>
                 <p>Automated feeds, imported files, and direct records converge here with observation times, listing links, identifiers, and source state preserved.</p>
               </div>
-              <button class="button button-dark" type="button" data-export-workspace><span aria-hidden="true">⇩</span> Export private workspace</button>
+              <div class="view-intro-actions">
+                <button class="button button-primary" type="button" data-refresh-now><span aria-hidden="true">↻</span> Refresh now</button>
+                <button class="button button-quiet" type="button" data-open-refresh-control>Refresh schedule</button>
+                <button class="button button-dark" type="button" data-export-workspace><span aria-hidden="true">⇩</span> Export private workspace</button>
+              </div>
             </div>
 
             <div class="source-status-card">
               <div class="source-status-icon" aria-hidden="true">✓</div>
-              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published listing snapshots are available. The latest source observation was <span data-research-observed>not yet received</span>. The built-in ShopGoodwill catalog refreshes in GitHub Actions; optional feeds and direct records merge into the same evidence ledger.</p></div>
+              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published listings are available. The latest successful source check was <span data-research-observed>not yet received</span>. Bid changes remain in the price curve, while every successful cloud check updates the separate “last checked” time.</p></div>
               <span class="status-chip"><i></i> PROVENANCE TRACKED</span>
             </div>
 
             <dl class="source-metadata source-metadata-grid" aria-label="Source pipeline metadata">
               <div><dt>Ingestion mode</dt><dd>ShopGoodwill catalog + optional feeds</dd></div>
-              <div><dt>Refresh cadence</dt><dd>Hourly · 5 min · final 30 sec</dd></div>
-              <div><dt>Latest observation</dt><dd data-research-observed>Awaiting first snapshot</dd></div>
+              <div><dt>Refresh cadence</dt><dd><span data-cloud-normal-cadence>Every hour</span> · <span data-cloud-closing-cadence>every 5 minutes</span> · final 30 sec · last minute 5 sec</dd></div>
+              <div><dt>Latest successful check</dt><dd data-research-observed>Awaiting first check</dd></div>
               <div><dt>Published records</dt><dd data-research-count>0</dd></div>
               <div><dt>Marketplaces observed</dt><dd data-market-count>0</dd></div>
             </dl>
+
+            <section class="cloud-refresh-card" aria-labelledby="cloud-refresh-heading">
+              <div class="cloud-refresh-lead">
+                <span class="refresh-orbit" aria-hidden="true">↻</span>
+                <div><span class="section-kicker"><i></i> CLOUD REFRESH CONTROL</span><h3 id="cloud-refresh-heading">Refresh even when this computer is off.</h3><p>GitHub runs the collector in the cloud. A manual refresh starts the same workflow immediately; scheduled checks continue after the browser closes.</p></div>
+              </div>
+              <dl>
+                <div><dt>Last successful check</dt><dd data-cloud-last-checked>No successful cloud check yet</dd></div>
+                <div><dt>Normal auctions</dt><dd data-cloud-normal-cadence>Every hour</dd></div>
+                <div><dt>Inside 30 minutes</dt><dd data-cloud-closing-cadence>Every 5 minutes</dd></div>
+                <div class="locked"><dt>Inside 5 minutes</dt><dd>Every 30 seconds · locked</dd></div>
+                <div class="locked"><dt>Inside 1 minute</dt><dd>Every 5 seconds · locked</dd></div>
+              </dl>
+              <div class="cloud-refresh-actions"><div><strong data-cloud-dispatch-state>Ready for a manual cloud refresh</strong><small>Manual refresh requires a GitHub token with Actions write access. It stays in this browser session only.</small></div><button class="button button-primary" type="button" data-refresh-now>Refresh all sources now</button><button class="button button-quiet" type="button" data-open-refresh-control>Change schedule</button></div>
+            </section>
 
             <section class="apify-connector-card" aria-labelledby="apify-connector-heading">
               <div class="connector-card-head">
@@ -377,7 +399,7 @@
                 <li>
                   <span class="connector-step">01</span>
                   <span class="connector-flow-icon" aria-hidden="true">&#8599;</span>
-                  <div><strong>Broad live catalog</strong><p>The hourly pass imports up to 10,000 nearest-closing real ShopGoodwill listings with canonical item links and images.</p></div>
+                  <div><strong>Broad live catalog</strong><p>Each due catalog pass imports up to 10,000 nearest-closing real ShopGoodwill listings with canonical item links and images.</p></div>
                 </li>
                 <li>
                   <span class="connector-step">02</span>
@@ -387,7 +409,7 @@
                 <li>
                   <span class="connector-step">03</span>
                   <span class="connector-flow-icon" aria-hidden="true">&#8635;</span>
-                  <div><strong>Adaptive BidAI import</strong><p>GitHub checks every source hourly, every five minutes inside 30 minutes, and every 30 seconds during the final five minutes.</p></div>
+                  <div><strong>Adaptive BidAI import</strong><p>Normal and 30-minute cadence are configurable. The final five minutes are locked to 30 seconds, and the final minute is locked to 5 seconds.</p></div>
                 </li>
               </ol>
 
@@ -521,6 +543,35 @@
         </footer>
       </main>
     </div>
+
+    <dialog class="analysis-modal" id="item-analysis-modal" aria-labelledby="analysis-modal-heading">
+      <div class="analysis-modal-bar"><div><span>COMPLETE PROFITABILITY REVIEW</span><h2 id="analysis-modal-heading">Item underwriting dossier</h2></div><button type="button" data-close-dialog="item-analysis-modal" aria-label="Close item analysis">×</button></div>
+      <div class="analysis-modal-content" data-item-modal-content></div>
+    </dialog>
+
+    <dialog class="control-dialog" id="refresh-control-dialog" aria-labelledby="refresh-control-heading">
+      <div class="control-dialog-head"><div><span>GITHUB CLOUD CONTROL</span><h2 id="refresh-control-heading">Refresh schedule</h2><p>These settings control the cloud workflow that continues when your computer is off.</p></div><button type="button" data-close-dialog="refresh-control-dialog" aria-label="Close refresh settings">×</button></div>
+      <form id="cloud-control-form" class="cloud-control-form">
+        <label><span>GitHub repository</span><input name="repository" required pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" placeholder="BidAIPro/BidAIPro" /><small>Owner/repository for the published site.</small></label>
+        <label><span>GitHub token</span><input name="token" type="password" autocomplete="off" required placeholder="Fine-grained token" /><small>Needs Actions and repository Variables write access. Stored in session memory only.</small></label>
+        <label><span>Normal auction checks</span><select name="normalMinutes"><option value="15">Every 15 minutes</option><option value="30">Every 30 minutes</option><option value="60">Every hour</option><option value="120">Every 2 hours</option><option value="240">Every 4 hours</option><option value="360">Every 6 hours</option></select></label>
+        <label><span>Inside the final 30 minutes</span><select name="nearCloseMinutes"><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option><option value="15">Every 15 minutes</option></select></label>
+        <div class="locked-cadence"><span>LOCKED SAFETY CADENCE</span><strong>Final 5 minutes: every 30 seconds</strong><strong>Final 1 minute: every 5 seconds</strong><small>These two rules cannot be changed.</small></div>
+        <div class="control-dialog-actions"><button class="button button-primary" type="submit">Save cloud schedule</button><button class="button button-dark" type="button" data-refresh-from-dialog>Save and refresh now</button></div>
+      </form>
+    </dialog>
+
+    <dialog class="control-dialog" id="source-connect-dialog" aria-labelledby="source-connect-heading">
+      <div class="control-dialog-head"><div><span>AUTHORIZED MARKETPLACE CONNECTION</span><h2 id="source-connect-heading">Connect an auction source</h2><p>Attach an authorized Apify Task, persistent Dataset, or HTTPS JSON feed to the cloud workflow.</p></div><button type="button" data-close-dialog="source-connect-dialog" aria-label="Close source connection">×</button></div>
+      <form id="source-connect-form" class="cloud-control-form">
+        <label><span>Marketplace</span><select name="marketKey" required></select></label>
+        <label><span>Connection type</span><select name="connectionType"><option value="taskId">Apify Task ID</option><option value="datasetId">Apify Dataset ID</option><option value="feedUrl">HTTPS JSON feed URL</option></select></label>
+        <label class="span-2"><span>Task, Dataset, or feed value</span><input name="connectionValue" required placeholder="Enter the authorized connection value" /><small>Task/private Dataset connections also require the repository’s BIDAI_APIFY_TOKEN secret. HTTPS feeds must return BidAI Pro’s documented schema.</small></label>
+        <label><span>GitHub repository</span><input name="repository" required pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" /></label>
+        <label><span>GitHub token</span><input name="token" type="password" autocomplete="off" required placeholder="Fine-grained token" /></label>
+        <div class="control-dialog-actions span-2"><button class="button button-primary" type="submit">Save connection and refresh</button><a class="button button-quiet" href="https://github.com/BidAIPro/BidAIPro/blob/main/docs/AUTOMATION.md" target="_blank" rel="noreferrer noopener">Connection guide ↗</a></div>
+      </form>
+    </dialog>
 
     <div class="toast-region" aria-live="polite" aria-atomic="true" data-toast-region></div>
   </body>
