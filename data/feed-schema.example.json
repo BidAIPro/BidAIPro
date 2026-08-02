@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-08-01T16:30:00Z",
+  "sourceMode": "authorized-feed",
+  "sourceNotes": [
+    "Example payload from an operator-approved JSON endpoint."
+  ],
+  "items": [
+    {
+      "id": "camera-1042",
+      "source": "Authorized partner feed",
+      "title": "Vintage rangefinder camera with 50mm lens",
+      "category": "Cameras & optics",
+      "url": "https://feed.example.invalid/listings/camera-1042",
+      "imageUrl": "https://feed.example.invalid/images/camera-1042.jpg",
+      "currentBid": "$425.00",
+      "shipping": "18.75",
+      "bidCount": 14,
+      "endsAt": "2026-08-02T01:00:00Z",
+      "observedAt": "2026-08-01T16:30:00Z",
+      "expectedClose": 690,
+      "resaleLow": 850,
+      "resaleMedian": "$1,050.00",
+      "resaleHigh": 1225,
+      "demand": 86,
+      "rarity": 68,
+      "identityConfidence": "78%",
+      "conditionConfidence": 0.62,
+      "compCount": 17,
+      "compRecencyDays": 45,
+      "identifiedAs": "Rangefinder body and standard lens; serial details unverified",
+      "history": [
+        {
+          "observedAt": "2026-08-01T12:30:00Z",
+          "currentBid": 280,
+          "bidCount": 8,
+          "expectedClose": 610,
+          "status": "active"
+        },
+        {
+          "observedAt": "2026-08-01T14:30:00Z",
+          "currentBid": "$350.00",
+          "bidCount": 11,
+          "expectedClose": 645,
+          "status": "active"
+        }
+      ]
+    },
+    {
+      "externalId": "watch-2088",
+      "source": "Authorized partner feed",
+      "title": "Mechanical wristwatch for parts or restoration",
+      "category": "Watches",
+      "currentBid": 155.5,
+      "shipping": 12,
+      "bidCount": 9,
+      "endsAt": 1785639600,
+      "observedAt": 1785610800,
+      "resaleLow": 275,
+      "resaleMedian": 360,
+      "resaleHigh": 475,
+      "demandScore": 72,
+      "rarityScore": 40,
+      "identityConfidence": 0.55,
+      "conditionConfidence": "35%",
+      "status": "active"
+    }
+  ]
+}

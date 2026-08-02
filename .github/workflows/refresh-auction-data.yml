@@ -1,0 +1,53 @@
+name: Refresh authorized auction data
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-authorized-auction-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Refresh normalized snapshots
+        env:
+          BIDAI_FEED_URL: ${{ secrets.BIDAI_FEED_URL }}
+          BIDAI_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_SOURCE_AUTHORIZED }}
+        run: node scripts/refresh-feed.mjs
+
+      - name: Commit changed snapshot data
+        shell: bash
+        run: |
+          if [[ ! -f data/live-snapshots.js ]]; then
+            echo "No generated snapshot file; nothing to commit."
+            exit 0
+          fi
+
+          git add -- data/live-snapshots.js
+          if git diff --cached --quiet; then
+            echo "Authorized feed data is unchanged."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(data): refresh auction snapshots"
+          git push origin HEAD:main

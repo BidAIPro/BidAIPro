@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="BidAI Pro turns user-provided auction snapshots into conservative bid limits, resale margin estimates, and a private learning history."
+      content="BidAI Pro ranks auction opportunities using downside-aware bid limits, resale evidence, demand signals, and observed price history."
     />
     <meta name="theme-color" content="#0b0f0d" />
     <meta property="og:title" content="BidAI Pro — Auction intelligence" />
@@ -14,8 +14,16 @@
       content="Know the margin before the gavel falls. Analyze auction snapshots, compare downside, and learn from final prices."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://bidaipro.github.io/BidAIPro/" />
+    <meta property="og:image" content="https://bidaipro.github.io/BidAIPro/og.png" />
+    <meta property="og:image:alt" content="BidAI Pro auction intelligence command center" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="BidAI Pro — Auction intelligence" />
+    <meta name="twitter:description" content="Find the margin before the gavel falls." />
+    <meta name="twitter:image" content="https://bidaipro.github.io/BidAIPro/og.png" />
     <title>BidAI Pro | Auction intelligence</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="data/live-snapshots.js" defer></script>
     <script src="script.js" defer></script>
   </head>
   <body>
@@ -28,7 +36,7 @@
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="brand-copy">BidAI <strong>Pro</strong></span>
           </a>
-          <span class="brand-edition">AUCTION INTELLIGENCE</span>
+          <span class="brand-edition">AUCTION DECISION SYSTEM</span>
         </div>
 
         <nav class="side-nav" aria-label="Workspace views">
@@ -60,14 +68,14 @@
         <div class="sidebar-status">
           <span class="status-orbit" aria-hidden="true"><i></i></span>
           <div>
-            <strong>User-provided snapshots</strong>
-            <span>No automated site access</span>
+            <strong data-source-status>Awaiting research data</strong>
+            <span>Source state is always labeled</span>
           </div>
         </div>
 
         <div class="privacy-note">
           <span aria-hidden="true">▣</span>
-          <p><strong>Private by design</strong>Your workspace stays in this browser until you export it.</p>
+          <p><strong>Evidence before action</strong>Live research and illustrative records are kept visibly distinct.</p>
         </div>
       </aside>
 
@@ -87,11 +95,15 @@
               <span></span><span></span><span></span>
             </button>
             <div>
-              <span class="kicker">PRIVATE AUCTION WORKSPACE</span>
+              <span class="kicker">AUCTION DEAL INTELLIGENCE</span>
               <h1 data-view-title>Opportunities</h1>
             </div>
           </div>
           <div class="topbar-actions">
+            <div class="system-state" aria-label="Research system status">
+              <span aria-hidden="true"></span>
+              <div><strong>Research workspace</strong><small>Decision support</small></div>
+            </div>
             <label class="search-box" for="global-search">
               <span aria-hidden="true">⌕</span>
               <span class="sr-only">Search auction opportunities</span>
@@ -112,26 +124,45 @@
           <section class="app-view is-active" id="view-opportunities" data-view="opportunities" aria-labelledby="opportunities-heading">
             <div class="view-intro">
               <div>
-                <span class="section-kicker"><i></i> DECISION QUEUE</span>
-                <h2 id="opportunities-heading">Know the margin before the gavel falls.</h2>
-                <p>Rank possible buys by downside-aware profit, demand, evidence quality, and bidding risk.</p>
+                <span class="section-kicker"><i></i> AUCTION COMMAND CENTER</span>
+                <h2 id="opportunities-heading">Spot the spread before the market catches up.</h2>
+                <p>Surface underpriced lots, pressure-test the resale case, and set a disciplined ceiling before the bidding accelerates.</p>
               </div>
               <div class="snapshot-mode" role="status">
                 <span class="mode-dot" aria-hidden="true"></span>
-                <div><strong>Snapshot mode</strong><span>Manual and imported records only</span></div>
+                <div><strong data-source-status>Awaiting research data</strong><span>Published pass + private workspace</span></div>
               </div>
             </div>
 
+            <section class="research-pass" aria-labelledby="research-pass-heading">
+              <div class="research-pass-lead">
+                <span class="research-pass-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+                <div>
+                  <span class="section-kicker"><i></i> LATEST RESEARCH PASS</span>
+                  <h3 id="research-pass-heading" data-source-status>Awaiting research data</h3>
+                  <p>Published observations are scored against resale evidence and your full cost profile.</p>
+                </div>
+              </div>
+              <dl class="research-pass-stats">
+                <div><dt>Research snapshots</dt><dd data-research-count>0</dd></div>
+                <div><dt>Last observed</dt><dd data-research-observed>No published pass</dd></div>
+                <div><dt>Decision rule</dt><dd>Margin after all costs</dd></div>
+              </dl>
+              <button class="research-pass-action" type="button" data-view-target="sources">
+                Inspect sources <span aria-hidden="true">→</span>
+              </button>
+            </section>
+
             <div class="demo-notice">
-              <span class="demo-tag">ILLUSTRATIVE DATA</span>
-              <p>The five examples below demonstrate the model—not live listings or buying advice. Verify identity, condition, fees, taxes, and resale demand before bidding.</p>
-              <button type="button" data-view-target="sources">Add your data <span aria-hidden="true">→</span></button>
+              <span class="demo-tag">DATA KEY</span>
+              <p><strong>Research snapshot</strong> means a published observation. <strong>Illustrative</strong> means a model example. Neither replaces identity, condition, fee, or sold-comparable verification.</p>
+              <button type="button" data-view-target="sources">Review inputs <span aria-hidden="true">→</span></button>
             </div>
 
             <div class="metric-grid" aria-label="Opportunity summary">
               <article class="summary-metric">
                 <div class="metric-icon lime" aria-hidden="true">↗</div>
-                <div><span>Modeled upside</span><strong data-stat-upside>$0</strong><small>Median case, before income tax</small></div>
+                <div><span>Modeled opportunity</span><strong data-stat-upside>$0</strong><small>Median profit across active records</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon orange" aria-hidden="true">◷</div>
@@ -139,7 +170,7 @@
               </article>
               <article class="summary-metric">
                 <div class="metric-icon blue" aria-hidden="true">◎</div>
-                <div><span>Average confidence</span><strong data-stat-confidence>0%</strong><small>Evidence completeness</small></div>
+                <div><span>Evidence confidence</span><strong data-stat-confidence>0%</strong><small>Identity, condition, and resale inputs</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon neutral" aria-hidden="true">≋</div>
@@ -151,8 +182,8 @@
               <section class="queue-panel" aria-labelledby="queue-heading">
                 <div class="panel-head queue-head">
                   <div>
-                    <span class="section-kicker"><i></i> RANKED OPPORTUNITIES</span>
-                    <h3 id="queue-heading">Decision queue</h3>
+                    <span class="section-kicker"><i></i> CONSERVATIVE RANKING</span>
+                    <h3 id="queue-heading">Profit decision queue</h3>
                   </div>
                   <div class="filter-row">
                     <label>
@@ -247,17 +278,17 @@
           <section class="app-view" id="view-sources" data-view="sources" aria-labelledby="sources-heading">
             <div class="view-intro compact">
               <div>
-                <span class="section-kicker"><i></i> DATA INPUTS</span>
-                <h2 id="sources-heading">Bring your own snapshots.</h2>
-                <p>BidAI Pro analyzes records you enter or import. It does not crawl or fetch ShopGoodwill pages.</p>
+                <span class="section-kicker"><i></i> RESEARCH INGESTION</span>
+                <h2 id="sources-heading">Know exactly what the model is seeing.</h2>
+                <p>Published research passes, authorized scheduled feeds, imported files, and manual records converge here with their source state preserved.</p>
               </div>
               <button class="button button-dark" type="button" data-export-workspace><span aria-hidden="true">⇩</span> Export private workspace</button>
             </div>
 
             <div class="source-status-card">
               <div class="source-status-icon" aria-hidden="true">✓</div>
-              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3>User-provided snapshots only</h3><p>Manual entries and CSV/JSON files are processed on this device. An authorized or officially approved feed can be connected in a future hosted version.</p></div>
-              <span class="status-chip"><i></i> LOCAL MODE</span>
+              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3 data-source-status>Awaiting research data</h3><p><strong data-research-count>0</strong> published research snapshots are available. The latest observation was <span data-research-observed>not yet published</span>. Authorized feeds refresh through GitHub Actions when configured; private CSV, JSON, and manual records stay on this device.</p></div>
+              <span class="status-chip"><i></i> SOURCE LABELED</span>
             </div>
 
             <div class="sources-grid">
@@ -347,7 +378,7 @@
 
         <footer class="workspace-footer">
           <p>BidAI Pro estimates are decision support—not appraisals, guarantees, or financial advice.</p>
-          <p><span class="footer-dot"></span> Local snapshot mode · <span data-current-year>2026</span></p>
+          <p><span class="footer-dot"></span> Research workspace · <span data-current-year>2026</span></p>
         </footer>
       </main>
     </div>

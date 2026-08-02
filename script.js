@@ -22,6 +22,18 @@
     targetMargin: 22,
   };
 
+  const PUBLISHED_RESEARCH = (() => {
+    const payload = window.BIDAI_LIVE_SNAPSHOTS;
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
+      return { observedAt: null, sourceMode: "unavailable", items: [] };
+    }
+    return {
+      observedAt: payload.observedAt || null,
+      sourceMode: payload.sourceMode || "published-research",
+      items: payload.items.filter((item) => item && item.id && item.title),
+    };
+  })();
+
   const now = Date.now();
   const hoursFromNow = (hours) => new Date(now + hours * 3600000).toISOString();
   const observedBefore = (hours) => new Date(now - hours * 3600000).toISOString();
@@ -324,7 +336,7 @@
 
   let workspace = loadWorkspace();
   let activeView = "opportunities";
-  let selectedId = "demo-gold-ring";
+  let selectedId = PUBLISHED_RESEARCH.items[0]?.id || "demo-gold-ring";
 
   function saveWorkspace() {
     try {
@@ -337,7 +349,7 @@
   }
 
   function allItems() {
-    return [...DEMO_ITEMS, ...workspace.userItems].map((item) => ({
+    return [...PUBLISHED_RESEARCH.items, ...DEMO_ITEMS, ...workspace.userItems].map((item) => ({
       ...item,
       watched: workspace.watchIds.includes(item.id),
     }));
@@ -420,6 +432,9 @@
     if (hasResaleEvidence && (profitExpected < 0 || maxBid < Number(item.currentBid) * 0.9)) signal = "avoid";
     else if (hasResaleEvidence && score >= 70 && maxBid > Number(item.currentBid)) signal = "candidate";
     else if (hasResaleEvidence && score >= 48) signal = "watch";
+    if (["candidate", "watch", "research", "avoid"].includes(item.riskGate)) {
+      signal = item.riskGate;
+    }
     return {
       expectedClose,
       marketplaceFee,
@@ -484,7 +499,7 @@
           <span class="item-copy">
             <strong>${escapeHtml(item.title)}</strong>
             <small>${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span></span>
+            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span class="status-pill">${statusText}</span>${item.publishedResearch ? '<span class="status-pill research-source">RESEARCH SNAPSHOT</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.score};--score-color:${scoreColor(a.signal)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
@@ -518,7 +533,7 @@
     }
     const a = assess(item);
     const curve = curveFor(item, a);
-    const sourceUrl = safeHttpUrl(item.url);
+    const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
     const maxWaterfall = Math.max(a.resaleMedian, a.acquisition, a.sellingCosts, Math.abs(a.profitExpected), 1);
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
@@ -530,7 +545,7 @@
         ];
     container.innerHTML = `
       <div class="detail-top">
-        <div class="detail-eyebrow"><span class="section-kicker"><i></i> SELECTED ANALYSIS</span>${item.illustrative ? '<span class="illustrative-chip">ILLUSTRATIVE</span>' : '<span class="illustrative-chip">USER SNAPSHOT</span>'}</div>
+        <div class="detail-eyebrow"><span class="section-kicker"><i></i> SELECTED ANALYSIS</span>${item.publishedResearch ? '<span class="illustrative-chip live">RESEARCH SNAPSHOT</span>' : item.illustrative ? '<span class="illustrative-chip">ILLUSTRATIVE</span>' : '<span class="illustrative-chip">USER SNAPSHOT</span>'}</div>
         <div class="detail-title-row">
           <span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>
           <div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.externalId)} · ${escapeHtml(item.category)}</p></div>
@@ -613,6 +628,23 @@
     $("[data-stat-observations]").textContent = observations.toLocaleString("en-US");
     $$('[data-opportunity-count]').forEach((el) => { el.textContent = String(active.length); });
     $$('[data-watch-count]').forEach((el) => { el.textContent = String(workspace.watchIds.length); });
+    $$('[data-research-count]').forEach((el) => { el.textContent = String(PUBLISHED_RESEARCH.items.length); });
+    $$('[data-research-observed]').forEach((el) => {
+      const observed = PUBLISHED_RESEARCH.observedAt ? new Date(PUBLISHED_RESEARCH.observedAt) : null;
+      el.textContent = observed && !Number.isNaN(observed.getTime())
+        ? observed.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+        : "No published pass";
+    });
+    $$('[data-source-status]').forEach((el) => {
+      const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
+      el.textContent = !PUBLISHED_RESEARCH.items.length
+        ? "Awaiting research data"
+        : mode.includes("authorized")
+          ? "Authorized feed loaded"
+          : mode.includes("manual")
+            ? "Manual research pass loaded"
+            : "Research snapshots loaded";
+    });
   }
 
   function renderOpportunities() {

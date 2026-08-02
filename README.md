@@ -1,6 +1,6 @@
 # BidAI Pro
 
-BidAI Pro is a private-first auction intelligence workspace for evaluating resale opportunities. It estimates landed cost, conservative resale value, expected profit, risk, demand, and a maximum rational bid from snapshots you provide.
+BidAI Pro is a private-first auction intelligence workspace for evaluating resale opportunities. It estimates landed cost, conservative resale value, expected profit, risk, demand, and a maximum rational bid from published research, authorized feeds, and snapshots you provide.
 
 The GitHub Pages version is intentionally dependency-free: it runs entirely in the browser, stores your workspace on the current device, and does not send listing data to a server.
 
@@ -27,6 +27,7 @@ Open `index.html` in a browser. There is no install or build step.
 
 You can:
 
+- review the current published ShopGoodwill research pass, with each listing linked back to its source;
 - review illustrative opportunities and inspect their cost assumptions;
 - record a single auction snapshot;
 - import repeated CSV or JSON snapshots to build price history;
@@ -44,6 +45,12 @@ The importer accepts CSV or JSON. Common CSV headers include:
 
 Money values are in US dollars. Confidence values can be decimals such as `0.82` or percentages such as `82`.
 
+## Automatic refreshes
+
+The repository includes a scheduled GitHub Actions pipeline for an official API, licensed feed, or other endpoint whose operator has authorized programmatic access. It normalizes current bids and ended outcomes, preserves observation history, and republishes the data file only when something changed.
+
+Setup and feed-field details are in `docs/AUTOMATION.md`. Until an authorized endpoint is configured, the workflow performs a guarded no-op and the checked-in point-in-time research pass remains visible.
+
 ## Data-source boundary
 
-This repository does not crawl ShopGoodwill or automate bidding. It analyzes user-provided snapshots and can later be connected to a data feed for which the operator has permission. Recommendations are decision support, not guarantees; verify authenticity, condition, taxes, fees, shipping, and resale restrictions before bidding.
+This repository does not automate bidding. Its checked-in ShopGoodwill records are labeled point-in-time manual research snapshots. Unattended direct crawling is not enabled because ShopGoodwill's current Terms of Use prohibit unauthorized automated access and extraction; the scheduled connector is therefore permission-gated and source-neutral. Recommendations are decision support, not guarantees; verify authenticity, condition, taxes, fees, shipping, and resale restrictions before bidding.
