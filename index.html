@@ -149,7 +149,7 @@
                 <div><dt>Forecast inputs</dt><dd>History + comparable evidence</dd></div>
               </dl>
               <div class="research-pass-actions">
-                <button class="research-pass-action primary" type="button" data-refresh-now>Refresh now <span aria-hidden="true">↻</span></button>
+                <button class="research-pass-action primary" type="button" data-refresh-now>Refresh published data <span aria-hidden="true">↻</span></button>
                 <button class="research-pass-action" type="button" data-view-target="sources">Open source ledger <span aria-hidden="true">→</span></button>
               </div>
             </section>
@@ -347,7 +347,7 @@
                 <p>Automated feeds, imported files, and direct records converge here with observation times, listing links, identifiers, and source state preserved.</p>
               </div>
               <div class="view-intro-actions">
-                <button class="button button-primary" type="button" data-refresh-now><span aria-hidden="true">↻</span> Refresh now</button>
+                <button class="button button-primary" type="button" data-refresh-now><span aria-hidden="true">↻</span> Refresh published data</button>
                 <button class="button button-quiet" type="button" data-open-refresh-control>Refresh schedule</button>
                 <button class="button button-dark" type="button" data-export-workspace><span aria-hidden="true">⇩</span> Export private workspace</button>
               </div>
@@ -367,10 +367,18 @@
               <div><dt>Marketplaces observed</dt><dd data-market-count>0</dd></div>
             </dl>
 
+            <section class="catalog-coverage-card" aria-labelledby="catalog-coverage-heading">
+              <div class="panel-head">
+                <div><span class="section-kicker"><i></i> LIVE CATEGORY COVERAGE</span><h3 id="catalog-coverage-heading">Every discovered ShopGoodwill department, with real record counts.</h3></div>
+                <p>Click a department to open its listings. Counts come from the currently published snapshot, never placeholders.</p>
+              </div>
+              <div class="category-coverage-grid" data-category-coverage-grid></div>
+            </section>
+
             <section class="cloud-refresh-card" aria-labelledby="cloud-refresh-heading">
               <div class="cloud-refresh-lead">
                 <span class="refresh-orbit" aria-hidden="true">↻</span>
-                <div><span class="section-kicker"><i></i> CLOUD REFRESH CONTROL</span><h3 id="cloud-refresh-heading">Refresh even when this computer is off.</h3><p>GitHub runs the collector in the cloud. A manual refresh starts the same workflow immediately; scheduled checks continue after the browser closes.</p></div>
+                <div><span class="section-kicker"><i></i> CLOUD REFRESH CONTROL</span><h3 id="cloud-refresh-heading">Cloud collection stays automatic. Dashboard refresh is instant.</h3><p>GitHub runs the collector while your computer is off. Refresh published data checks the latest completed cloud snapshot immediately and never asks for a GitHub token.</p></div>
               </div>
               <dl>
                 <div><dt>Last successful check</dt><dd data-cloud-last-checked>No successful cloud check yet</dd></div>
@@ -379,7 +387,7 @@
                 <div class="locked"><dt>Inside 5 minutes</dt><dd>Every 30 seconds · locked</dd></div>
                 <div class="locked"><dt>Inside 1 minute</dt><dd>Every 5 seconds · locked</dd></div>
               </dl>
-              <div class="cloud-refresh-actions"><div><strong data-cloud-dispatch-state>Ready for a manual cloud refresh</strong><small>Manual refresh requires a GitHub token with Actions write access. It stays in this browser session only.</small></div><button class="button button-primary" type="button" data-refresh-now>Refresh all sources now</button><button class="button button-quiet" type="button" data-open-refresh-control>Change schedule</button></div>
+              <div class="cloud-refresh-actions"><div><strong data-cloud-dispatch-state>Ready to check for newly published data</strong><small>This reloads the latest completed cloud snapshot with cache bypass. No GitHub token is requested or stored.</small></div><button class="button button-primary" type="button" data-refresh-now>Refresh published data</button><a class="button button-dark" href="https://github.com/BidAIPro/BidAIPro/actions/workflows/refresh-auction-data.yml" target="_blank" rel="noreferrer noopener">Run collection on GitHub ↗</a><button class="button button-quiet" type="button" data-open-refresh-control>Advanced schedule</button></div>
             </section>
 
             <section class="apify-connector-card" aria-labelledby="apify-connector-heading">
@@ -557,7 +565,7 @@
         <label><span>Normal auction checks</span><select name="normalMinutes"><option value="15">Every 15 minutes</option><option value="30">Every 30 minutes</option><option value="60">Every hour</option><option value="120">Every 2 hours</option><option value="240">Every 4 hours</option><option value="360">Every 6 hours</option></select></label>
         <label><span>Inside the final 30 minutes</span><select name="nearCloseMinutes"><option value="5">Every 5 minutes</option><option value="10">Every 10 minutes</option><option value="15">Every 15 minutes</option></select></label>
         <div class="locked-cadence"><span>LOCKED SAFETY CADENCE</span><strong>Final 5 minutes: every 30 seconds</strong><strong>Final 1 minute: every 5 seconds</strong><small>These two rules cannot be changed.</small></div>
-        <div class="control-dialog-actions"><button class="button button-primary" type="submit">Save cloud schedule</button><button class="button button-dark" type="button" data-refresh-from-dialog>Save and refresh now</button></div>
+        <div class="control-dialog-actions"><button class="button button-primary" type="submit">Save cloud schedule</button><button class="button button-dark" type="button" data-refresh-from-dialog>Save and run cloud collection</button></div>
       </form>
     </dialog>
 

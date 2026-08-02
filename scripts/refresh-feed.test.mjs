@@ -313,12 +313,15 @@ test("the built-in ShopGoodwill catalog pages real listings and preserves source
         categoryName: index === 1 ? "Shoes" : "Collectibles",
         catFullName: index === 1 ? "Clothing > Shoes" : "Collectibles > General",
       });
-      const items = request.page === 1
-        ? Array.from({ length: 40 }, (_, index) => makeItem(index + 1))
-        : request.page === 2 ? [makeItem(41)] : [];
+      const items = request.selectedCategoryIds === "500"
+        ? [{ ...makeItem(42), itemId: 270000042, title: "Category fan-out listing", categoryName: "Tools", catFullName: "Tools > Hand Tools" }]
+        : request.page === 1
+          ? Array.from({ length: 40 }, (_, index) => makeItem(index + 1))
+          : request.page === 2 ? [makeItem(41)] : [];
       return new Response(JSON.stringify({
-        searchResults: { items, itemCount: 41 },
+        searchResults: { items, itemCount: request.selectedCategoryIds === "500" ? 1 : 41 },
         maxTotalRecords: 10000,
+        categoryListModel: { categoryWithNonZeroChild: [{ categoryId: 500, name: "Tools", levelNumber: 1 }] },
       }), { status: 200, headers: { "content-type": "application/json" } });
     };
   `, "utf8");
@@ -332,6 +335,7 @@ test("the built-in ShopGoodwill catalog pages real listings and preserves source
         BIDAI_SOURCE_AUTHORIZED: "false",
         BIDAI_SHOPGOODWILL_MODE: "catalog",
         BIDAI_SHOPGOODWILL_CATALOG_LIMIT: "41",
+        BIDAI_SHOPGOODWILL_CATEGORY_LIMIT: "1",
         BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -341,7 +345,8 @@ test("the built-in ShopGoodwill catalog pages real listings and preserves source
   assert.equal(result.code, 0, result.stderr);
   const envelope = await readEnvelope(join(fixture.data, "live-snapshots.js"));
   assert.equal(envelope.sourceMode, "shopgoodwill-public-catalog");
-  assert.equal(envelope.items.length, 41);
+  assert.equal(envelope.items.length, 42);
+  assert.ok(envelope.items.some((item) => item.title === "Category fan-out listing"));
   const footwear = envelope.items.find((item) => item.externalId === "270000001");
   assert.ok(footwear);
   assert.equal(footwear.sourceKey, "shopgoodwill");

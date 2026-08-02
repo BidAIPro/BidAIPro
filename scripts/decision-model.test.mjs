@@ -363,3 +363,23 @@ test("an unsupported item receives zero ceilings instead of an invented exit", (
   assert.equal(result.rankingScore, 0);
   assert.equal(result.bidHeadroom, -result.currentBid);
 });
+
+test("category browsing groups detailed source paths into populated parent categories", () => {
+  const model = loadModel();
+  assert.equal(model.categoryRootFor("Clothing > Shoes > Men's"), "Clothing");
+  assert.equal(model.categoryRootFor("Computers & Electronics > Audio"), "Computers & Electronics");
+  assert.equal(model.categoryRootFor(""), "Unclassified");
+});
+
+test("published snapshot refresh parses data without evaluating executable script", () => {
+  const model = loadModel();
+  const parsed = model.parsePublishedSnapshotScript(`window.BIDAI_LIVE_SNAPSHOTS = ${JSON.stringify({
+    observedAt: "2026-08-02T18:00:00.000Z",
+    lastCheckedAt: "2026-08-02T18:05:00.000Z",
+    sourceMode: "test-refresh",
+    items: [{ id: "real-1", title: "Real listing" }, { id: "", title: "Rejected" }],
+  })};`);
+  assert.equal(parsed.sourceMode, "test-refresh");
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].id, "real-1");
+});

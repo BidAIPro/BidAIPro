@@ -43,6 +43,7 @@ jobs:
           BIDAI_NEAR_CLOSE_REFRESH_MINUTES: ${{ vars.BIDAI_NEAR_CLOSE_REFRESH_MINUTES || '5' }}
           BIDAI_SHOPGOODWILL_ENABLED: "true"
           BIDAI_SHOPGOODWILL_CATALOG_LIMIT: "10000"
+          BIDAI_SHOPGOODWILL_CATEGORY_LIMIT: "250"
           BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "200"
         run: node scripts/refresh-all-sources.mjs
 

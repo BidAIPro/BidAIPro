@@ -38,6 +38,7 @@
     nearCloseMinutes: 5,
     sourceConfigs: [],
     lastDispatchAt: null,
+    lastPublishedRefreshAt: null,
   };
 
   const AUCTION_MARKETS = [
@@ -53,8 +54,7 @@
     { key: "bidspotter", name: "BidSpotter", domain: "bidspotter.com", homeUrl: "https://www.bidspotter.com/en-us", focus: "Industrial, commercial, plant and machinery" },
   ];
 
-  const PUBLISHED_RESEARCH = (() => {
-    const payload = window.BIDAI_LIVE_SNAPSHOTS;
+  function normalizePublishedResearch(payload) {
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
       return { observedAt: null, lastCheckedAt: null, sourceMode: "unavailable", items: [] };
     }
@@ -64,7 +64,19 @@
       sourceMode: payload.sourceMode || "published-research",
       items: payload.items.filter((item) => item && item.id && item.title),
     };
-  })();
+  }
+
+  function parsePublishedSnapshotScript(source) {
+    const assignment = "window.BIDAI_LIVE_SNAPSHOTS";
+    const assignmentIndex = String(source || "").indexOf(assignment);
+    if (assignmentIndex < 0) throw new Error("The published snapshot file has an unexpected format.");
+    const equalsIndex = source.indexOf("=", assignmentIndex + assignment.length);
+    if (equalsIndex < 0) throw new Error("The published snapshot file has an unexpected format.");
+    const json = source.slice(equalsIndex + 1).trim().replace(/;\s*$/, "");
+    return normalizePublishedResearch(JSON.parse(json));
+  }
+
+  let PUBLISHED_RESEARCH = normalizePublishedResearch(window.BIDAI_LIVE_SNAPSHOTS);
 
 
   const aliases = {
@@ -1939,7 +1951,7 @@
         return (!query || haystack.includes(query)) &&
           matchesMode &&
           (signal === "all" || assessment.signal === signal) &&
-          (category === "all" || item.category === category) &&
+          (category === "all" || categoryRootFor(item.category) === category) &&
           (vertical === "all" || (item.resaleVertical || "Other") === vertical) &&
           (authentication === "all" || (item.authenticationStatus || "not-supplied") === authentication) &&
           (source === "all" || item.sourceKey === source);
@@ -1968,12 +1980,23 @@
       .map(({ item }) => item);
   }
 
+  function categoryRootFor(category) {
+    return String(category || "Unclassified").split(">")[0].trim() || "Unclassified";
+  }
+
   function populateCategories() {
     const select = $("#category-filter");
     if (!select) return;
     const current = select.value;
-    const categories = [...new Set(allItems().map((item) => item.category).filter(Boolean))].sort();
-    select.innerHTML = '<option value="all">All categories</option>' + categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("");
+    const counts = new Map();
+    for (const item of allItems()) {
+      const category = categoryRootFor(item.category);
+      counts.set(category, (counts.get(category) || 0) + 1);
+    }
+    const categories = [...counts.keys()].sort((left, right) => left.localeCompare(right));
+    select.innerHTML = '<option value="all">All categories</option>' + categories
+      .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)} (${counts.get(category).toLocaleString("en-US")})</option>`)
+      .join("");
     select.value = categories.includes(current) ? current : "all";
   }
 
@@ -1991,10 +2014,27 @@
         return { key, name: item?.marketplaceName || key, count: itemCounts.get(key) || 0 };
       });
     const sources = [...known, ...other];
-    select.innerHTML = '<option value="all">All marketplaces</option>' + sources
-      .map((market) => `<option value="${escapeHtml(market.key)}">${escapeHtml(market.name)}${market.count ? ` (${market.count})` : ""}</option>`)
+    select.innerHTML = '<option value="all">All connected marketplaces</option>' + sources
+      .map((market) => `<option value="${escapeHtml(market.key)}"${market.count ? "" : " disabled"}>${escapeHtml(market.name)} — ${market.count ? `${market.count.toLocaleString("en-US")} records` : "feed not connected"}</option>`)
       .join("");
-    select.value = sources.some((market) => market.key === current) ? current : "all";
+    select.value = sources.some((market) => market.key === current && market.count > 0) ? current : "all";
+  }
+
+  function renderCategoryCoverage() {
+    const container = $("[data-category-coverage-grid]");
+    if (!container) return;
+    const counts = new Map();
+    for (const item of allItems()) {
+      const category = categoryRootFor(item.category);
+      const current = counts.get(category) || { total: 0, active: 0 };
+      current.total += 1;
+      if (item.status === "active") current.active += 1;
+      counts.set(category, current);
+    }
+    container.innerHTML = [...counts.entries()]
+      .sort((left, right) => right[1].total - left[1].total || left[0].localeCompare(right[0]))
+      .map(([category, count]) => `<button type="button" data-category-jump="${escapeHtml(category)}"><span>${escapeHtml(category)}</span><strong>${count.total.toLocaleString("en-US")}</strong><small>${count.active.toLocaleString("en-US")} active now</small></button>`)
+      .join("");
   }
 
 function renderMarketplaceCoverage() {
@@ -2017,7 +2057,7 @@ function renderMarketplaceCoverage() {
         <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${connected ? "REAL RECORDS CONNECTED" : "AWAITING AUTHORIZED FEED"}</small></div></div>
         <p>${escapeHtml(market.focus)}</p>
         <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Bid changes</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest <= 1 / 12 ? "5s" : fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : `${fastest / 60}h`) : "—"}</dd></div></dl>
-        <div class="marketplace-card-footer"><span>${latest ? `Checked ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "No listing data stored"}</span><div>${!connected ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Connect source</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
+        <div class="marketplace-card-footer"><span>${latest ? `Checked ${escapeHtml(formatDateTime(new Date(latest).toISOString()))}` : "0 ingested · feed not configured"}</span><div>${!connected ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Add authorized feed</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
       </article>`;
     }).join("");
   }
@@ -2070,7 +2110,9 @@ function renderMarketplaceCoverage() {
     });
     $$('[data-cloud-closing-cadence]').forEach((el) => { el.textContent = `Every ${cloudControl.nearCloseMinutes} minutes`; });
     $$('[data-cloud-dispatch-state]').forEach((el) => {
-      el.textContent = cloudControl.lastDispatchAt ? `Refresh requested ${formatDateTime(cloudControl.lastDispatchAt)}` : "Ready for a manual cloud refresh";
+      el.textContent = cloudControl.lastPublishedRefreshAt
+        ? `Published data refreshed ${formatDateTime(cloudControl.lastPublishedRefreshAt)}`
+        : "Ready to check for newly published data";
     });
     $$('[data-source-status]').forEach((el) => {
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
@@ -2083,6 +2125,7 @@ function renderMarketplaceCoverage() {
       else if (mode.includes("manual")) status = "Manual research pass loaded";
       el.textContent = status;
     });
+    renderCategoryCoverage();
     renderMarketplaceCoverage();
   }
 
@@ -2377,16 +2420,30 @@ function renderMarketplaceCoverage() {
     }
   }
 
-  async function refreshNow() {
-    if (!cloudToken()) {
-      openCloudControl();
-      return;
-    }
+  async function refreshNow(button = null) {
+    const refreshButtons = $$('[data-refresh-now]');
+    refreshButtons.forEach((candidate) => { candidate.disabled = true; });
+    if (button) button.setAttribute("aria-busy", "true");
     try {
-      await dispatchCloudRefresh();
+      const snapshotUrl = new URL("data/live-snapshots.js", document.baseURI);
+      snapshotUrl.searchParams.set("refresh", String(Date.now()));
+      const response = await fetch(snapshotUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Published data returned ${response.status}.`);
+      const refreshed = parsePublishedSnapshotScript(await response.text());
+      if (!refreshed.items.length) throw new Error("The published snapshot contains no usable listings.");
+      PUBLISHED_RESEARCH = refreshed;
+      cloudControl.lastPublishedRefreshAt = new Date().toISOString();
+      saveCloudControl();
+      invalidateHistoricalIndex();
+      visibleQueueLimit = QUEUE_PAGE_SIZE;
+      renderStats();
+      renderCurrentView();
+      toast(`${refreshed.items.length.toLocaleString("en-US")} published listings refreshed. No GitHub token needed.`);
     } catch (error) {
-      toast(error.message || "Cloud refresh could not be requested.", "error");
-      openCloudControl();
+      toast(error.message || "Published data could not be refreshed.", "error");
+    } finally {
+      refreshButtons.forEach((candidate) => { candidate.disabled = false; });
+      if (button) button.removeAttribute("aria-busy");
     }
   }
 
@@ -2809,6 +2866,9 @@ function renderMarketplaceCoverage() {
   if (window.BIDAI_TEST_MODE === true) {
     window.BIDAI_TEST_API = Object.freeze({
       assess,
+      categoryRootFor,
+      normalizePublishedResearch,
+      parsePublishedSnapshotScript,
       recommendationLabel,
       snapshotPlanFor,
       setSettings(settings = {}) {
@@ -2832,7 +2892,7 @@ function renderMarketplaceCoverage() {
       return;
     }
     if (event.target.closest("[data-refresh-now]")) {
-      await refreshNow();
+      await refreshNow(event.target.closest("[data-refresh-now]"));
       return;
     }
     if (event.target.closest("[data-open-refresh-control]")) {
@@ -2851,6 +2911,15 @@ function renderMarketplaceCoverage() {
     const quickModeButton = event.target.closest("[data-quick-mode]");
     if (quickModeButton) {
       setQueueMode(quickModeButton.dataset.quickMode);
+      return;
+    }
+    const categoryJumpButton = event.target.closest("[data-category-jump]");
+    if (categoryJumpButton) {
+      setView("opportunities");
+      populateCategories();
+      $("#category-filter").value = categoryJumpButton.dataset.categoryJump;
+      visibleQueueLimit = QUEUE_PAGE_SIZE;
+      renderOpportunities();
       return;
     }
     const viewButton = event.target.closest("[data-view-target]");

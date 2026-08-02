@@ -4,7 +4,7 @@ BidAI Pro can collect the real ShopGoodwill public catalog directly and merge it
 
 The supported source modes are:
 
-1. **Built-in ShopGoodwill catalog:** each due catalog pass reads the public bid search in 40-item pages, up to the source's 10,000-result broad-search cap, and adds dedicated discovery pools for footwear, watches, rings, hats, collectibles, electronics, and authenticated-sneaker wording. Near close, only known item-detail records are requested.
+1. **Built-in ShopGoodwill catalog:** each due catalog pass reads the public bid search in 40-item pages, up to the source's 10,000-result broad-search cap, fans out across every top-level category returned by the source catalog, and adds dedicated discovery pools for footwear, watches, rings, hats, collectibles, electronics, and authenticated-sneaker wording. Near close, only known item-detail records are requested.
 2. **Apify Task plus Dataset:** BidAI Pro starts a preconfigured Task when that market is due, waits for the run to succeed, and imports the run's Dataset.
 3. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
 4. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
@@ -17,7 +17,7 @@ For any additional source, configure only an official API, licensed data feed, o
 
 ## Built-in ShopGoodwill source
 
-The workflow sets `BIDAI_SHOPGOODWILL_ENABLED=true`, `BIDAI_SHOPGOODWILL_CATALOG_LIMIT=10000`, and `BIDAI_SHOPGOODWILL_PRIORITY_LIMIT=200`. The first value activates the source; the second caps the broad nearest-close search; the third caps each priority search. The source service itself currently exposes at most 10,000 broad results to one search, so “all” means all records returned within that documented runtime cap plus the dedicated category searches—not a claim that every item in the marketplace is available through one query.
+The workflow sets `BIDAI_SHOPGOODWILL_ENABLED=true`, `BIDAI_SHOPGOODWILL_CATALOG_LIMIT=10000`, `BIDAI_SHOPGOODWILL_CATEGORY_LIMIT=250`, and `BIDAI_SHOPGOODWILL_PRIORITY_LIMIT=200`. These activate the source and cap the broad, per-category, and per-keyword discovery pools. The source service currently exposes at most 10,000 broad results to one search, so “all” means all records returned within those runtime windows—not a claim that every marketplace listing is available through one query. Individual deep pages that remain unavailable after bounded retry are skipped while successful verified pages continue to publish.
 
 The collector stores the source ID, title, category path, current bid, bid count, end time, image, and direct item URL. It deliberately leaves shipping and resale value unknown unless a trustworthy feed supplies them. Its model key is a conservative exact normalization of the complete source title, including size and variant wording; it never groups merely similar category items. A closing forecast remains unavailable until five completed listings share that exact normalized title. The collector does not fabricate sold comparables or resale profit, so a real item can remain **Research** until exact-title auction outcomes, completed resale evidence, and cost inputs exist.
 
@@ -65,7 +65,7 @@ Example configuration value showing shape only (replace every placeholder with a
 
 ### In-app cloud controls
 
-The Sources view can dispatch `refresh-auction-data.yml` and update the repository's non-sensitive refresh variables through GitHub's REST API. Enter a fine-grained personal access token scoped to this repository with **Actions: write** and **Variables: write** permissions. BidAI Pro stores that token only in `sessionStorage`, so it is cleared when the browser tab/session ends; it is never written to `localStorage`, the generated data file, or the repository.
+The ordinary **Refresh published data** action only fetches the newest completed snapshot with cache bypass and does not use a token. The Sources view can separately dispatch `refresh-auction-data.yml` and update repository variables through GitHub's REST API; those write operations require a fine-grained token with **Actions: write** and **Variables: write** permissions. BidAI Pro stores that token only in `sessionStorage`, so it is cleared when the browser tab/session ends; it is never written to `localStorage`, the generated data file, or the repository. The **Run collection on GitHub** link is the preferred manual trigger because it uses GitHub's normal signed-in workflow UI.
 
 The schedule form writes:
 

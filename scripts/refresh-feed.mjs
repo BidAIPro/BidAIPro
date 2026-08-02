@@ -18,8 +18,9 @@ const SHOPGOODWILL_SEARCH_PATH = "/api/Search/ItemListing";
 const SHOPGOODWILL_ITEM_PATH = "/api/ItemDetail/GetItemDetailModelByItemId/";
 const SHOPGOODWILL_PAGE_SIZE = 40;
 const SHOPGOODWILL_MAX_CATALOG_ITEMS = 10_000;
-const SHOPGOODWILL_REQUEST_CONCURRENCY = 4;
+const SHOPGOODWILL_REQUEST_CONCURRENCY = 2;
 const SHOPGOODWILL_PRIORITY_SEARCH_LIMIT = 200;
+const SHOPGOODWILL_CATEGORY_SEARCH_LIMIT = 250;
 const SHOPGOODWILL_PRIORITY_SEARCHES = [
   "authenticated sneakers",
   "shoes",
@@ -723,7 +724,7 @@ function sleep(milliseconds) {
 async function fetchShopGoodwillJson(path, options = {}) {
   const url = new URL(path, SHOPGOODWILL_API_ORIGIN);
   let lastStatus = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     let response;
     try {
       response = await fetch(url, {
@@ -739,7 +740,7 @@ async function fetchShopGoodwillJson(path, options = {}) {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
-      if (attempt === 2) throw new Error("The ShopGoodwill public catalog request failed.");
+      if (attempt === 3) throw new Error("The ShopGoodwill public catalog request failed.");
       await sleep(500 * (attempt + 1));
       continue;
     }
@@ -752,11 +753,11 @@ async function fetchShopGoodwillJson(path, options = {}) {
       }
     }
     lastStatus = response.status;
-    if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break;
+    if (![403, 429, 500, 502, 503, 504].includes(response.status) || attempt === 3) break;
     const retryAfterSeconds = Number.parseInt(response.headers.get("retry-after") || "", 10);
     await sleep(Number.isFinite(retryAfterSeconds)
       ? Math.min(10_000, retryAfterSeconds * 1_000)
-      : 750 * (attempt + 1));
+      : (response.status === 403 ? 2_000 : 750) * (attempt + 1));
   }
   throw new Error(`The ShopGoodwill public catalog returned HTTP ${lastStatus}.`);
 }
@@ -775,11 +776,14 @@ async function mapWithConcurrency(values, limit, mapper) {
   return results;
 }
 
-function shopGoodwillSearchRequest(page, searchText = "") {
+function shopGoodwillSearchRequest(page, searchText = "", categoryId = null) {
+  const normalizedCategoryId = Number.isInteger(Number(categoryId)) && Number(categoryId) > 0
+    ? String(Number(categoryId))
+    : null;
   return {
     searchText,
     selectedGroup: searchText ? "Keyword" : "",
-    selectedCategoryIds: null,
+    selectedCategoryIds: normalizedCategoryId,
     selectedSellerIds: null,
     lowPrice: "0",
     highPrice: "999999",
@@ -804,20 +808,43 @@ function shopGoodwillSearchRequest(page, searchText = "") {
     isSize: false,
     isMultipleCategoryIds: false,
     partNumber: "",
-    catIds: "",
+    catIds: normalizedCategoryId || "",
     isWeddingCatagory: false,
     sellerStore: "",
   };
 }
 
-async function fetchShopGoodwillSearchPage(page, searchText = "") {
+async function fetchShopGoodwillSearchPage(page, searchText = "", categoryId = null) {
   const payload = await fetchShopGoodwillJson(SHOPGOODWILL_SEARCH_PATH, {
     method: "POST",
-    body: JSON.stringify(shopGoodwillSearchRequest(page, searchText)),
+    body: JSON.stringify(shopGoodwillSearchRequest(page, searchText, categoryId)),
   });
   const items = payload?.searchResults?.items;
   if (!Array.isArray(items)) throw new Error("The ShopGoodwill catalog response did not include listing items.");
   return payload;
+}
+
+async function fetchOptionalShopGoodwillSearchPage(page, searchText = "", categoryId = null) {
+  try {
+    return await fetchShopGoodwillSearchPage(page, searchText, categoryId);
+  } catch (error) {
+    const scope = categoryId ? `category ${categoryId}` : (searchText ? `keyword ${JSON.stringify(searchText)}` : "broad catalog");
+    console.warn(`[refresh-feed] Skipped ${scope} page ${page}: ${error.message}`);
+    return null;
+  }
+}
+
+function shopGoodwillTopLevelCategories(payload) {
+  const categories = payload?.categoryListModel?.categoryWithNonZeroChild;
+  if (!Array.isArray(categories)) return [];
+  const byId = new Map();
+  for (const category of categories) {
+    const id = Number(category?.categoryId);
+    const name = text(category?.name || category?.label);
+    if (!Number.isInteger(id) || id <= 0 || !name || /^all\b/i.test(name)) continue;
+    byId.set(id, { id, name });
+  }
+  return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function zonedDateTimeToIso(value, timeZone = "America/Los_Angeles") {
@@ -1009,6 +1036,12 @@ async function fetchShopGoodwillCatalog(environment) {
     0,
     1_000,
   );
+  const categoryLimit = boundedInteger(
+    environment.BIDAI_SHOPGOODWILL_CATEGORY_LIMIT,
+    SHOPGOODWILL_CATEGORY_SEARCH_LIMIT,
+    0,
+    1_000,
+  );
   const [first, metalQuotes] = await Promise.all([
     fetchShopGoodwillSearchPage(1),
     fetchMetalQuotes(),
@@ -1021,13 +1054,51 @@ async function fetchShopGoodwillCatalog(environment) {
   const broadPayloads = [first, ...await mapWithConcurrency(
     remainingPages,
     SHOPGOODWILL_REQUEST_CONCURRENCY,
-    (page) => fetchShopGoodwillSearchPage(page),
+    (page) => fetchOptionalShopGoodwillSearchPage(page),
   )];
   const broadRecords = broadPayloads
-    .flatMap((payload) => payload.searchResults.items)
+    .flatMap((payload) => payload?.searchResults?.items || [])
     .slice(0, broadLimit)
     .map((record) => shopGoodwillRecord(record, capturedAt, false, { metalQuotes }))
     .filter(Boolean);
+
+  const categoryRecords = [];
+  const topLevelCategories = shopGoodwillTopLevelCategories(first);
+  if (categoryLimit > 0 && topLevelCategories.length) {
+    const firstCategoryPayloads = await mapWithConcurrency(
+      topLevelCategories,
+      SHOPGOODWILL_REQUEST_CONCURRENCY,
+      (category) => fetchOptionalShopGoodwillSearchPage(1, "", category.id),
+    );
+    const categoryPageRequests = [];
+    firstCategoryPayloads.forEach((payload, index) => {
+      if (!payload) return;
+      const available = boundedInteger(payload?.searchResults?.itemCount, categoryLimit, 0, Number.MAX_SAFE_INTEGER);
+      const categoryCap = boundedInteger(payload?.maxTotalRecords, categoryLimit, 1, categoryLimit);
+      const pages = Math.ceil(Math.min(categoryLimit, categoryCap, available) / SHOPGOODWILL_PAGE_SIZE);
+      for (let page = 2; page <= Math.max(1, pages); page += 1) {
+        categoryPageRequests.push({ categoryId: topLevelCategories[index].id, page });
+      }
+    });
+    const remainingCategoryPayloads = await mapWithConcurrency(
+      categoryPageRequests,
+      SHOPGOODWILL_REQUEST_CONCURRENCY,
+      ({ categoryId, page }) => fetchOptionalShopGoodwillSearchPage(page, "", categoryId),
+    );
+    const payloadsByCategory = new Map(topLevelCategories.map((category, index) => (
+      [category.id, [firstCategoryPayloads[index]]]
+    )));
+    for (const request of categoryPageRequests) {
+      payloadsByCategory.get(request.categoryId)?.push(remainingCategoryPayloads.shift());
+    }
+    for (const category of topLevelCategories) {
+      categoryRecords.push(...(payloadsByCategory.get(category.id) || [])
+        .flatMap((payload) => payload?.searchResults?.items || [])
+        .slice(0, categoryLimit)
+        .map((record) => shopGoodwillRecord(record, capturedAt, false, { metalQuotes }))
+        .filter(Boolean));
+    }
+  }
 
   const priorityRecords = [];
   if (priorityLimit > 0) {
@@ -1038,13 +1109,13 @@ async function fetchShopGoodwillCatalog(environment) {
     const priorityPayloads = await mapWithConcurrency(
       requests,
       SHOPGOODWILL_REQUEST_CONCURRENCY,
-      ({ page, searchText }) => fetchShopGoodwillSearchPage(page, searchText),
+      ({ page, searchText }) => fetchOptionalShopGoodwillSearchPage(page, searchText),
     );
     for (let searchIndex = 0; searchIndex < SHOPGOODWILL_PRIORITY_SEARCHES.length; searchIndex += 1) {
       const offset = searchIndex * pagesPerSearch;
       const records = priorityPayloads
         .slice(offset, offset + pagesPerSearch)
-        .flatMap((payload) => payload.searchResults.items)
+        .flatMap((payload) => payload?.searchResults?.items || [])
         .slice(0, priorityLimit);
       priorityRecords.push(...records
         .map((record) => shopGoodwillRecord(record, capturedAt, false, { metalQuotes }))
@@ -1057,14 +1128,14 @@ async function fetchShopGoodwillCatalog(environment) {
     capturedAt,
     metalQuotes,
   );
-  const records = deduplicateShopGoodwillRecords([...broadRecords, ...priorityRecords, ...recoveryRecords]);
+  const records = deduplicateShopGoodwillRecords([...broadRecords, ...categoryRecords, ...priorityRecords, ...recoveryRecords]);
   if (!records.length) throw new Error("The ShopGoodwill public catalog contained no active bid listings.");
   return {
     generatedAt: capturedAt,
     sourceMode: "shopgoodwill-public-catalog",
     sourceNotes: [
       `Loaded ${records.length.toLocaleString("en-US")} real ShopGoodwill bid listings, ordered toward the nearest closes.`,
-      `The broad search is limited to ${sourceCap.toLocaleString("en-US")} results by the source service; priority searches add footwear, watches, rings, hats, collectibles, and electronics coverage.`,
+      `The broad search is limited to ${sourceCap.toLocaleString("en-US")} results by the source service; ${topLevelCategories.length || "all discovered"} top-level category searches and priority searches extend coverage beyond that window.`,
       "Authentication is never inferred: only explicit source wording is labeled as source-stated, and still requires independent verification.",
     ],
     items: records,
