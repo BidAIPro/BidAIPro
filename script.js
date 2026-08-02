@@ -257,7 +257,7 @@
 
   let workspace = loadWorkspace();
   let activeView = "opportunities";
-  let selectedId = PUBLISHED_RESEARCH.items[0]?.id || workspace.userItems[0]?.id || "";
+  let selectedId = "";
   let historicalIndexCache = null;
   let visibleQueueLimit = QUEUE_PAGE_SIZE;
   let queueMode = "profit";
@@ -675,13 +675,6 @@
     const liquidityLabel = liquidityScore === null
       ? "unknown"
       : liquidityScore >= 80 ? "hot" : liquidityScore >= 60 ? "strong" : liquidityScore >= 40 ? "moderate" : "slow";
-    const intrinsicQuoteAt = Date.parse(item.valuationBasis?.referenceObservedAt || "");
-    const hasIntrinsicEvidence = item.intrinsicValueEvidence === true
-      && Number(item.valuationBasis?.grossWeightGrams) > 0
-      && Number(item.valuationBasis?.reference14kMeltPerGram) > 0
-      && Number.isFinite(intrinsicQuoteAt)
-      && intrinsicQuoteAt <= evidenceCutoff
-      && evidenceCutoff - intrinsicQuoteAt <= 86400000;
     const hasComparableResaleEvidence = resaleEvidenceCount >= 3;
     const sourceResaleLow = Math.max(0, Number(item.resaleLow) || 0);
     const sourceResaleMedian = Math.max(0, Number(item.resaleMedian) || 0);
@@ -716,13 +709,15 @@
       && resaleLow > 0
       && resaleLow <= resaleMedian
       && resaleHigh >= resaleMedian
-      && (hasComparableResaleEvidence || hasIntrinsicEvidence || hasUsedAskingEvidence);
+      && (hasComparableResaleEvidence || hasUsedAskingEvidence);
     const hasForecast = forecast.status === "available";
     const resaleDecisionAvailable = hasResaleEvidence;
     const profitLow = hasForecast && resaleDecisionAvailable ? netLow - landedAt(forecast.high) : null;
     const profitExpected = hasForecast && resaleDecisionAvailable ? netMedian - acquisition : null;
     const profitHigh = hasForecast && resaleDecisionAvailable ? netHigh - landedAt(forecast.low) : null;
     const profitAtCurrentBid = resaleDecisionAvailable ? netMedian - currentAcquisition : null;
+    const onlineProfitLowAtCurrentBid = resaleDecisionAvailable ? netLow - currentAcquisition : null;
+    const onlineProfitHighAtCurrentBid = resaleDecisionAvailable ? netHigh - currentAcquisition : null;
     const pawnPayoutPercent = clamp(configuredNumber(null, s.pawnPayoutPercent) / 100, 0.2, 0.7) * 100;
     const pawnTestingReserve = Math.max(0, configuredNumber(null, s.pawnTestingReserve));
     const metalQuoteAt = Date.parse(item.metalEstimate?.quoteObservedAt || "");
@@ -757,21 +752,54 @@
     const pawnMaxBid = hasMetalEstimate
       ? Math.max(0, (pawnMaximumLanded / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
       : 0;
-    const exitType = hasMetalEstimate ? "pawn" : resaleDecisionAvailable ? "online-resale" : "no-evidence";
+    const resaleBreakEvenBid = resaleDecisionAvailable
+      ? Math.max(0, (Math.max(0, netMedian) / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
+      : 0;
+    const pawnBreakEvenBid = hasMetalEstimate
+      ? Math.max(0, (Math.max(0, pawnCashEstimate - pawnTestingReserve) / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
+      : 0;
+    const minimumProfitTarget = Math.max(0, Number(s.minimumProfit) || 0);
+    const pawnSafeNow = hasMetalEstimate && pawnMaxBid > currentBid;
+    const onlineSafeNow = resaleDecisionAvailable && resaleMaxBid > currentBid;
+    const pawnLikelyProfitable = hasMetalEstimate && pawnProfitAtCurrentBid > 0;
+    const onlineLikelyProfitable = resaleDecisionAvailable && profitAtCurrentBid > 0;
+    let exitType = "no-evidence";
+    let recommendationState = "no-evidence";
+    if (pawnSafeNow) {
+      exitType = "pawn";
+      recommendationState = "pawn-safe";
+    } else if (onlineSafeNow) {
+      exitType = "online-resale";
+      recommendationState = "online-safe";
+    } else if (pawnLikelyProfitable) {
+      exitType = "pawn";
+      recommendationState = "pawn-thin";
+    } else if (onlineLikelyProfitable) {
+      exitType = "online-resale";
+      recommendationState = "online-thin";
+    } else if (hasMetalEstimate && resaleDecisionAvailable) {
+      exitType = pawnProfitAtCurrentBid >= profitAtCurrentBid ? "pawn" : "online-resale";
+      recommendationState = "no-safe-exit";
+    } else if (hasMetalEstimate) {
+      exitType = "pawn";
+      recommendationState = "no-safe-exit";
+    } else if (resaleDecisionAvailable) {
+      exitType = "online-resale";
+      recommendationState = "no-safe-exit";
+    }
     const maxBid = exitType === "pawn" ? pawnMaxBid : exitType === "online-resale" ? resaleMaxBid : 0;
+    const breakEvenBid = exitType === "pawn" ? pawnBreakEvenBid : exitType === "online-resale" ? resaleBreakEvenBid : 0;
     const safeCeilingBasis = exitType === "pawn"
       ? `${pawnLowPercent.toFixed(0)}% low pawn case after recoverable-weight and testing reserves`
       : hasComparableResaleEvidence
         ? "Exact-model completed-sale P20 after all configured costs"
         : hasUsedAskingEvidence
           ? `Used online asking P20 after ${Math.round(askingPriceHaircut * 100)}% evidence haircut and all costs`
-          : hasIntrinsicEvidence
-            ? "Timestamped intrinsic floor after all configured costs"
-            : "No defensible online price evidence — do not bid";
+          : "No defensible online price evidence — do not bid";
     const hasDecisionInputs = exitType !== "no-evidence";
     const decisionProfitAtCurrentBid = exitType === "pawn" ? pawnProfitAtCurrentBid : profitAtCurrentBid;
-    const decisionProfitLow = exitType === "pawn" ? pawnProfitLow : (resaleDecisionAvailable ? netLow - currentAcquisition : null);
-    const decisionProfitHigh = exitType === "pawn" ? pawnProfitHigh : (resaleDecisionAvailable ? netHigh - currentAcquisition : null);
+    const decisionProfitLow = exitType === "pawn" ? pawnProfitLow : onlineProfitLowAtCurrentBid;
+    const decisionProfitHigh = exitType === "pawn" ? pawnProfitHigh : onlineProfitHighAtCurrentBid;
     const comparableCount = Math.max(Number(item.compCount) || 0, forecast.exactModelCount || 0);
     const compCoverage = clamp(Math.log2(comparableCount + 1) / 4);
     const suppliedRecencyDays = Number(item.compRecencyDays);
@@ -794,12 +822,13 @@
       : 0;
     const askingConfidence = hasUsedAskingEvidence ? clamp(0.42 + Math.min(0.18, uniqueUsedListings.length / 100)) : 0;
     const confidence = exitType === "pawn" ? metalConfidence : hasComparableResaleEvidence ? evidenceConfidence : hasUsedAskingEvidence ? askingConfidence : evidenceConfidence;
-    const resalePopularityScore = exitType === "pawn"
-      ? 90
-      : hasLiquidityEvidence ? liquidityScore : hasUsedAskingEvidence ? 52 : hasComparableResaleEvidence ? 45 : 0;
-    const saleLikelihood = exitType === "pawn"
-      ? 0.9
-      : hasLiquidityEvidence ? clamp(0.35 + sellThroughRate * 0.65) : hasUsedAskingEvidence ? 0.52 : hasComparableResaleEvidence ? 0.45 : 0;
+    const pawnLiquidityScore = hasMetalEstimate ? 90 : 0;
+    const pawnSaleLikelihood = hasMetalEstimate ? 0.9 : 0;
+    const onlinePopularityScore = hasLiquidityEvidence ? liquidityScore : 0;
+    const onlineSaleLikelihood = hasLiquidityEvidence ? clamp(0.35 + sellThroughRate * 0.65) : 0;
+    const onlinePopularityKnown = hasLiquidityEvidence;
+    const resalePopularityScore = exitType === "pawn" ? pawnLiquidityScore : onlinePopularityScore;
+    const saleLikelihood = exitType === "pawn" ? pawnSaleLikelihood : onlineSaleLikelihood;
     const roi = decisionProfitAtCurrentBid === null ? null : decisionProfitAtCurrentBid / Math.max(1, currentAcquisition);
     const marginComponent = clamp((roi + 0.15) / 1.15);
     const urgency = clamp(1 - hours / 72);
@@ -818,17 +847,16 @@
       && currentBid > 0
       && (freshness.className === "is-fresh" || freshness.className === "is-aging");
     const score = hasDecisionInputs ? Math.round(rawScore) : 0;
-    const profitableNow = decisionProfitAtCurrentBid !== null
-      && decisionProfitAtCurrentBid >= Number(s.minimumProfit || 0)
-      && maxBid > currentBid;
-    const rankTier = profitableNow && exitType === "pawn"
+    const profitableNow = maxBid > currentBid;
+    const rankTier = pawnSafeNow
       ? 0
-      : profitableNow && resalePopularityScore >= 60 ? 1
-        : profitableNow ? 2
-          : exitType === "pawn" ? 3
-            : hasDecisionInputs ? 4 : 5;
+      : onlineSafeNow && onlinePopularityScore >= 60 ? 1
+        : onlineSafeNow ? 2
+          : pawnLikelyProfitable ? 3
+            : onlineLikelyProfitable ? 4
+              : hasDecisionInputs ? 5 : 6;
     let signal = "research";
-    if (hasDecisionInputs && (decisionProfitAtCurrentBid < 0 || maxBid <= currentBid)) signal = "avoid";
+    if (hasDecisionInputs && decisionProfitAtCurrentBid <= 0) signal = "avoid";
     else if (profitableNow && actionableSnapshot) signal = "candidate";
     else if (hasDecisionInputs && decisionProfitAtCurrentBid > 0) signal = "watch";
     if (["research", "avoid"].includes(item.riskGate)) signal = item.riskGate;
@@ -864,6 +892,8 @@
       profitExpected,
       profitHigh,
       profitAtCurrentBid,
+      onlineProfitLowAtCurrentBid,
+      onlineProfitHighAtCurrentBid,
       pawnPayoutPercent,
       pawnLowPercent,
       pawnHighPercent,
@@ -881,24 +911,36 @@
       score,
       signal,
       maxBid,
+      breakEvenBid,
       resaleMaxBid,
+      resaleBreakEvenBid,
       pawnMaxBid,
+      pawnBreakEvenBid,
       safeCeilingBasis,
       exitType,
+      recommendationState,
       decisionProfitAtCurrentBid,
       decisionProfitLow,
       decisionProfitHigh,
       profitableNow,
+      pawnSafeNow,
+      onlineSafeNow,
+      pawnLikelyProfitable,
+      onlineLikelyProfitable,
+      minimumProfitTarget,
       rankTier,
       resalePopularityScore,
       saleLikelihood,
+      pawnLiquidityScore,
+      pawnSaleLikelihood,
+      onlinePopularityScore,
+      onlineSaleLikelihood,
+      onlinePopularityKnown,
       roi,
       hours,
       hasResaleEvidence,
       resaleEvidenceCount,
-      resaleEvidenceType: hasIntrinsicEvidence
-        ? "intrinsic liquidation basis"
-        : hasComparableResaleEvidence
+      resaleEvidenceType: hasComparableResaleEvidence
           ? `${resaleEvidenceCount} exact-model sold comparable${resaleEvidenceCount === 1 ? "" : "s"}`
           : hasUsedAskingEvidence
             ? `${uniqueUsedListings.length} matched used online asking prices with a ${Math.round(askingPriceHaircut * 100)}% haircut`
@@ -929,6 +971,24 @@
 
   function signalLabel(signal) {
     return { candidate: "Candidate", watch: "Watch", research: "Research", avoid: "Avoid" }[signal] || "Research";
+  }
+
+  function recommendationLabel(state) {
+    return {
+      "pawn-safe": "Pawn profit now",
+      "online-safe": "Online resale profit",
+      "pawn-thin": "Pawn margin below target",
+      "online-thin": "Online margin below target",
+      "no-safe-exit": "No safe exit now",
+      "no-evidence": "No exit evidence",
+    }[state] || "No exit evidence";
+  }
+
+  function recommendationClass(state) {
+    if (["pawn-safe", "online-safe"].includes(state)) return "is-safe";
+    if (["pawn-thin", "online-thin"].includes(state)) return "is-thin";
+    if (state === "no-safe-exit") return "is-unsafe";
+    return "is-unknown";
   }
 
   function scoreColor(signal, dark = false) {
@@ -966,18 +1026,19 @@
       ? '<span class="status-pill authentication-source">AUTH CLAIM</span>'
       : "";
     const exitBadge = a.exitType === "pawn"
-      ? '<span class="status-pill pawn-exit">PAWN EXIT</span>'
+      ? '<span class="status-pill pawn-exit">PAWN FIRST</span>'
       : a.hasComparableResaleEvidence
-        ? '<span class="status-pill sold-exit">SOLD COMPS</span>'
-        : a.hasUsedAskingEvidence ? '<span class="status-pill asking-exit">USED ASKING</span>' : "";
+        ? '<span class="status-pill sold-exit">ONLINE · SOLD COMPS</span>'
+        : a.hasUsedAskingEvidence ? '<span class="status-pill asking-exit">ONLINE · USED ASKING</span>' : "";
+    const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(recommendationLabel(a.recommendationState))}</span>`;
     const rowProfit = a.decisionProfitAtCurrentBid;
-    const rowProfitLabel = a.exitType === "pawn" ? "Likely pawn profit" : "Likely resale profit";
+    const rowProfitLabel = a.exitType === "pawn" ? "Likely pawn profit" : a.exitType === "online-resale" ? "Likely online profit" : "Likely profit";
     const exitSummary = a.exitType === "pawn"
-      ? `${money(a.pawnCashEstimate)} likely pawn cash · ${Math.round(a.saleLikelihood * 100)}% modeled liquidity`
+      ? `${money(a.pawnCashEstimate)} likely pawn cash · ${a.onlineSafeNow ? "online fallback also clears target" : "pawn evaluated first"}`
       : a.hasComparableResaleEvidence
-        ? `${money(a.resaleMedian)} sold median · ${a.hasLiquidityEvidence ? `${a.liquidityLabel} liquidity` : "velocity unknown"}`
+        ? `${money(a.resaleMedian)} sold median · ${a.hasLiquidityEvidence ? `${a.liquidityLabel} liquidity` : "velocity unknown"}${a.hasMetalEstimate ? " · pawn did not clear target" : ""}`
         : a.hasUsedAskingEvidence
-          ? `${money(a.onlineUsedAverage)} average used asking · ${Math.round(a.askingPriceHaircut * 100)}% haircut`
+          ? `${money(a.onlineUsedAverage)} average used asking · ${Math.round(a.askingPriceHaircut * 100)}% haircut${a.hasMetalEstimate ? " · pawn did not clear target" : ""}`
           : "No defensible online price evidence";
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; ${sourceUrl ? `press Enter to open on ${escapeHtml(marketplace.name)}` : "source listing URL unavailable"}">
@@ -986,12 +1047,12 @@
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Observed ${escapeHtml(formatDateTime(freshness.observedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.score};--score-color:${scoreColor(a.signal)}" data-score="${a.score}" aria-label="Opportunity score ${a.score} out of 100"></span>
         </div>
         <div class="money-cell"><span>Observed bid</span><strong>${money(item.currentBid)}</strong><small>${a.hasForecast ? `Expected ${money(a.expectedClose)} · ` : "No learned close · "}${Number(item.bidCount) || 0} bids</small></div>
-        <div class="money-cell"><span>Safe ceiling</span><strong>${money(a.maxBid)}</strong><small>${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? " · shipping estimated" : ""}</small></div>
+        <div class="money-cell"><span>Target-safe ceiling</span><strong>${money(a.maxBid)}</strong><small>Modeled break-even ${money(a.breakEvenBid)} · ${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? " · shipping estimated" : ""}</small></div>
         <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowProfit === null ? "" : rowProfit >= 0 ? "positive" : "negative"}">${rowProfit === null ? "No evidence" : money(rowProfit)}</strong><small>${escapeHtml(exitSummary)}</small></div>
         <div class="row-actions">
           <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
@@ -1102,6 +1163,25 @@
     const marketAverage = marketUsesAsking ? a.onlineUsedAverage : a.resaleAverage;
     const marketHigh = marketUsesAsking ? a.onlineUsedHigh : a.resaleHigh;
     const marketSampleSize = marketUsesAsking ? a.usedAskingCount : a.resaleEvidenceCount;
+    const pawnRouteLabel = !a.hasMetalEstimate
+      ? "Not eligible from source evidence"
+      : a.pawnSafeNow ? "Immediate pawn profit clears target"
+        : a.pawnLikelyProfitable ? "Likely positive, but below safety target"
+          : "No likely pawn profit at the observed bid";
+    const onlineRouteLabel = !a.hasResaleEvidence
+      ? "No defensible online evidence"
+      : a.onlineSafeNow ? "Online resale profit clears target"
+        : a.onlineLikelyProfitable ? "Likely positive, but below safety target"
+          : "No likely online profit at the observed bid";
+    const recommendationExplanation = a.recommendationState === "pawn-safe"
+      ? "The conservative pawn route clears your profit target, so it is recommended before taking listing, return, or shipping risk online."
+      : a.recommendationState === "online-safe"
+        ? `${a.hasMetalEstimate ? "The pawn route does not clear the safety target. " : ""}The online route does, using ${a.hasComparableResaleEvidence ? "completed exact-model sales" : "matched active-used prices with the configured haircut"}.`
+        : ["pawn-thin", "online-thin"].includes(a.recommendationState)
+          ? `The likely case is positive, but the observed bid is already above the target-safe ceiling that preserves ${money(a.minimumProfitTarget)} minimum profit and your configured margin.`
+          : a.recommendationState === "no-safe-exit"
+            ? "Neither pawn nor online resale supports a safe profit at the observed bid. The break-even amount is shown for reference, but this item should not be chased."
+            : "Neither a testable pawn basis nor sufficient real online resale evidence is available. The safe ceiling remains $0.";
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
       ? item.evidence
@@ -1122,10 +1202,41 @@
         <div class="detail-signal"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span>${escapeHtml(item.identifiedAs || "Identity requires verification")}</span><span class="snapshot-freshness ${freshness.className}">${escapeHtml(freshness.label)} · ${escapeHtml(freshness.short)}</span></div>
       </div>
       <div class="detail-body">
+        <section class="exit-decision-panel ${recommendationClass(a.recommendationState)}">
+          <div class="exit-decision-head">
+            <div><span>RECOMMENDED EXIT</span><h4>${escapeHtml(recommendationLabel(a.recommendationState))}</h4></div>
+            <span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(recommendationLabel(a.recommendationState))}</span>
+          </div>
+          <p>${escapeHtml(recommendationExplanation)}</p>
+          <div class="exit-route-grid">
+            <article class="exit-route-card ${a.exitType === "pawn" ? "is-selected" : ""}">
+              <div class="exit-route-title"><span>1</span><div><small>FIRST CHECK</small><strong>Immediate pawn exit</strong></div></div>
+              <div class="exit-route-state ${a.pawnSafeNow ? "is-safe" : a.pawnLikelyProfitable ? "is-thin" : "is-unavailable"}">${escapeHtml(pawnRouteLabel)}</div>
+              <dl>
+                <div><dt>Likely cash</dt><dd>${a.hasMetalEstimate ? money(a.pawnCashEstimate) : "Unavailable"}</dd></div>
+                <div><dt>Likely profit now</dt><dd>${a.pawnProfitAtCurrentBid === null ? "Unavailable" : money(a.pawnProfitAtCurrentBid)}</dd></div>
+                <div><dt>Target-safe bid</dt><dd>${money(a.pawnMaxBid)}</dd></div>
+                <div><dt>Modeled break-even</dt><dd>${money(a.pawnBreakEvenBid)}</dd></div>
+              </dl>
+              <small class="exit-route-foot">${a.hasMetalEstimate ? `${a.pawnLowPercent.toFixed(0)}% low / ${a.pawnPayoutPercent.toFixed(0)}% likely / ${a.pawnHighPercent.toFixed(0)}% high payout cases · ${percent(a.pawnSaleLikelihood)} modeled immediacy` : "Requires source-stated purity, weight, and a fresh spot quote; testing is still mandatory."}</small>
+            </article>
+            <article class="exit-route-card ${a.exitType === "online-resale" ? "is-selected" : ""}">
+              <div class="exit-route-title"><span>2</span><div><small>FALLBACK / HIGHER-VALUE CHECK</small><strong>Online or auction resale</strong></div></div>
+              <div class="exit-route-state ${a.onlineSafeNow ? "is-safe" : a.onlineLikelyProfitable ? "is-thin" : "is-unavailable"}">${escapeHtml(onlineRouteLabel)}</div>
+              <dl>
+                <div><dt>Likely sale price</dt><dd>${a.hasResaleEvidence ? money(a.resaleMedian) : "Unavailable"}</dd></div>
+                <div><dt>Likely profit now</dt><dd>${a.profitAtCurrentBid === null ? "Unavailable" : money(a.profitAtCurrentBid)}</dd></div>
+                <div><dt>Target-safe bid</dt><dd>${money(a.resaleMaxBid)}</dd></div>
+                <div><dt>Modeled break-even</dt><dd>${money(a.resaleBreakEvenBid)}</dd></div>
+              </dl>
+              <small class="exit-route-foot">${a.hasResaleEvidence ? `${escapeHtml(a.resaleEvidenceType)} · ${a.onlinePopularityKnown ? `popularity ${a.onlinePopularityScore}/100 · ${percent(a.onlineSaleLikelihood)} modeled sale likelihood` : "popularity and sale speed unavailable until sold-versus-active evidence exists"}` : "Requires completed exact-model sales or at least five matched active-used prices. Auction bid counts alone are not resale demand."}</small>
+            </article>
+          </div>
+        </section>
         <div class="bid-metrics">
           <div class="bid-metric"><span>${item.status === "ended" ? "Final recorded bid" : "Observed bid"}</span><strong>${money(item.status === "ended" && item.finalPrice ? item.finalPrice : item.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids · ${timeLabel(item)} · ${escapeHtml(freshness.short)}</small></div>
           <div class="bid-metric"><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient history"}</strong><small>${a.hasForecast ? `${money(a.forecast.low)}–${money(a.forecast.high)}` : `${a.forecast.exactModelCount}/5 exact-model outcomes`}</small></div>
-          <div class="bid-metric primary"><span>Safe ceiling</span><strong>${money(a.maxBid)}</strong><small>${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? ` · includes ${money(a.shipping)} estimated inbound shipping` : ""}</small></div>
+          <div class="bid-metric primary"><span>Target-safe ceiling</span><strong>${money(a.maxBid)}</strong><small>Modeled break-even ${money(a.breakEvenBid)} · ${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? ` · includes ${money(a.shipping)} estimated inbound shipping` : ""}</small></div>
         </div>
         <section class="forecast-basis-panel ${a.hasForecast ? "is-available" : "is-insufficient"}">
           <div class="forecast-basis-head"><div><span>FORECAST BASIS</span><h4>${a.hasForecast ? escapeHtml(a.forecast.method) : "Insufficient similar completed auctions"}</h4></div><strong>${a.hasForecast ? `${Math.round(a.forecast.confidence * 100)}% model confidence` : "Not ranked"}</strong></div>
@@ -1212,8 +1323,8 @@
           <div class="detail-section-heading"><h4>Evidence check</h4><span>${percent(a.confidence)} confidence</span></div>
           <div class="evidence-grid">${evidence.slice(0, 4).map((entry) => `<div class="evidence-item"><span>${escapeHtml(entry.label)}</span><strong title="${escapeHtml(entry.value)}">${escapeHtml(entry.value)}</strong></div>`).join("")}</div>
           <div class="analysis-factors-grid">
-            <div><span>${a.exitType === "pawn" ? "Pawn exit liquidity" : a.hasLiquidityEvidence ? "Resale liquidity" : a.hasUsedAskingEvidence ? "Used-market proxy" : "Resale popularity unknown"}</span><strong>${a.resalePopularityScore}/100</strong></div>
-            <div><span>Modeled sale likelihood</span><strong>${percent(a.saleLikelihood)}</strong></div>
+            <div><span>${a.exitType === "pawn" ? "Pawn exit liquidity" : a.hasLiquidityEvidence ? "Resale liquidity" : "Resale popularity unknown"}</span><strong>${a.exitType === "pawn" || a.hasLiquidityEvidence ? `${a.resalePopularityScore}/100` : "Unavailable"}</strong></div>
+            <div><span>Modeled sale likelihood</span><strong>${a.exitType === "pawn" || a.hasLiquidityEvidence ? percent(a.saleLikelihood) : "Unavailable"}</strong></div>
             <div><span>Rarity signal</span><strong>${Math.round(Number(item.rarity) || 0)}/100</strong></div>
             <div><span>Identity confidence</span><strong>${percent(parseConfidence(item.identityConfidence, 0))}</strong></div>
             <div><span>Condition confidence</span><strong>${percent(parseConfidence(item.conditionConfidence, 0))}</strong></div>
@@ -1435,6 +1546,7 @@ function renderMarketplaceCoverage() {
   function setQueueMode(mode) {
     if (!["profit", "pawn", "closing"].includes(mode)) return;
     queueMode = mode;
+    selectedId = "";
     visibleQueueLimit = QUEUE_PAGE_SIZE;
     if (activeView !== "opportunities") setView("opportunities");
     else renderOpportunities();
@@ -1451,7 +1563,7 @@ function renderMarketplaceCoverage() {
       const marketplace = marketplaceFor(item);
       return `<article class="watch-card">
         <div class="watch-card-top"><span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span><div><h4>${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</h4><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${timeLabel(item)}</p></div></div>
-        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient"}</strong></div><div><span>Safe ceiling</span><strong>${money(a.maxBid)}</strong></div></div>
+        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Best exit</span><strong>${escapeHtml(recommendationLabel(a.recommendationState))}</strong></div><div><span>Target-safe ceiling</span><strong>${money(a.maxBid)}</strong></div><div><span>Likely profit now</span><strong>${a.decisionProfitAtCurrentBid === null ? "Unavailable" : money(a.decisionProfitAtCurrentBid)}</strong></div></div>
         <div class="watch-card-actions"><button class="button button-primary" type="button" data-open-id="${escapeHtml(item.id)}">Open analysis</button>${sourceUrl ? `<a class="button button-dark" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Source listing ↗</a>` : ""}<button class="button button-quiet" type="button" data-watch-id="${escapeHtml(item.id)}">Remove</button></div>
       </article>`;
     }).join("");
@@ -1959,6 +2071,17 @@ function renderMarketplaceCoverage() {
     form.reset();
     toast(result.updated ? "Item updated and observation preserved." : "Snapshot added to your private workspace.");
     setView("opportunities");
+  }
+
+  if (window.BIDAI_TEST_MODE === true) {
+    window.BIDAI_TEST_API = Object.freeze({
+      assess,
+      recommendationLabel,
+      setSettings(settings = {}) {
+        workspace.settings = { ...DEFAULT_SETTINGS, ...settings };
+      },
+    });
+    return;
   }
 
   document.addEventListener("click", (event) => {

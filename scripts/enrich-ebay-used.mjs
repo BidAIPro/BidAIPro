@@ -179,7 +179,7 @@ async function searchUsedListings(target, accessToken, marketplaceId) {
   const query = queryFor(target);
   const url = new URL(SEARCH_URL);
   url.searchParams.set("q", query);
-  url.searchParams.set("filter", "conditions:{USED}");
+  url.searchParams.set("filter", "conditions:{USED},buyingOptions:{FIXED_PRICE|BEST_OFFER}");
   url.searchParams.set("limit", String(MAX_LISTINGS));
   const response = await fetch(url, {
     headers: {

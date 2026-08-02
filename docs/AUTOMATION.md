@@ -9,7 +9,7 @@ The supported source modes are:
 3. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
 4. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
 5. **Completed-sales enrichment:** after auction refreshes, BidAI Pro can send stale active listing identities to one explicitly authorized HTTPS resale provider and merge back exact-model completed sales and market counts.
-6. **eBay active-used enrichment:** an optional official eBay Browse API step searches active listings with `conditions:{USED}`, accepts only closely title-matched USD results, and stores asking-price statistics separately from sold evidence.
+6. **eBay active-used enrichment:** an optional official eBay Browse API step searches active fixed-price/best-offer listings with `conditions:{USED}`, accepts only closely title-matched USD results, and stores asking-price statistics separately from sold evidence.
 
 BidAI Pro does not invent listing records. Every visible automated listing must arrive from the built-in ShopGoodwill public catalog or one of the configured sources and must retain its canonical source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
 
@@ -128,6 +128,19 @@ Create an eBay production application, complete eBay's required Buy API producti
 The hourly/manual workflow requests a client-credentials OAuth token only at runtime, processes at most 150 stale targets per run to stay within eBay's default Browse API call limit, and searches the US marketplace by default. It requires at least five unique results that are USD-priced, explicitly returned as used/pre-owned, have stable eBay IDs and URLs, and share at least 65% of the significant target-title tokens with at least three tokens in common. Price totals include the lowest stated USD shipping charge. The browser revalidates the records, requires an observation no more than 24 hours old, displays P20/median/average/P80, and applies a default 30% haircut before any planning value or safe ceiling is calculated.
 
 Active asking prices do not prove what an item will sell for and do not create a sell-through rate. Exact-model completed sales remain the preferred evidence tier. If credentials are missing, OAuth fails, fewer than five matches qualify, or eBay returns no usable result, the connector does not publish a value for that item. No credentials or access tokens are written to `data/live-snapshots.js`.
+
+### Pawn-first exit decision
+
+The browser independently evaluates a direct pawn exit and an online resale exit for every item. A pawn route exists only when source-stated purity and weight produce a valid fresh metal estimate. An online route exists only when at least three qualifying exact-model completed sales or five sufficiently matched active-used listings survive validation.
+
+The recommendation hierarchy is:
+
+1. Recommend pawn when the conservative pawn ceiling remains above the observed bid and therefore preserves the configured minimum profit and target margin.
+2. Otherwise recommend online resale when its conservative ceiling remains above the observed bid.
+3. If neither route clears the safety target but one likely case is still positive, label it as a thin margin instead of a candidate.
+4. If neither route is positive, label the item as having no safe exit; if neither route has evidence, keep the ceiling at `$0`.
+
+Each route exposes its own likely cash or sale value, profit at the observed bid, target-safe ceiling, and modeled break-even bid. Pawn liquidity and online resale popularity remain separate signals. The selected route controls ranking, but the alternative route remains visible for comparison.
 
 The GitHub-hosted workflow has two schedules: one hourly discovery pass for every configured source, and one five-minute wake-up that runs only sources with a known auction inside the final 30 minutes. When a known auction enters its final five minutes, that workflow run remains active and polls the source every 30 seconds through close, with a one-minute final-result grace period. The next hourly ShopGoodwill pass also retries unresolved outcomes that ended within the prior 24 hours, up to 500 per run, so one delayed scheduled start does not automatically discard the final price. Up to four optional Tasks start concurrently; their Datasets are imported sequentially to keep history merges atomic. GitHub Actions scheduled starts can be delayed, so the 30-second interval is best effort and depends on the source responding within that interval.
 

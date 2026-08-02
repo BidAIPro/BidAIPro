@@ -125,8 +125,8 @@
             <div class="view-intro">
               <div>
                 <span class="section-kicker"><i></i> AUCTION COMMAND CENTER</span>
-                <h2 id="opportunities-heading">Know the price. Forecast the close. Protect the margin.</h2>
-                <p>Rank auction opportunities using timestamped prices, exact-model outcomes, completed resale evidence, full landed costs, and direct source links.</p>
+                <h2 id="opportunities-heading">Know the exit before you place the bid.</h2>
+                <p>Check immediate pawn profit first, then evaluate online or auction resale using real price evidence, popularity, shipping, fees, and a hard break-even limit.</p>
               </div>
               <div class="snapshot-mode" role="status">
                 <span class="mode-dot" aria-hidden="true"></span>
@@ -140,7 +140,7 @@
                 <div>
                   <span class="section-kicker"><i></i> LATEST PUBLISHED SOURCE PASS</span>
                   <h3 id="research-pass-heading" data-source-status>Awaiting research data</h3>
-                  <p>Each listing is timestamped and evaluated; a closing forecast appears only after the exact-model evidence threshold is met.</p>
+                  <p>Each listing is timestamped and evaluated across pawn and online resale routes; unsupported values remain unavailable instead of being guessed.</p>
                 </div>
               </div>
               <dl class="research-pass-stats">
@@ -190,7 +190,7 @@
               <section class="queue-panel" aria-labelledby="queue-heading">
                 <div class="panel-head queue-head">
                   <div>
-                    <span class="section-kicker"><i></i> PROFIT + LIQUIDITY RANKING</span>
+                    <span class="section-kicker"><i></i> PAWN-FIRST EXIT RANKING</span>
                     <h3 id="queue-heading">Best exits first</h3>
                     <div class="queue-mode-switch" role="group" aria-label="Opportunity view">
                       <button class="is-active" type="button" data-quick-mode="profit" aria-pressed="true">Top profit</button>
@@ -241,7 +241,7 @@
                   </div>
                 </div>
                 <div class="queue-labels" aria-hidden="true">
-                  <span>ITEM / EXIT</span><span>OBSERVED / CLOSE</span><span>SAFE CEILING</span><span>LIKELY PROFIT NOW</span><span>SOURCE</span>
+                  <span>ITEM / BEST EXIT</span><span>OBSERVED / CLOSE</span><span>TARGET-SAFE / BREAK-EVEN</span><span>LIKELY PROFIT NOW</span><span>SOURCE</span>
                 </div>
                 <div class="opportunity-list" data-opportunity-list></div>
                 <div class="queue-pagination" data-queue-pagination hidden>
@@ -462,11 +462,11 @@
               <aside class="settings-aside">
                 <div class="content-card formula-card">
                   <span class="section-kicker"><i></i> SAFE CEILING</span>
-                  <h3>Price the exit before placing the bid.</h3>
+                  <h3>Price both exits before placing the bid.</h3>
                   <div class="formula">
                     <span>Conservative resale</span><b>−</b><span>Selling costs</span><b>−</b><span>Target profit</span><b>=</b><strong>Maximum landed cost</strong>
                   </div>
-                  <p>BidAI Pro separates the expected closing price from the safe bid ceiling, then removes tax, shipping, premium, selling fees, repair, and loss reserves before calculating what you can afford to bid.</p>
+                  <p>BidAI Pro checks a direct pawn sale first, then an evidence-backed online resale. It shows the target-safe ceiling that preserves your profit goal and the higher modeled break-even bid where estimated profit reaches zero.</p>
                 </div>
                 <div class="content-card danger-card">
                   <span class="section-kicker"><i></i> LOCAL DATA</span>
