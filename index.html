@@ -5,261 +5,353 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="BidAI Pro helps contractors turn bid documents into clear estimates and confident proposals with AI."
+      content="BidAI Pro turns user-provided auction snapshots into conservative bid limits, resale margin estimates, and a private learning history."
     />
-    <meta name="theme-color" content="#07131f" />
-    <meta property="og:title" content="BidAI Pro — Bid smarter. Build more." />
+    <meta name="theme-color" content="#0b0f0d" />
+    <meta property="og:title" content="BidAI Pro — Auction intelligence" />
     <meta
       property="og:description"
-      content="AI-powered estimating and proposal support built for modern contractors."
+      content="Know the margin before the gavel falls. Analyze auction snapshots, compare downside, and learn from final prices."
     />
     <meta property="og:type" content="website" />
-    <title>BidAI Pro | AI-powered construction bidding</title>
+    <title>BidAI Pro | Auction intelligence</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="script.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to content</a>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
 
-    <header class="site-header" data-header>
-      <div class="shell nav-wrap">
-        <a class="brand" href="#top" aria-label="BidAI Pro home">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>BidAI <strong>Pro</strong></span>
-        </a>
-
-        <button
-          class="menu-toggle"
-          type="button"
-          aria-expanded="false"
-          aria-controls="primary-navigation"
-          data-menu-toggle
-        >
-          <span></span><span></span><span></span>
-          <span class="sr-only">Open navigation</span>
-        </button>
-
-        <nav class="primary-nav" id="primary-navigation" aria-label="Primary navigation" data-nav>
-          <a href="#benefits">Benefits</a>
-          <a href="#how-it-works">How it works</a>
-          <a href="#contact">Contact</a>
-          <a class="button button-small button-light" href="#contact">Get early access</a>
-        </nav>
-      </div>
-    </header>
-
-    <main id="main-content">
-      <section class="hero" id="top">
-        <div class="hero-grid" aria-hidden="true"></div>
-        <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
-        <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
-
-        <div class="shell hero-layout">
-          <div class="hero-copy">
-            <div class="eyebrow"><span></span> AI built for construction teams</div>
-            <h1>Bid smarter.<br /><em>Build more.</em></h1>
-            <p class="hero-lead">
-              Turn plans, specs, and scope documents into organized estimates and polished
-              proposals—without the spreadsheet scramble.
-            </p>
-            <div class="hero-actions">
-              <a class="button button-primary" href="#contact">Get early access <span>&rarr;</span></a>
-              <a class="text-link" href="#how-it-works">See how it works <span>&darr;</span></a>
-            </div>
-            <div class="hero-proof" aria-label="Product benefits">
-              <span><b aria-hidden="true">✓</b> Faster takeoffs</span>
-              <span><b aria-hidden="true">✓</b> Clearer scope</span>
-              <span><b aria-hidden="true">✓</b> Confident bids</span>
-            </div>
-          </div>
-
-          <div class="product-frame" aria-label="Illustration of a BidAI Pro project estimate">
-            <div class="window-bar">
-              <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-              <span>Riverside Office Renovation</span>
-              <span class="live-pill"><i></i> Estimate ready</span>
-            </div>
-            <div class="app-shell">
-              <aside class="app-sidebar" aria-hidden="true">
-                <div class="mini-brand"><span class="brand-mark"><i></i><i></i><i></i></span></div>
-                <i class="side-item active"></i>
-                <i class="side-item"></i>
-                <i class="side-item"></i>
-                <i class="side-item"></i>
-              </aside>
-              <div class="estimate-panel">
-                <div class="panel-heading">
-                  <div>
-                    <span class="overline">SAMPLE ESTIMATE</span>
-                    <h2>Cost summary</h2>
-                  </div>
-                  <button type="button" tabindex="-1">Export proposal</button>
-                </div>
-
-                <div class="metric-row">
-                  <div class="metric">
-                    <span>Estimated total</span>
-                    <strong>$287,400</strong>
-                    <small>Labor + materials</small>
-                  </div>
-                  <div class="metric compact">
-                    <span>Documents</span>
-                    <strong>14</strong>
-                    <small>Processed</small>
-                  </div>
-                  <div class="metric compact">
-                    <span>Scope items</span>
-                    <strong>68</strong>
-                    <small>Organized</small>
-                  </div>
-                </div>
-
-                <div class="estimate-table">
-                  <div class="table-head"><span>Division</span><span>Confidence</span><span>Amount</span></div>
-                  <div class="table-row">
-                    <span><i class="division-dot teal"></i> Concrete</span>
-                    <span><b class="confidence high">High</b></span>
-                    <strong>$74,200</strong>
-                  </div>
-                  <div class="table-row">
-                    <span><i class="division-dot orange"></i> Electrical</span>
-                    <span><b class="confidence review">Review</b></span>
-                    <strong>$62,850</strong>
-                  </div>
-                  <div class="table-row">
-                    <span><i class="division-dot blue"></i> Finishes</span>
-                    <span><b class="confidence high">High</b></span>
-                    <strong>$46,300</strong>
-                  </div>
-                </div>
-
-                <div class="ai-note">
-                  <span class="spark" aria-hidden="true">✦</span>
-                  <div>
-                    <strong>BidAI found a scope gap</strong>
-                    <p>Sheet E-104 includes fixtures missing from the written scope.</p>
-                  </div>
-                  <span class="review-link">Review &rarr;</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="intro" id="benefits">
-        <div class="shell">
-          <div class="section-heading centered">
-            <div class="eyebrow dark"><span></span> From invitation to submission</div>
-            <h2>More clarity in every bid.</h2>
-            <p>BidAI Pro handles the repetitive work so your team can focus on pricing, risk, and winning the right projects.</p>
-          </div>
-
-          <div class="benefit-grid">
-            <article class="benefit-card featured">
-              <span class="card-number">01</span>
-              <div class="card-icon document-icon" aria-hidden="true"><i></i><i></i><i></i></div>
-              <h3>Read bid documents faster</h3>
-              <p>Pull key requirements, deadlines, alternates, and exclusions into one organized view.</p>
-              <div class="document-stack" aria-hidden="true">
-                <div><span>PROJECT MANUAL</span><b>Specifications.pdf</b><i></i><i></i><i></i></div>
-                <div><span>ADDENDUM 02</span><b>Revised scope</b><i></i><i></i></div>
-              </div>
-            </article>
-
-            <article class="benefit-card">
-              <span class="card-number">02</span>
-              <div class="card-icon estimate-icon" aria-hidden="true"><span>$</span></div>
-              <h3>Build consistent estimates</h3>
-              <p>Structure labor, materials, allowances, and markups the same way across every opportunity.</p>
-              <ul class="mini-list" aria-hidden="true">
-                <li><span>Labor</span><b>$96,800</b></li>
-                <li><span>Materials</span><b>$141,250</b></li>
-                <li><span>Overhead</span><b>$22,100</b></li>
-              </ul>
-            </article>
-
-            <article class="benefit-card dark-card">
-              <span class="card-number">03</span>
-              <div class="card-icon risk-icon" aria-hidden="true">!</div>
-              <h3>Catch risk before submit</h3>
-              <p>Surface missing scope, unusual terms, and items that need a human decision before the deadline.</p>
-              <div class="risk-callout" aria-hidden="true">
-                <span>✦</span>
-                <div><small>NEEDS REVIEW</small><b>Insurance requirement changed</b></div>
-              </div>
-            </article>
-
-            <article class="benefit-card wide-card">
-              <span class="card-number">04</span>
-              <div>
-                <div class="card-icon proposal-icon" aria-hidden="true"><i></i><i></i></div>
-                <h3>Send a proposal you trust</h3>
-                <p>Turn approved numbers and scope notes into a clean, professional proposal your customer can understand.</p>
-              </div>
-              <div class="proposal-sheet" aria-hidden="true">
-                <div class="proposal-top"><span class="brand-mark"><i></i><i></i><i></i></span><b>PROPOSAL</b></div>
-                <i></i><i></i><i class="short"></i>
-                <div class="proposal-total"><span>Total proposal</span><strong>$287,400</strong></div>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="process" id="how-it-works">
-        <div class="shell process-layout">
-          <div class="process-copy">
-            <div class="eyebrow dark"><span></span> A simpler bid process</div>
-            <h2>Three steps from documents to decision.</h2>
-            <p>No complex setup. Bring the files you already use and let BidAI Pro create a clear starting point for your team.</p>
-          </div>
-          <ol class="process-steps">
-            <li>
-              <span class="step-number">1</span>
-              <div><h3>Upload the bid package</h3><p>Add drawings, specifications, addenda, and scope documents.</p></div>
-            </li>
-            <li>
-              <span class="step-number">2</span>
-              <div><h3>Review the AI workspace</h3><p>Check extracted requirements, quantities, pricing structure, and risk flags.</p></div>
-            </li>
-            <li>
-              <span class="step-number">3</span>
-              <div><h3>Approve and submit</h3><p>Apply your expertise, finalize the numbers, and export a professional proposal.</p></div>
-            </li>
-          </ol>
-        </div>
-      </section>
-
-      <section class="contact" id="contact">
-        <div class="shell contact-card">
-          <div class="contact-grid" aria-hidden="true"></div>
-          <div class="contact-copy">
-            <div class="eyebrow"><span></span> Early access</div>
-            <h2>Ready to build a better bid?</h2>
-            <p>Follow BidAI Pro on GitHub and be first to know when early access opens.</p>
-          </div>
-          <a
-            class="button button-primary button-large"
-            href="https://github.com/BidAIPro"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Contact BidAI Pro <span>&rarr;</span>
+    <div class="app-frame">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+        <div class="brand-wrap">
+          <a class="brand" href="#opportunities" aria-label="BidAI Pro opportunities">
+            <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="brand-copy">BidAI <strong>Pro</strong></span>
           </a>
+          <span class="brand-edition">AUCTION INTELLIGENCE</span>
         </div>
-      </section>
-    </main>
 
-    <footer class="site-footer">
-      <div class="shell footer-row">
-        <a class="brand footer-brand" href="#top" aria-label="BidAI Pro home">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>BidAI <strong>Pro</strong></span>
-        </a>
-        <p>&copy; <span data-year>2026</span> BidAI Pro. Built for better bids.</p>
-        <a href="https://github.com/BidAIPro" target="_blank" rel="noreferrer">GitHub <span>&nearr;</span></a>
-      </div>
-    </footer>
+        <nav class="side-nav" aria-label="Workspace views">
+          <p class="nav-label">Workspace</p>
+          <button class="nav-item is-active" type="button" data-view-target="opportunities">
+            <span class="nav-icon" aria-hidden="true">⌁</span>
+            <span>Opportunities</span>
+            <span class="nav-count" data-opportunity-count>5</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="watchlist">
+            <span class="nav-icon" aria-hidden="true">◇</span>
+            <span>Watchlist</span>
+            <span class="nav-count" data-watch-count>0</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="learning">
+            <span class="nav-icon" aria-hidden="true">↗</span>
+            <span>Learning</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="sources">
+            <span class="nav-icon" aria-hidden="true">＋</span>
+            <span>Sources</span>
+          </button>
+          <button class="nav-item" type="button" data-view-target="settings">
+            <span class="nav-icon" aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-status">
+          <span class="status-orbit" aria-hidden="true"><i></i></span>
+          <div>
+            <strong>User-provided snapshots</strong>
+            <span>No automated site access</span>
+          </div>
+        </div>
+
+        <div class="privacy-note">
+          <span aria-hidden="true">▣</span>
+          <p><strong>Private by design</strong>Your workspace stays in this browser until you export it.</p>
+        </div>
+      </aside>
+
+      <button class="sidebar-scrim" type="button" data-close-menu aria-label="Close navigation"></button>
+
+      <main class="workspace" id="workspace">
+        <header class="topbar">
+          <div class="topbar-title">
+            <button
+              class="mobile-menu"
+              type="button"
+              aria-expanded="false"
+              aria-controls="sidebar"
+              aria-label="Open navigation"
+              data-menu-toggle
+            >
+              <span></span><span></span><span></span>
+            </button>
+            <div>
+              <span class="kicker">PRIVATE AUCTION WORKSPACE</span>
+              <h1 data-view-title>Opportunities</h1>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <label class="search-box" for="global-search">
+              <span aria-hidden="true">⌕</span>
+              <span class="sr-only">Search auction opportunities</span>
+              <input id="global-search" type="search" placeholder="Search title, category, ID…" autocomplete="off" />
+              <kbd>/</kbd>
+            </label>
+            <input id="snapshot-file" class="sr-only" type="file" accept=".csv,.json,text/csv,application/json" multiple />
+            <button class="button button-quiet desktop-action" type="button" data-import-trigger>
+              <span aria-hidden="true">⇧</span> Import
+            </button>
+            <button class="button button-primary" type="button" data-add-snapshot>
+              <span aria-hidden="true">＋</span> Add snapshot
+            </button>
+          </div>
+        </header>
+
+        <div class="view-stack">
+          <section class="app-view is-active" id="view-opportunities" data-view="opportunities" aria-labelledby="opportunities-heading">
+            <div class="view-intro">
+              <div>
+                <span class="section-kicker"><i></i> DECISION QUEUE</span>
+                <h2 id="opportunities-heading">Know the margin before the gavel falls.</h2>
+                <p>Rank possible buys by downside-aware profit, demand, evidence quality, and bidding risk.</p>
+              </div>
+              <div class="snapshot-mode" role="status">
+                <span class="mode-dot" aria-hidden="true"></span>
+                <div><strong>Snapshot mode</strong><span>Manual and imported records only</span></div>
+              </div>
+            </div>
+
+            <div class="demo-notice">
+              <span class="demo-tag">ILLUSTRATIVE DATA</span>
+              <p>The five examples below demonstrate the model—not live listings or buying advice. Verify identity, condition, fees, taxes, and resale demand before bidding.</p>
+              <button type="button" data-view-target="sources">Add your data <span aria-hidden="true">→</span></button>
+            </div>
+
+            <div class="metric-grid" aria-label="Opportunity summary">
+              <article class="summary-metric">
+                <div class="metric-icon lime" aria-hidden="true">↗</div>
+                <div><span>Modeled upside</span><strong data-stat-upside>$0</strong><small>Median case, before income tax</small></div>
+              </article>
+              <article class="summary-metric">
+                <div class="metric-icon orange" aria-hidden="true">◷</div>
+                <div><span>Ending soon</span><strong data-stat-urgent>0</strong><small>Within the next 12 hours</small></div>
+              </article>
+              <article class="summary-metric">
+                <div class="metric-icon blue" aria-hidden="true">◎</div>
+                <div><span>Average confidence</span><strong data-stat-confidence>0%</strong><small>Evidence completeness</small></div>
+              </article>
+              <article class="summary-metric">
+                <div class="metric-icon neutral" aria-hidden="true">≋</div>
+                <div><span>Stored observations</span><strong data-stat-observations>0</strong><small>Across repeated snapshots</small></div>
+              </article>
+            </div>
+
+            <div class="decision-layout">
+              <section class="queue-panel" aria-labelledby="queue-heading">
+                <div class="panel-head queue-head">
+                  <div>
+                    <span class="section-kicker"><i></i> RANKED OPPORTUNITIES</span>
+                    <h3 id="queue-heading">Decision queue</h3>
+                  </div>
+                  <div class="filter-row">
+                    <label>
+                      <span class="sr-only">Filter by signal</span>
+                      <select id="signal-filter">
+                        <option value="all">All signals</option>
+                        <option value="candidate">Candidates</option>
+                        <option value="watch">Watch</option>
+                        <option value="research">Research</option>
+                        <option value="avoid">Avoid</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span class="sr-only">Filter by category</span>
+                      <select id="category-filter"><option value="all">All categories</option></select>
+                    </label>
+                  </div>
+                </div>
+                <div class="queue-labels" aria-hidden="true">
+                  <span>ITEM / SIGNAL</span><span>CURRENT</span><span>SAFE CEILING</span><span>MEDIAN PROFIT</span><span></span>
+                </div>
+                <div class="opportunity-list" data-opportunity-list></div>
+                <div class="empty-state" data-queue-empty hidden>
+                  <span aria-hidden="true">⌕</span>
+                  <h4>No matching snapshots</h4>
+                  <p>Try a broader search or import another record.</p>
+                  <button class="button button-primary" type="button" data-add-snapshot>Add snapshot</button>
+                </div>
+              </section>
+
+              <aside class="detail-panel" data-opportunity-detail aria-label="Selected opportunity details"></aside>
+            </div>
+          </section>
+
+          <section class="app-view" id="view-watchlist" data-view="watchlist" aria-labelledby="watchlist-heading">
+            <div class="view-intro compact">
+              <div>
+                <span class="section-kicker"><i></i> FOCUSED REVIEW</span>
+                <h2 id="watchlist-heading">Watchlist</h2>
+                <p>Keep the auctions worth another look in one private shortlist.</p>
+              </div>
+            </div>
+            <div class="content-card">
+              <div class="panel-head">
+                <div><span class="section-kicker"><i></i> SAVED LOCALLY</span><h3>Watched opportunities</h3></div>
+                <button class="button button-quiet" type="button" data-view-target="opportunities">Browse opportunities</button>
+              </div>
+              <div class="watch-grid" data-watchlist-grid></div>
+              <div class="empty-state" data-watch-empty hidden>
+                <span aria-hidden="true">◇</span>
+                <h4>Your watchlist is empty</h4>
+                <p>Save an opportunity to compare it as new snapshots arrive.</p>
+                <button class="button button-primary" type="button" data-view-target="opportunities">Find opportunities</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="app-view" id="view-learning" data-view="learning" aria-labelledby="learning-heading">
+            <div class="view-intro compact">
+              <div>
+                <span class="section-kicker"><i></i> OUTCOME CALIBRATION</span>
+                <h2 id="learning-heading">Learn from every close.</h2>
+                <p>Ended items compare the price predicted at snapshot time with the actual final bid.</p>
+              </div>
+            </div>
+
+            <div class="learning-summary" data-learning-summary></div>
+
+            <div class="learning-grid">
+              <section class="content-card">
+                <div class="panel-head"><div><span class="section-kicker"><i></i> BY CATEGORY</span><h3>Prediction calibration</h3></div></div>
+                <div class="learning-table-wrap">
+                  <table class="learning-table">
+                    <thead><tr><th scope="col">Category</th><th scope="col">Ended</th><th scope="col">Typical error</th><th scope="col">Bias</th><th scope="col">Signal</th></tr></thead>
+                    <tbody data-learning-table></tbody>
+                  </table>
+                </div>
+              </section>
+              <aside class="content-card methodology-card">
+                <span class="section-kicker"><i></i> HOW IT LEARNS</span>
+                <h3>Snapshots become a price curve.</h3>
+                <ol class="method-list">
+                  <li><span>01</span><div><strong>Record each observation</strong><p>Repeated IDs update the item while preserving current bid, bid count, and time.</p></div></li>
+                  <li><span>02</span><div><strong>Capture the final price</strong><p>Mark the listing ended and add the actual close to measure forecast error.</p></div></li>
+                  <li><span>03</span><div><strong>Calibrate by category</strong><p>Median prediction ratios reveal whether a category tends to close above or below estimates.</p></div></li>
+                </ol>
+                <p class="fine-print">Local results are descriptive, not a guarantee of future profit. Larger, cleaner samples make calibration more useful.</p>
+              </aside>
+            </div>
+          </section>
+
+          <section class="app-view" id="view-sources" data-view="sources" aria-labelledby="sources-heading">
+            <div class="view-intro compact">
+              <div>
+                <span class="section-kicker"><i></i> DATA INPUTS</span>
+                <h2 id="sources-heading">Bring your own snapshots.</h2>
+                <p>BidAI Pro analyzes records you enter or import. It does not crawl or fetch ShopGoodwill pages.</p>
+              </div>
+              <button class="button button-dark" type="button" data-export-workspace><span aria-hidden="true">⇩</span> Export private workspace</button>
+            </div>
+
+            <div class="source-status-card">
+              <div class="source-status-icon" aria-hidden="true">✓</div>
+              <div><span class="section-kicker"><i></i> CURRENT SOURCE STATUS</span><h3>User-provided snapshots only</h3><p>Manual entries and CSV/JSON files are processed on this device. An authorized or officially approved feed can be connected in a future hosted version.</p></div>
+              <span class="status-chip"><i></i> LOCAL MODE</span>
+            </div>
+
+            <div class="sources-grid">
+              <section class="content-card import-card">
+                <div class="panel-head"><div><span class="section-kicker"><i></i> BULK INPUT</span><h3>Import snapshots</h3></div></div>
+                <button class="drop-zone" type="button" data-import-trigger data-drop-zone>
+                  <span class="drop-icon" aria-hidden="true">⇧</span>
+                  <strong>Choose CSV or JSON files</strong>
+                  <span>or drop files here · up to 5,000 rows each</span>
+                </button>
+                <div class="format-row">
+                  <div><strong>Repeated listing IDs</strong><span>update the item and add an observation</span></div>
+                  <button class="text-button" type="button" data-download-template>Download CSV template <span aria-hidden="true">↓</span></button>
+                </div>
+                <details class="field-reference">
+                  <summary>Accepted field names</summary>
+                  <p><code>id</code>, <code>title</code>, <code>category</code>, <code>url</code>, <code>current_bid</code>, <code>shipping</code>, <code>bid_count</code>, <code>ends_at</code>, <code>expected_close</code>, <code>resale_low</code>, <code>resale_median</code>, <code>resale_high</code>, <code>demand</code>, <code>rarity</code>, <code>identity_confidence</code>, <code>condition_confidence</code>, <code>final_price</code>, <code>status</code>, <code>observed_at</code>.</p>
+                </details>
+              </section>
+
+              <section class="content-card manual-card" id="manual-snapshot-card">
+                <div class="panel-head"><div><span class="section-kicker"><i></i> SINGLE INPUT</span><h3>Record one snapshot</h3></div><span class="required-note">* Required</span></div>
+                <form id="snapshot-form" class="snapshot-form">
+                  <div class="field span-2"><label for="snapshot-title">Listing title *</label><input id="snapshot-title" name="title" required placeholder="e.g. Vintage camera body and lens" /></div>
+                  <div class="field"><label for="snapshot-id">Listing ID *</label><input id="snapshot-id" name="externalId" required placeholder="SGW-123456" /></div>
+                  <div class="field"><label for="snapshot-category">Category *</label><input id="snapshot-category" name="category" required placeholder="Cameras & optics" /></div>
+                  <div class="field span-2"><label for="snapshot-url">Listing URL</label><input id="snapshot-url" name="url" type="url" inputmode="url" placeholder="https://example.com/listing/123456" /></div>
+                  <div class="field"><label for="snapshot-current">Current bid *</label><span class="money-input"><b>$</b><input id="snapshot-current" name="currentBid" type="number" min="0" step="0.01" required placeholder="0.00" /></span></div>
+                  <div class="field"><label for="snapshot-shipping">Inbound shipping</label><span class="money-input"><b>$</b><input id="snapshot-shipping" name="shipping" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
+                  <div class="field"><label for="snapshot-bids">Bid count</label><input id="snapshot-bids" name="bidCount" type="number" min="0" step="1" placeholder="0" /></div>
+                  <div class="field"><label for="snapshot-ends">Auction ends</label><input id="snapshot-ends" name="endsAt" type="datetime-local" /></div>
+                  <div class="field"><label for="snapshot-expected">Expected final bid</label><span class="money-input"><b>$</b><input id="snapshot-expected" name="expectedClose" type="number" min="0" step="0.01" placeholder="Model if blank" /></span></div>
+                  <div class="field"><label for="snapshot-final">Actual final bid</label><span class="money-input"><b>$</b><input id="snapshot-final" name="finalPrice" type="number" min="0" step="0.01" placeholder="Add when ended" /></span></div>
+                  <div class="field"><label for="snapshot-resale-low">Resale low</label><span class="money-input"><b>$</b><input id="snapshot-resale-low" name="resaleLow" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
+                  <div class="field"><label for="snapshot-resale-median">Resale median</label><span class="money-input"><b>$</b><input id="snapshot-resale-median" name="resaleMedian" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
+                  <div class="field"><label for="snapshot-resale-high">Resale high</label><span class="money-input"><b>$</b><input id="snapshot-resale-high" name="resaleHigh" type="number" min="0" step="0.01" placeholder="0.00" /></span></div>
+                  <div class="field"><label for="snapshot-status">Status</label><select id="snapshot-status" name="status"><option value="active">Active</option><option value="ended">Ended</option></select></div>
+                  <div class="form-actions span-2"><button class="button button-primary" type="submit">Save snapshot <span aria-hidden="true">→</span></button><span>Saved locally in this browser</span></div>
+                </form>
+              </section>
+            </div>
+          </section>
+
+          <section class="app-view" id="view-settings" data-view="settings" aria-labelledby="settings-heading">
+            <div class="view-intro compact">
+              <div>
+                <span class="section-kicker"><i></i> MODEL ASSUMPTIONS</span>
+                <h2 id="settings-heading">Set your cost reality.</h2>
+                <p>Conservative bid ceilings use these defaults unless a snapshot provides its own value.</p>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <section class="content-card">
+                <div class="panel-head"><div><span class="section-kicker"><i></i> COST PROFILE</span><h3>Default assumptions</h3></div></div>
+                <form id="settings-form" class="settings-form">
+                  <label><span>Marketplace selling fee</span><span class="suffix-input"><input name="marketplaceFee" type="number" min="0" max="50" step="0.1" /><b>%</b></span><small>Deducted from the resale price.</small></label>
+                  <label><span>Estimated sales tax</span><span class="suffix-input"><input name="taxRate" type="number" min="0" max="20" step="0.1" /><b>%</b></span><small>Applied to purchase, premium, and inbound shipping.</small></label>
+                  <label><span>Buyer premium</span><span class="suffix-input"><input name="buyerPremium" type="number" min="0" max="50" step="0.1" /><b>%</b></span><small>Set to zero when the auction has no premium.</small></label>
+                  <label><span>Outbound shipping</span><span class="money-input"><b>$</b><input name="outboundShipping" type="number" min="0" step="0.01" /></span><small>Average shipping cost when resold.</small></label>
+                  <label><span>Repair / testing reserve</span><span class="money-input"><b>$</b><input name="repairReserve" type="number" min="0" step="0.01" /></span><small>Default condition uncertainty reserve.</small></label>
+                  <label><span>Return / loss reserve</span><span class="money-input"><b>$</b><input name="returnReserve" type="number" min="0" step="0.01" /></span><small>Buffer for returns, loss, or dispute costs.</small></label>
+                  <label><span>Minimum profit target</span><span class="money-input"><b>$</b><input name="minimumProfit" type="number" min="0" step="1" /></span><small>The ceiling preserves at least this much downside profit.</small></label>
+                  <label><span>Target margin</span><span class="suffix-input"><input name="targetMargin" type="number" min="0" max="90" step="1" /><b>%</b></span><small>Applied to conservative resale value.</small></label>
+                  <div class="form-actions settings-actions"><button class="button button-primary" type="submit">Save assumptions</button><button class="button button-quiet" type="button" data-reset-settings>Restore defaults</button></div>
+                </form>
+              </section>
+              <aside class="settings-aside">
+                <div class="content-card formula-card">
+                  <span class="section-kicker"><i></i> SAFE CEILING</span>
+                  <h3>Bid from the exit backward.</h3>
+                  <div class="formula">
+                    <span>Conservative resale</span><b>−</b><span>Selling costs</span><b>−</b><span>Target profit</span><b>=</b><strong>Maximum landed cost</strong>
+                  </div>
+                  <p>BidAI Pro then removes expected tax, shipping, and buyer premium to calculate the most you should bid—not what it predicts the auction will reach.</p>
+                </div>
+                <div class="content-card danger-card">
+                  <span class="section-kicker"><i></i> LOCAL DATA</span>
+                  <h3>Workspace controls</h3>
+                  <p>Export before clearing if you want a backup. Deleting removes imported snapshots, history, and your watchlist from this browser.</p>
+                  <div class="danger-actions"><button class="button button-quiet" type="button" data-export-workspace>Export backup</button><button class="button button-danger" type="button" data-clear-workspace>Clear private data</button></div>
+                </div>
+              </aside>
+            </div>
+          </section>
+        </div>
+
+        <footer class="workspace-footer">
+          <p>BidAI Pro estimates are decision support—not appraisals, guarantees, or financial advice.</p>
+          <p><span class="footer-dot"></span> Local snapshot mode · <span data-current-year>2026</span></p>
+        </footer>
+      </main>
+    </div>
+
+    <div class="toast-region" aria-live="polite" aria-atomic="true" data-toast-region></div>
   </body>
 </html>
