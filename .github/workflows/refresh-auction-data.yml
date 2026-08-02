@@ -29,6 +29,8 @@ jobs:
 
       - name: Refresh normalized snapshots
         env:
+          BIDAI_APIFY_DATASET_ID: ${{ secrets.BIDAI_APIFY_DATASET_ID }}
+          BIDAI_APIFY_TOKEN: ${{ secrets.BIDAI_APIFY_TOKEN }}
           BIDAI_FEED_URL: ${{ secrets.BIDAI_FEED_URL }}
           BIDAI_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_SOURCE_AUTHORIZED }}
         run: node scripts/refresh-feed.mjs

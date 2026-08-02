@@ -291,6 +291,46 @@
               <span class="status-chip"><i></i> SOURCE LABELED</span>
             </div>
 
+            <section class="apify-connector-card" aria-labelledby="apify-connector-heading">
+              <div class="connector-card-head">
+                <div class="connector-identity">
+                  <span class="connector-mark" aria-hidden="true">AP</span>
+                  <div>
+                    <span class="section-kicker"><i></i> AUTOMATION BRIDGE</span>
+                    <h3 id="apify-connector-heading">Apify Dataset connector</h3>
+                    <p>Turn structured collector results into fresh BidAI Pro research snapshots without exposing credentials to the public site.</p>
+                  </div>
+                </div>
+                <span class="connector-installed"><i aria-hidden="true"></i> CONNECTOR CODE INSTALLED</span>
+              </div>
+
+              <ol class="connector-flow" aria-label="Apify import flow">
+                <li>
+                  <span class="connector-step">01</span>
+                  <span class="connector-flow-icon" aria-hidden="true">&#8599;</span>
+                  <div><strong>Collector output</strong><p>Your Apify Actor writes normalized auction records after each run.</p></div>
+                </li>
+                <li>
+                  <span class="connector-step">02</span>
+                  <span class="connector-flow-icon" aria-hidden="true">&#9642;</span>
+                  <div><strong>Private Dataset</strong><p>Results remain in an Apify Dataset protected by your account token.</p></div>
+                </li>
+                <li>
+                  <span class="connector-step">03</span>
+                  <span class="connector-flow-icon" aria-hidden="true">&#8635;</span>
+                  <div><strong>Scheduled BidAI import</strong><p>GitHub Actions refreshes the published snapshot feed on your chosen cadence.</p></div>
+                </li>
+              </ol>
+
+              <div class="connector-security">
+                <div>
+                  <span class="security-mark" aria-hidden="true">&#9635;</span>
+                  <p><strong>Server-side secrets only.</strong> Your Apify token stays in GitHub Actions secrets and is never shipped to the browser.</p>
+                </div>
+                <a class="connector-docs-link" href="https://github.com/BidAIPro/BidAIPro/blob/main/docs/AUTOMATION.md" target="_blank" rel="noreferrer noopener">Open setup guide <span aria-hidden="true">&#8599;</span></a>
+              </div>
+            </section>
+
             <div class="sources-grid">
               <section class="content-card import-card">
                 <div class="panel-head"><div><span class="section-kicker"><i></i> BULK INPUT</span><h3>Import snapshots</h3></div></div>

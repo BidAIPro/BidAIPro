@@ -8,7 +8,9 @@ const AUTHORIZED_VALUE = "true";
 const OUTPUT_PREFIX = "window.BIDAI_LIVE_SNAPSHOTS = ";
 const MAX_HISTORY_POINTS = 250;
 const MAX_RETAINED_ITEMS = 5_000;
+const MAX_RESPONSE_BYTES = 20_000_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const APIFY_API_ORIGIN = "https://api.apify.com";
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = join(repositoryRoot, "data");
@@ -91,6 +93,91 @@ function httpUrl(value) {
   } catch {
     return null;
   }
+}
+
+async function readJsonResponse(response) {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    throw new Error("The authorized feed response exceeds the 20 MB limit.");
+  }
+  if (!response.body) return response.json();
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error("The authorized feed response exceeds the 20 MB limit.");
+    }
+    chunks.push(value);
+  }
+
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(combined));
+}
+
+function bearerToken(value, label) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (raw.length > 8_192 || /[\r\n]/.test(raw)) {
+    throw new Error(`${label} is not a valid bearer token.`);
+  }
+  return raw;
+}
+
+function feedRequestConfiguration(environment) {
+  const apifyDatasetId = text(environment.BIDAI_APIFY_DATASET_ID);
+  if (apifyDatasetId) {
+    if (!/^[a-zA-Z0-9._~-]{1,200}$/.test(apifyDatasetId)) {
+      throw new Error("BIDAI_APIFY_DATASET_ID must be an Apify dataset ID or username~dataset-name.");
+    }
+
+    const feedUrl = new URL(`/v2/datasets/${encodeURIComponent(apifyDatasetId)}/items`, APIFY_API_ORIGIN);
+    feedUrl.searchParams.set("format", "json");
+    feedUrl.searchParams.set("clean", "true");
+    feedUrl.searchParams.set("desc", "1");
+    feedUrl.searchParams.set("limit", String(MAX_RETAINED_ITEMS));
+
+    const headers = { accept: "application/json" };
+    const token = bearerToken(environment.BIDAI_APIFY_TOKEN, "BIDAI_APIFY_TOKEN");
+    if (token) headers.authorization = `Bearer ${token}`;
+
+    return {
+      feedUrl,
+      headers,
+      sourceMode: "apify-dataset",
+      sourceLabel: "Apify dataset",
+    };
+  }
+
+  const configuredUrl = text(environment.BIDAI_FEED_URL);
+  if (!configuredUrl) {
+    throw new Error("Set BIDAI_APIFY_DATASET_ID or BIDAI_FEED_URL when source access is authorized.");
+  }
+
+  let feedUrl;
+  try {
+    feedUrl = new URL(configuredUrl);
+    if (feedUrl.protocol !== "https:") throw new Error("protocol");
+  } catch {
+    throw new Error("BIDAI_FEED_URL must be a valid HTTPS URL.");
+  }
+
+  return {
+    feedUrl,
+    headers: { accept: "application/json" },
+    sourceMode: "authorized-feed",
+    sourceLabel: "Authorized feed",
+  };
 }
 
 function slug(value) {
@@ -182,7 +269,16 @@ function retentionOrder(a, b) {
   return recency || text(a?.id).localeCompare(text(b?.id));
 }
 
-function normalizeRecord(record, index, capturedAt) {
+function reconcileRetainedStatus(item) {
+  if (item?.status !== "active" || !item?.endsAt || Date.parse(item.endsAt) > Date.now()) return item;
+  return { ...item, status: "ended" };
+}
+
+function recordObservedAt(record) {
+  return timestamp(pick(record, "observedAt", "observed_at", "capturedAt", "captured_at", "timestamp"));
+}
+
+function normalizeRecord(record, index, capturedAt, sourceLabel = "Authorized feed", requireObservedAt = false) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return null;
 
   const title = text(pick(record, "title", "name", "listingTitle", "listing_title"));
@@ -191,15 +287,14 @@ function normalizeRecord(record, index, capturedAt) {
   const currentBid = money(pick(record, "currentBid", "current_bid", "currentPrice", "current_price", "price", "bidAmount", "bid_amount"));
   const finalPrice = money(pick(record, "finalPrice", "final_price", "soldPrice", "sold_price"), 0);
   const endsAt = timestamp(pick(record, "endsAt", "ends_at", "endTime", "end_time", "closeTime", "close_time"));
-  const observedAt = timestamp(
-    pick(record, "observedAt", "observed_at", "capturedAt", "captured_at", "timestamp"),
-    capturedAt,
-  );
+  const suppliedObservedAt = recordObservedAt(record);
+  if (requireObservedAt && !suppliedObservedAt) return null;
+  const observedAt = suppliedObservedAt || capturedAt;
   const expectedClose = money(pick(record, "expectedClose", "expected_close", "predictedFinal", "predicted_final"), 0);
   const normalized = {
     title,
     category: text(pick(record, "category", "department", "type"), "Unclassified"),
-    url: httpUrl(pick(record, "url", "listingUrl", "listing_url")),
+    url: httpUrl(pick(record, "url", "sourceUrl", "source_url", "listingUrl", "listing_url")),
     endsAt,
   };
   const identity = stableIdentity(record, normalized);
@@ -222,7 +317,7 @@ function normalizeRecord(record, index, capturedAt) {
   return {
     id: identity.id,
     externalId: identity.externalId,
-    source: text(pick(record, "source", "sourceName", "source_name"), "Authorized feed"),
+    source: text(pick(record, "source", "sourceName", "source_name"), sourceLabel),
     url: normalized.url,
     sourceUrl: normalized.url,
     imageUrl: httpUrl(pick(record, "imageUrl", "image_url", "thumbnailUrl", "thumbnail_url")),
@@ -324,21 +419,12 @@ async function run() {
     return;
   }
 
-  const configuredUrl = text(process.env.BIDAI_FEED_URL);
-  if (!configuredUrl) throw new Error("BIDAI_FEED_URL is required when source access is authorized.");
-
-  let feedUrl;
-  try {
-    feedUrl = new URL(configuredUrl);
-    if (feedUrl.protocol !== "https:") throw new Error("protocol");
-  } catch {
-    throw new Error("BIDAI_FEED_URL must be a valid HTTPS URL.");
-  }
+  const requestConfiguration = feedRequestConfiguration(process.env);
 
   let response;
   try {
-    response = await fetch(feedUrl, {
-      headers: { accept: "application/json" },
+    response = await fetch(requestConfiguration.feedUrl, {
+      headers: requestConfiguration.headers,
       redirect: "error",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -349,16 +435,53 @@ async function run() {
 
   let payload;
   try {
-    payload = await response.json();
-  } catch {
+    payload = await readJsonResponse(response);
+  } catch (error) {
+    if (String(error?.message || "").includes("exceeds the 20 MB limit")) throw error;
     throw new Error("The authorized feed did not return valid JSON.");
   }
 
   const records = extractRecords(payload);
   if (!records.length) throw new Error("The authorized feed contained no item records.");
 
-  const capturedAt = timestamp(pick(payload, "generatedAt", "generated_at", "observedAt", "observed_at"), new Date().toISOString());
-  const normalized = records.map((record, index) => normalizeRecord(record, index, capturedAt)).filter(Boolean);
+  const isApifyDataset = requestConfiguration.sourceMode === "apify-dataset";
+  const recordEntries = records.map((record, originalIndex) => ({
+    record,
+    originalIndex,
+    observedAt: recordObservedAt(record),
+  }));
+  if (isApifyDataset && recordEntries.some((entry) => !entry.observedAt)) {
+    throw new Error("Every Apify dataset item must include a valid observedAt timestamp.");
+  }
+  if (isApifyDataset && recordEntries.some(({ record }) => {
+    const currency = text(pick(record, "currency", "currencyCode", "currency_code", "priceCurrency")).toUpperCase();
+    return currency && currency !== "USD";
+  })) {
+    throw new Error("Apify dataset monetary fields must be denominated in USD.");
+  }
+  if (isApifyDataset) {
+    recordEntries.sort((a, b) => (
+      Date.parse(a.observedAt) - Date.parse(b.observedAt) || b.originalIndex - a.originalIndex
+    ));
+  }
+
+  const newestRecordObservation = recordEntries.reduce((latest, entry) => {
+    if (!entry.observedAt) return latest;
+    return !latest || Date.parse(entry.observedAt) > Date.parse(latest) ? entry.observedAt : latest;
+  }, null);
+  const capturedAt = timestamp(
+    pick(payload, "generatedAt", "generated_at", "observedAt", "observed_at"),
+    isApifyDataset ? newestRecordObservation : new Date().toISOString(),
+  );
+  const normalized = recordEntries
+    .map((entry, index) => normalizeRecord(
+      entry.record,
+      index,
+      capturedAt,
+      requestConfiguration.sourceLabel,
+      isApifyDataset,
+    ))
+    .filter(Boolean);
   if (!normalized.length) throw new Error("The authorized feed contained no records with a title.");
 
   const previousEnvelope = await readPreviousEnvelope();
@@ -391,6 +514,7 @@ async function run() {
 
   const items = [...mergedById.values()]
     .map(({ feedOrder: _feedOrder, ...item }) => item)
+    .map(reconcileRetainedStatus)
     .sort(retentionOrder)
     .slice(0, MAX_RETAINED_ITEMS);
   const incomingNotes = pick(payload, "sourceNotes", "source_notes", "notes");
@@ -399,11 +523,13 @@ async function run() {
     .filter(Boolean);
   const envelope = {
     observedAt: capturedAt,
-    sourceMode: text(pick(payload, "sourceMode", "source_mode"), "authorized-feed"),
+    sourceMode: text(pick(payload, "sourceMode", "source_mode"), requestConfiguration.sourceMode),
     sourceNotes: sourceNotes.length
       ? [...sourceNotes, "Prior unmatched records are retained for outcome and bid-history learning."]
       : [
-          "Automated snapshots from a permissioned JSON feed; verify each item before bidding.",
+          requestConfiguration.sourceMode === "apify-dataset"
+            ? "Automated snapshots imported from the configured Apify dataset; verify each item before bidding."
+            : "Automated snapshots from a permissioned JSON feed; verify each item before bidding.",
           "Prior unmatched records are retained for outcome and bid-history learning.",
         ],
     items,

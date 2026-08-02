@@ -637,13 +637,12 @@
     });
     $$('[data-source-status]').forEach((el) => {
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
-      el.textContent = !PUBLISHED_RESEARCH.items.length
-        ? "Awaiting research data"
-        : mode.includes("authorized")
-          ? "Authorized feed loaded"
-          : mode.includes("manual")
-            ? "Manual research pass loaded"
-            : "Research snapshots loaded";
+      let status = "Research snapshots loaded";
+      if (!PUBLISHED_RESEARCH.items.length) status = "Awaiting research data";
+      else if (mode.includes("apify")) status = "Apify dataset loaded";
+      else if (mode.includes("authorized")) status = "Authorized feed loaded";
+      else if (mode.includes("manual")) status = "Manual research pass loaded";
+      el.textContent = status;
     });
   }
 

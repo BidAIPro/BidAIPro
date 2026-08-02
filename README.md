@@ -47,9 +47,17 @@ Money values are in US dollars. Confidence values can be decimals such as `0.82`
 
 ## Automatic refreshes
 
-The repository includes a scheduled GitHub Actions pipeline for an official API, licensed feed, or other endpoint whose operator has authorized programmatic access. It normalizes current bids and ended outcomes, preserves observation history, and republishes the data file only when something changed.
+The repository includes a scheduled GitHub Actions pipeline that can pull structured results from either an **Apify Dataset** or a generic HTTPS JSON feed. It normalizes current bids and ended outcomes, preserves observation history, and republishes the data file only when something changed. The schedule runs at minutes **17 and 47** of every hour.
 
-Setup and feed-field details are in `docs/AUTOMATION.md`. Until an authorized endpoint is configured, the workflow performs a guarded no-op and the checked-in point-in-time research pass remains visible.
+For Apify mode, configure these GitHub Actions secrets:
+
+- `BIDAI_APIFY_DATASET_ID` — the dataset ID that contains one flat JSON object per auction listing;
+- `BIDAI_APIFY_TOKEN` — optional for a public dataset and required for a private dataset;
+- `BIDAI_SOURCE_AUTHORIZED=true` — the exact permission-gate value required before any network request is made.
+
+BidAI Pro only reads structured items already present in the dataset; it does not create or run an Apify Actor, crawler, or collector. Configure that collection separately in Apify, keep tokens in GitHub Actions secrets, and publish only fields BidAI Pro needs. If `BIDAI_APIFY_DATASET_ID` is present, Apify Dataset mode takes precedence over `BIDAI_FEED_URL`.
+
+Setup, the flat item schema, and generic feed details are in `docs/AUTOMATION.md`. Until an authorized source is configured, the workflow performs a guarded no-op and the checked-in point-in-time research pass remains visible.
 
 ## Data-source boundary
 
