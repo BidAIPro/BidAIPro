@@ -8,8 +8,9 @@ import { fileURLToPath } from "node:url";
 const OUTPUT_PREFIX = "window.BIDAI_LIVE_SNAPSHOTS = ";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const snapshotPath = join(root, "data", "live-snapshots.js");
-const LIMIT = bounded(process.env.BIDAI_PUBLIC_SOURCE_LIMIT, 30, 1, 100);
-const DETAIL_LIMIT = bounded(process.env.BIDAI_PUBLIC_DETAIL_LIMIT, 12, 1, 40);
+const LIMIT = bounded(process.env.BIDAI_PUBLIC_SOURCE_LIMIT, 250, 1, 5_000);
+const DETAIL_LIMIT = bounded(process.env.BIDAI_PUBLIC_DETAIL_LIMIT, 80, 1, 1_000);
+const PAGE_LIMIT = bounded(process.env.BIDAI_PUBLIC_PAGE_LIMIT, 5, 1, 50);
 const TIMEOUT_MS = bounded(process.env.BIDAI_PUBLIC_REQUEST_TIMEOUT_MS, 25_000, 5_000, 60_000);
 const USER_AGENT = "BidAIPro/1.0 (+public auction snapshot; low-volume research collector)";
 
@@ -105,17 +106,25 @@ function record(sourceKey, source, externalId, title, url, fields = {}) {
     modelKey: modelKey(sourceKey, title),
     forecastBasis: "Exact normalized title only; similar items require separately labeled analog evidence.",
     currentBid: money(fields.currentBid, 0),
+    currentBidKnown: fields.currentBidKnown !== false,
+    priceBasis: text(fields.priceBasis, "current bid"),
     bidCount: integer(fields.bidCount),
     endsAt: iso(fields.endsAt),
     status: fields.status || (iso(fields.endsAt) && Date.parse(fields.endsAt) <= Date.now() ? "ended" : "active"),
     imageUrl: safeUrl(fields.imageUrl, url),
     buyerPremium: money(fields.buyerPremium),
-    shippingKnown: false,
+    ...(money(fields.shipping) !== null ? { shipping: money(fields.shipping) } : {}),
+    shippingKnown: money(fields.shipping) !== null,
     feeKnown: fields.buyerPremium !== null && fields.buyerPremium !== undefined,
     identifiedAs: "Source listing title; identity, condition, authenticity, and final costs require verification.",
     riskSummary: "Public source snapshot. Open the original lot and verify buyer premium, tax, shipping, pickup, condition, authenticity, and close time before bidding.",
     observedAt,
   };
+}
+
+function withCoverage(items, coverage = {}) {
+  Object.defineProperty(items, "coverage", { value: coverage, enumerable: false, configurable: true });
+  return items;
 }
 
 async function fetchResponse(url, options = {}) {
@@ -149,6 +158,69 @@ function xmlLocations(xml) {
   return [...String(xml).matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)].map((match) => decodeHtml(match[1]));
 }
 
+function nextData(value) {
+  const payload = String(value).match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)?.[1];
+  if (!payload) return null;
+  try { return JSON.parse(payload); } catch { return null; }
+}
+
+function proxibidRecordsFromHtml(html, pageUrl) {
+  const lot = nextData(html)?.props?.pageProps?.lotDetails;
+  if (!lot || typeof lot !== "object") {
+    const id = pageUrl.match(/\/lotinformation\/(\d+)/i)?.[1];
+    const title = decodeHtml(String(html).match(/id=["']moreInfoLotTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1]);
+    const currentBid = money(String(html).match(new RegExp(`id=["']CurrentBid:${id}["'][^>]+value=["']([^"']+)`, "i"))?.[1]);
+    const imageUrl = decodeHtml(String(html).match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)/i)?.[1]);
+    const endLabel = decodeHtml(String(html).match(/id=["']moreInfoEventEndDate["'][^>]*>([\s\S]*?)<\/span>/i)?.[1]);
+    const endParts = endLabel.match(/(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),?\s+([A-Za-z]+)\s+(\d{1,2})\s*\|?\s*(\d{1,2}:\d{2}\s*[AP]M)\s+Eastern/i);
+    let endsAt = null;
+    if (endParts) {
+      const monthIndex = new Date(`${endParts[1]} 1, 2000`).getMonth();
+      const zone = monthIndex >= 2 && monthIndex <= 10 ? "EDT" : "EST";
+      const thisYear = new Date().getUTCFullYear();
+      endsAt = iso(`${endParts[1]} ${endParts[2]}, ${thisYear} ${endParts[3]} ${zone}`);
+      if (endsAt && Date.parse(endsAt) < Date.now() - 30 * 86400000) {
+        endsAt = iso(`${endParts[1]} ${endParts[2]}, ${thisYear + 1} ${endParts[3]} ${zone}`);
+      }
+    }
+    // Legacy pages may label a future lot as "passed" until its bidding phase
+    // opens. A future source-stated close is authoritative for active/upcoming
+    // coverage and prevents those lots from disappearing from the ledger.
+    const active = (endsAt && Date.parse(endsAt) > Date.now())
+      || /class=["'][^"']*\blotActive\b/i.test(String(html));
+    if (!id || !title || currentBid === null) return [];
+    return [record("proxibid", "Proxibid", id, title, pageUrl, {
+      currentBid,
+      currentBidKnown: true,
+      priceBasis: "source page current bid field",
+      endsAt,
+      imageUrl,
+      status: active ? "active" : "ended",
+    })];
+  }
+  const records = [];
+  const append = (value, fallbackUrl = pageUrl) => {
+    const id = text(value?.lotId ?? value?.id);
+    const title = text(value?.title);
+    const url = safeUrl(value?.lotDetailsUrl || fallbackUrl, pageUrl);
+    const currentBid = money(value?.price);
+    if (!id || !title || !url || currentBid === null) return;
+    const statusText = text(value?.lotStatus).toLowerCase();
+    const ended = value?.auctionEnded === true || /passed|sold|closed|ended|expired/.test(statusText);
+    records.push(record("proxibid", "Proxibid", id, title, url, {
+      currentBid,
+      currentBidKnown: true,
+      priceBasis: "source page current lot price",
+      endsAt: value?.lotEndDate,
+      imageUrl: value?.imageUrl,
+      status: ended ? "ended" : "active",
+    }));
+  };
+  append(lot, pageUrl);
+  for (const similar of Array.isArray(lot.similarLots) ? lot.similarLots : []) append(similar, pageUrl);
+  return records;
+}
+
 async function collectEbay() {
   const clientId = text(process.env.BIDAI_EBAY_CLIENT_ID);
   const clientSecret = text(process.env.BIDAI_EBAY_CLIENT_SECRET);
@@ -165,16 +237,29 @@ async function collectEbay() {
   const token = (await tokenResponse.json()).access_token;
   if (!token) throw new Error("eBay did not return an application token.");
   const queries = ["gold jewelry", "silver bullion", "authenticated sneakers", "watches", "electronics", "collectibles", "vintage hats", "cameras"];
+  const targetPerQuery = Math.max(1, Math.ceil(LIMIT / queries.length));
+  let resultCount = 0;
+  let pageCount = 0;
   const pages = await parallel(queries, 2, async (query) => {
-    const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
-    url.searchParams.set("q", query);
-    url.searchParams.set("filter", "buyingOptions:{AUCTION},deliveryCountry:US");
-    url.searchParams.set("limit", String(Math.min(50, LIMIT)));
-    const response = await fetchResponse(url, { headers: { authorization: `Bearer ${token}`, "x-ebay-c-marketplace-id": "EBAY_US" } });
-    return (await response.json()).itemSummaries || [];
+    const summaries = [];
+    for (let offset = 0; summaries.length < targetPerQuery && offset < 10_000 && pageCount < PAGE_LIMIT * queries.length; offset += 200) {
+      const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
+      url.searchParams.set("q", query);
+      url.searchParams.set("filter", "buyingOptions:{AUCTION},deliveryCountry:US");
+      url.searchParams.set("limit", "200");
+      url.searchParams.set("offset", String(offset));
+      const response = await fetchResponse(url, { headers: { authorization: `Bearer ${token}`, "x-ebay-c-marketplace-id": "EBAY_US" } });
+      const payload = await response.json();
+      const items = Array.isArray(payload.itemSummaries) ? payload.itemSummaries : [];
+      resultCount += Math.max(0, Number(payload.total) || 0);
+      pageCount += 1;
+      summaries.push(...items);
+      if (items.length < 200) break;
+    }
+    return summaries.slice(0, targetPerQuery);
   });
   const seen = new Set();
-  return pages.flat().filter((item) => item?.itemId && !seen.has(item.itemId) && seen.add(item.itemId)).slice(0, LIMIT).map((item) => record(
+  const records = pages.flat().filter((item) => item?.itemId && !seen.has(item.itemId) && seen.add(item.itemId)).slice(0, LIMIT).map((item) => record(
     "ebay", "eBay Auctions", item.itemId, item.title, item.itemWebUrl,
     {
       currentBid: item.currentBidPrice?.value ?? item.price?.value,
@@ -182,30 +267,57 @@ async function collectEbay() {
       endsAt: item.itemEndDate,
       imageUrl: item.image?.imageUrl,
       category: item.categories?.[0]?.categoryName,
+      shipping: item.shippingOptions?.[0]?.shippingCost?.value,
     },
   ));
+  return withCoverage(records, {
+    complete: records.length >= resultCount && resultCount > 0,
+    discoveredTotal: resultCount || null,
+    pagesRead: pageCount,
+    note: `Official Browse API query set; ${pageCount} page${pageCount === 1 ? "" : "s"} read.`,
+  });
 }
 
 async function collectHiBid() {
-  const html = await fetchText("https://hibid.com/lots");
-  const stateMatch = html.match(/<script[^>]+id=["']hibid-state["'][^>]*>([\s\S]*?)<\/script>/i);
-  if (!stateMatch) throw new Error("HiBid did not expose its public lot-state payload.");
-  const payload = JSON.parse(stateMatch[1].trim());
-  const state = payload?.["apollo.state"] || payload?.props?.pageProps?.apolloState || payload?.apolloState || payload;
-  const auctions = new Map(Object.entries(state).filter(([key]) => /^Auction:/.test(key)));
-  return Object.entries(state).filter(([key, value]) => (/^Lot:/.test(key) || value?.__typename === "Lot") && value?.lead).slice(0, LIMIT).map(([key, lot]) => {
-    const auctionRef = lot.auction?.__ref;
-    const auction = auctions.get(auctionRef) || {};
-    const externalId = lot.id || lot.itemId || key.split(":").pop();
-    return record("hibid", "HiBid", externalId, lot.lead, safeUrl(`/lot/${externalId}`, "https://hibid.com"), {
-      currentBid: lot.lotState?.highBid,
-      bidCount: lot.lotState?.bidCount,
-      endsAt: lot.lotState?.timeLeftTitle?.replace(/^.*?at:\s*/i, "") || auction.bidCloseDateTime,
-      imageUrl: lot.featuredPicture?.hdThumbnailLocation || lot.featuredPicture?.thumbnailLocation || lot.featuredPicture?.fullSizeLocation || lot.featuredPicture?.url,
-      category: lot.category?.name || categoryFor(lot.lead),
-      buyerPremium: auction.buyerPremium,
-      status: lot.lotState?.isClosed ? "ended" : "active",
-    });
+  const found = new Map();
+  let pagesRead = 0;
+  let exhausted = false;
+  for (let page = 1; page <= PAGE_LIMIT && found.size < LIMIT; page += 1) {
+    const html = await fetchText(page === 1 ? "https://hibid.com/lots" : `https://hibid.com/lots?apage=${page}`);
+    const stateMatch = html.match(/<script[^>]+id=["']hibid-state["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (!stateMatch) throw new Error("HiBid did not expose its public lot-state payload.");
+    const payload = JSON.parse(stateMatch[1].trim());
+    const state = payload?.["apollo.state"] || payload?.props?.pageProps?.apolloState || payload?.apolloState || payload;
+    const auctions = new Map(Object.entries(state).filter(([key]) => /^Auction:/.test(key)));
+    const lots = Object.entries(state).filter(([key, value]) => (/^Lot:/.test(key) || value?.__typename === "Lot") && value?.lead);
+    let added = 0;
+    for (const [key, lot] of lots) {
+      const auctionRef = lot.auction?.__ref;
+      const auction = auctions.get(auctionRef) || {};
+      const externalId = String(lot.id || lot.itemId || key.split(":").pop());
+      if (found.has(externalId)) continue;
+      found.set(externalId, record("hibid", "HiBid", externalId, lot.lead, safeUrl(`/lot/${externalId}`, "https://hibid.com"), {
+        currentBid: lot.lotState?.highBid,
+        bidCount: lot.lotState?.bidCount,
+        endsAt: lot.lotState?.timeLeftTitle?.replace(/^.*?at:\s*/i, "") || auction.bidCloseDateTime,
+        imageUrl: lot.featuredPicture?.hdThumbnailLocation || lot.featuredPicture?.thumbnailLocation || lot.featuredPicture?.fullSizeLocation || lot.featuredPicture?.url,
+        category: lot.category?.name || categoryFor(lot.lead),
+        buyerPremium: auction.buyerPremium,
+        status: lot.lotState?.isClosed ? "ended" : "active",
+      }));
+      added += 1;
+      if (found.size >= LIMIT) break;
+    }
+    pagesRead += 1;
+    if (lots.length < 100 || added === 0) {
+      exhausted = true;
+      break;
+    }
+  }
+  return withCoverage([...found.values()], {
+    complete: exhausted,
+    pagesRead,
+    note: `Public lot pages; ${pagesRead} page${pagesRead === 1 ? "" : "s"} read at up to 100 lots per page.`,
   });
 }
 
@@ -223,7 +335,7 @@ async function collectLiveAuctioneers() {
   const response = await fetchResponse("https://www.liveauctioneers.com/sitemap-items-recent-0.xml.gz");
   const xml = gunzipSync(Buffer.from(await response.arrayBuffer())).toString("utf8");
   const urls = xmlLocations(xml).slice(0, DETAIL_LIMIT);
-  return parallel(urls, 2, async (url) => {
+  const records = await parallel(urls, 2, async (url) => {
     const html = await fetchText(url);
     const scripts = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
     let product = null;
@@ -241,6 +353,12 @@ async function collectLiveAuctioneers() {
       category: product.category,
     });
   });
+  return withCoverage(records, {
+    complete: urls.length < DETAIL_LIMIT,
+    discoveredTotal: xmlLocations(xml).length,
+    pagesRead: records.length,
+    note: "Recent-lot sitemap detail sample; a partner feed is required for complete catalogue coverage.",
+  });
 }
 
 async function collectGovDeals() {
@@ -254,40 +372,88 @@ async function collectGovDeals() {
     "passenger-vehicles",
     "computers-parts-supplies",
   ];
-  const pages = await parallel(categories, 2, async (category) => ({ category, html: await fetchText(`https://prod-seo.govdeals.com/en/${category}`) }));
+  const perCategory = Math.max(1, Math.ceil(LIMIT / categories.length));
+  const requests = categories.flatMap((category) => Array.from(
+    { length: Math.min(PAGE_LIMIT, Math.ceil(perCategory / 24)) },
+    (_, index) => ({ category, page: index + 1 }),
+  ));
+  const pages = await parallel(requests, 3, async ({ category, page }) => ({
+    category,
+    page,
+    html: await fetchText(page === 1
+      ? `https://prod-seo.govdeals.com/en/${category}`
+      : `https://prod-seo.govdeals.com/en/${category}/filters?pn=${page}`),
+  }));
   const found = new Map();
-  const perCategory = Math.max(1, Math.ceil(LIMIT / Math.max(1, pages.length)));
+  let discoveredTotal = 0;
   for (const { category, html } of pages) {
-    let categoryCount = 0;
-    for (const match of html.matchAll(/href=["'](\/en\/asset\/(\d+)\/\d+)["'][\s\S]{0,3000}?title=["']([^"']+)["'][\s\S]{0,3500}?(?:pAssetCurrentBid[^>]*>|Current Bid[\s\S]{0,300}?)(?:\$|USD\s*)?([\d,]+(?:\.\d{1,2})?)/gi)) {
-      const [, path, id, title, price] = match;
-      if (!found.has(id)) {
-        found.set(id, record("govdeals", "GovDeals", id, title, safeUrl(path, "https://www.govdeals.com"), { currentBid: price, category: categoryFor(title, category.replaceAll("-", " ")) }));
-        categoryCount += 1;
+    discoveredTotal = Math.max(discoveredTotal, integer(html.match(/#\s*([\d,]+)\s+Results\s+for/i)?.[1]));
+    const cards = html.split(/(?=<div[^>]+id=["']asset-\d+-\d+["'])/gi).slice(1);
+    for (const card of cards) {
+      const identity = card.match(/id=["']asset-(\d+)-(\d+)["']/i);
+      const path = card.match(/href=["'](\/en\/asset\/\d+\/\d+)["']/i)?.[1];
+      const title = decodeHtml(card.match(/name=["']lnkAssetDetails["'][^>]+class=["'][^"']*link-click[^"']*["'][^>]+title=["']([^"']+)/i)?.[1]
+        || card.match(/class=["'][^"']*card-title[^"']*["'][\s\S]{0,700}?title=["']([^"']+)/i)?.[1]);
+      const price = money(card.match(/name=["']pAssetCurrentBid["'][^>]+title=["']([^"']+)/i)?.[1]
+        || card.match(/name=["']pAssetCurrentBid["'][^>]*>[\s\S]{0,120}?(?:USD|CAD)?\s*([\d,]+(?:\.\d{1,2})?)/i)?.[1]);
+      const endsAt = card.match(/\(([A-Z][a-z]+\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+(?:AM|PM)\s+UTC)\)/i)?.[1];
+      const saleType = decodeHtml(card.match(/class=["'][^"']*card-auction[^"']*["'][^>]*>([\s\S]*?)<\/a>/i)?.[1]);
+      if (!identity || !path || !title || price === null || !/online auction/i.test(saleType)) continue;
+      const externalId = `${identity[1]}-${identity[2]}`;
+      if (!found.has(externalId)) {
+        found.set(externalId, record("govdeals", "GovDeals", externalId, title, safeUrl(path, "https://prod-seo.govdeals.com"), {
+          currentBid: price,
+          endsAt,
+          category: categoryFor(title, category.replaceAll("-", " ")),
+        }));
       }
-      if (categoryCount >= perCategory) break;
+      if (found.size >= LIMIT) break;
     }
+    if (found.size >= LIMIT) break;
   }
   if (!found.size) throw new Error("GovDeals public category pages did not return parseable lot cards.");
-  return [...found.values()].slice(0, LIMIT);
+  return withCoverage([...found.values()].slice(0, LIMIT), {
+    complete: false,
+    discoveredTotal: discoveredTotal || null,
+    pagesRead: pages.length,
+    note: `${categories.length} resale-relevant categories; paginated public lot cards parsed independently.`,
+  });
 }
 
 async function collectPublicSurplus() {
-  const html = await fetchText("https://www.publicsurplus.com/sms/browse/home");
+  const home = await fetchText("https://www.publicsurplus.com/sms/browse/home");
+  const categoryPages = [...new Map([...home.matchAll(/href=["'](\/sms\/browse\/cataucs\?catid=(\d+))["'][^>]*>([\s\S]*?)<\/a>/gi)]
+    .map((match) => [match[2], { url: safeUrl(match[1], "https://www.publicsurplus.com"), category: decodeHtml(match[3]) }])).values()]
+    .filter((entry) => entry.url && entry.category && !/view|browse|home/i.test(entry.category));
+  const pages = categoryPages.length
+    ? await parallel(categoryPages.slice(0, Math.max(1, Math.min(categoryPages.length, DETAIL_LIMIT))), 4, async (entry) => ({ ...entry, html: await fetchText(entry.url) }))
+    : [{ url: "https://www.publicsurplus.com/sms/browse/home", category: "Government surplus", html: home }];
   const found = new Map();
-  for (const match of html.matchAll(/<div class=["']auction-item["'][\s\S]{0,5000}?href=["']\/sms\/auction\/view\?auc=(\d+)["'][\s\S]{0,3000}?title=["']([^"']+)["'][\s\S]{0,1800}?Price:\s*<b[^>]*>\s*\$?([\d,]+(?:\.\d{1,2})?)[\s\S]{0,1800}?updateTimeLeftSpan\([^,]+,\s*\d+,\s*["'][^"']+["'],\s*\d+,\s*(\d+)/gi)) {
-    const [, id, rawTitle, price, endEpoch] = match;
-    const title = rawTitle.replace(/^#\d+\s*-\s*/, "");
-    found.set(id, record("publicsurplus", "Public Surplus", id, title, `https://www.publicsurplus.com/sms/auction/view?auc=${id}`, { currentBid: price, endsAt: Number(endEpoch) }));
+  for (const { category, html } of pages) {
+    for (const match of html.matchAll(/<div class=["']auction-item["'][\s\S]{0,5000}?href=["']\/sms\/auction\/view\?auc=(\d+)["'][\s\S]{0,3000}?title=["']([^"']+)["'][\s\S]{0,1800}?Price:\s*<b[^>]*>\s*\$?([\d,]+(?:\.\d{1,2})?)[\s\S]{0,1800}?updateTimeLeftSpan\([^,]+,\s*\d+,\s*["'][^"']+["'],\s*\d+,\s*(\d+)/gi)) {
+      const [, id, rawTitle, price, endEpoch] = match;
+      const title = rawTitle.replace(/^#\d+\s*-\s*/, "");
+      found.set(id, record("publicsurplus", "Public Surplus", id, title, `https://www.publicsurplus.com/sms/auction/view?auc=${id}`, {
+        currentBid: price,
+        endsAt: Number(endEpoch),
+        category: categoryFor(title, category),
+      }));
+      if (found.size >= LIMIT) break;
+    }
     if (found.size >= LIMIT) break;
   }
   if (!found.size) throw new Error("Public Surplus did not return parseable auction cards.");
-  return [...found.values()];
+  return withCoverage([...found.values()], {
+    complete: pages.length === categoryPages.length && found.size < LIMIT,
+    pagesRead: pages.length,
+    note: `Public category ledger; ${pages.length} category page${pages.length === 1 ? "" : "s"} read and deduplicated.`,
+  });
 }
 
 async function collectPropertyRoom() {
   const xml = await fetchText("https://www.propertyroom.com/sitemap.xml");
-  const urls = xmlLocations(xml).filter((url) => /\/l\/.+\/\d+\/?$/i.test(url)).slice(-DETAIL_LIMIT).reverse();
+  const currentUrls = xmlLocations(xml).filter((url) => /\/l\/.+\/\d+\/?$/i.test(url));
+  const urls = currentUrls.slice(-DETAIL_LIMIT).reverse();
   const details = await parallel(urls, 2, async (url) => {
     const html = await fetchText(url);
     const id = url.match(/\/(\d+)\/?$/)?.[1] || html.match(/LISTING_ID\s*=\s*["']?(\d+)/i)?.[1];
@@ -306,7 +472,7 @@ async function collectPropertyRoom() {
   });
   const states = await response.json();
   const byId = new Map((Array.isArray(states) ? states : []).map((state) => [String(state.lid), state]));
-  return details.map((item) => {
+  const records = details.map((item) => {
     const state = byId.get(item.id) || {};
     const epoch = String(state.end || "").match(/Date\((\d+)/)?.[1];
     return record("propertyroom", "PropertyRoom", item.id, item.title, item.url, {
@@ -316,39 +482,57 @@ async function collectPropertyRoom() {
       imageUrl: item.imageUrl,
       status: Number(state.lstat) === 0 ? "active" : "ended",
     });
-  }).filter((item) => item.currentBid > 0);
+  });
+  return withCoverage(records, {
+    complete: currentUrls.length <= DETAIL_LIMIT,
+    discoveredTotal: currentUrls.length,
+    pagesRead: details.length,
+    note: "Public listing sitemap plus current client-listing state endpoint.",
+  });
 }
 
 async function collectProxibid() {
   const indexXml = await fetchText("https://www.proxibid.com/sitemap-lots.xml");
   const indexLocations = xmlLocations(indexXml);
-  const detailXml = indexLocations.some((url) => /\/lotinformation\/\d+/i.test(url))
-    ? indexXml
-    : await fetchText(indexLocations[0]);
-  const urls = xmlLocations(detailXml).filter((url) => /\/lotinformation\/\d+/i.test(url)).slice(0, DETAIL_LIMIT);
-  return parallel(urls, 2, async (url) => {
-    const html = await fetchText(url);
-    const id = url.match(/\/lotinformation\/(\d+)/i)?.[1];
-    const title = decodeHtml(html.match(/id=["']moreInfoLotTitle["'][^>]*>([\s\S]*?)<\/span>/i)?.[1]);
-    const currentBid = money(html.match(new RegExp(`id=["']CurrentBid:${id}["'][^>]+value=["']([^"']+)`, "i"))?.[1]);
-    const bidCount = integer(html.match(/(?:Bid Count|Bids)[^\d]{0,80}(\d+)/i)?.[1]);
-    const dateText = decodeHtml(html.match(/<span>\s*<span class=["']live-icon["'][^>]*><\/span>[\s\S]{0,220}?<\/span>/i)?.[0]);
-    const endsAt = iso(dateText.replace(/\|/g, " "));
-    const imageUrl = decodeHtml(html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)/i)?.[1]);
-    if (!id || !title || currentBid === null) return null;
-    return record("proxibid", "Proxibid", id, title, url, { currentBid, bidCount, endsAt, imageUrl });
+  const sitemapUrls = indexLocations.some((url) => /\/lotinformation\/\d+/i.test(url))
+    ? []
+    : indexLocations.slice(-Math.min(PAGE_LIMIT, indexLocations.length));
+  const maps = sitemapUrls.length
+    ? await parallel(sitemapUrls, 2, async (url) => xmlLocations(await fetchText(url)))
+    : [xmlLocations(indexXml)];
+  const currentUrls = [...new Set(maps.flat().filter((url) => /\/lotinformation\/\d+/i.test(url)))];
+  const urls = currentUrls
+    .sort((left, right) => integer(right.match(/\/lotinformation\/(\d+)/i)?.[1]) - integer(left.match(/\/lotinformation\/(\d+)/i)?.[1]))
+    .slice(0, DETAIL_LIMIT);
+  const pages = await parallel(urls, 2, async (url) => proxibidRecordsFromHtml(await fetchText(url), url));
+  const byId = new Map();
+  for (const item of pages.flat()) {
+    const previous = byId.get(item.externalId);
+    if (!previous || (previous.status === "ended" && item.status === "active")) byId.set(item.externalId, item);
+  }
+  const records = [...byId.values()].filter((item) => item.status === "active").slice(0, LIMIT);
+  return withCoverage(records, {
+    complete: currentUrls.length <= DETAIL_LIMIT,
+    discoveredTotal: currentUrls.length,
+    pagesRead: urls.length,
+    note: "Newest lot sitemaps plus current structured page data and linked active lots; catalogue feed access is still needed for guaranteed completeness.",
   });
 }
 
 async function collectBidSpotter() {
   const index = await fetchText("https://www.bidspotter.com/lots_sitemapindex");
-  const sitemapUrls = xmlLocations(index).slice(0, 1);
+  const allSitemapUrls = xmlLocations(index);
+  const sitemapUrls = allSitemapUrls.slice(-Math.min(PAGE_LIMIT, allSitemapUrls.length));
   if (!sitemapUrls.length) throw new Error("BidSpotter sitemap index contained no lot map.");
-  const sitemapResponse = await fetchResponse(sitemapUrls[0]);
-  const sitemapBytes = Buffer.from(await sitemapResponse.arrayBuffer());
-  const xml = sitemapUrls[0].endsWith(".gz") ? gunzipSync(sitemapBytes).toString("utf8") : sitemapBytes.toString("utf8");
-  const urls = xmlLocations(xml).slice(0, DETAIL_LIMIT);
-  return parallel(urls, 2, async (url) => {
+  const maps = await parallel(sitemapUrls, 2, async (sitemapUrl) => {
+    const sitemapResponse = await fetchResponse(sitemapUrl);
+    const sitemapBytes = Buffer.from(await sitemapResponse.arrayBuffer());
+    const xml = sitemapUrl.endsWith(".gz") ? gunzipSync(sitemapBytes).toString("utf8") : sitemapBytes.toString("utf8");
+    return xmlLocations(xml);
+  });
+  const currentUrls = maps.flat();
+  const urls = currentUrls.slice(-DETAIL_LIMIT).reverse();
+  const records = await parallel(urls, 2, async (url) => {
     const html = await fetchText(url);
     const layer = html.match(/window\.dataLayer\.push\(\{([\s\S]*?)\}\);/i)?.[1] || "";
     const field = (name) => decodeHtml(layer.match(new RegExp(`"${name}"\\s*:\\s*"([^"]*)"`, "i"))?.[1]);
@@ -357,15 +541,23 @@ async function collectBidSpotter() {
     const bidCount = integer(field("currentBids"));
     const openingPrice = money(field("openingPrice"));
     const imageUrl = decodeHtml(html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)/i)?.[1]);
-    if (!id || !title || bidCount > 0 || openingPrice === null) return null;
+    if (!id || !title || openingPrice === null) return null;
     return record("bidspotter", "BidSpotter", id, title, url, {
       currentBid: openingPrice,
+      currentBidKnown: bidCount === 0,
+      priceBasis: bidCount === 0 ? "opening price; no bids recorded" : "opening price; current live bid not exposed in page HTML",
       bidCount,
       endsAt: field("lotEndsFrom"),
       imageUrl,
       category: field("lotCategory") || field("lotPrimaryCategory"),
       status: /expired|sold|closed/i.test(field("lotStatus")) ? "ended" : "active",
     });
+  });
+  return withCoverage(records, {
+    complete: currentUrls.length <= DETAIL_LIMIT,
+    discoveredTotal: currentUrls.length,
+    pagesRead: records.length,
+    note: "Recent sitemap detail sample; lots with client-rendered live prices are marked bid-unknown instead of being understated.",
   });
 }
 
@@ -439,9 +631,20 @@ async function main() {
   const records = [];
   await Promise.all(collectors.map(async ([key, mode, collect]) => {
     try {
-      const items = (await collect()).filter((item) => item?.externalId && item?.title && item?.url).slice(0, LIMIT);
+      const collected = await collect();
+      const coverage = collected?.coverage && typeof collected.coverage === "object" ? collected.coverage : {};
+      const items = collected.filter((item) => item?.externalId && item?.title && item?.url).slice(0, LIMIT);
       records.push(...items);
-      sourceHealth[key] = { mode, status: items.length ? "connected" : "ready-no-records", itemCount: items.length, checkedAt: observedAt };
+      sourceHealth[key] = {
+        mode,
+        status: items.length ? (coverage.complete ? "connected-complete" : "connected-partial") : "ready-no-records",
+        itemCount: items.length,
+        checkedAt: observedAt,
+        coverageComplete: coverage.complete === true,
+        discoveredTotal: Number.isFinite(Number(coverage.discoveredTotal)) ? Number(coverage.discoveredTotal) : null,
+        pagesRead: Number.isFinite(Number(coverage.pagesRead)) ? Number(coverage.pagesRead) : null,
+        message: text(coverage.note).slice(0, 240),
+      };
       console.log(`[public-markets] ${key}: ${items.length} record${items.length === 1 ? "" : "s"}.`);
     } catch (error) {
       const authorizationRequired = /credential|client_id|client_secret|secret|authorized|authorization/i.test(text(error?.message));
@@ -465,7 +668,7 @@ async function main() {
   envelope.sourceHealth = { ...(envelope.sourceHealth || {}), ...sourceHealth };
   envelope.sourceNotes = [
     ...(Array.isArray(envelope.sourceNotes) ? envelope.sourceNotes : []),
-    `Public marketplace collectors checked ${collectors.length} sources at ${observedAt}; ${records.length} real records were available in this run.`,
+    `Public marketplace collectors checked ${collectors.length} sources at ${observedAt}; ${records.length} real records were stored in this run. Source health distinguishes complete ledgers from partial samples.`,
     "Invaluable remains authorization-only because its published API is for catalog uploads, not public listing reads.",
   ].slice(-20);
   await writeEnvelope(envelope);
@@ -491,6 +694,8 @@ export {
   decodeHtml,
   findProductJson,
   modelKey,
+  nextData,
+  proxibidRecordsFromHtml,
   record,
   xmlLocations,
 };

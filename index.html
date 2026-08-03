@@ -214,7 +214,8 @@
                     <span class="section-kicker"><i></i> EVIDENCE-WEIGHTED PROFIT RANKING</span>
                     <h3 id="queue-heading">Highest profit likelihood first</h3>
                     <div class="queue-mode-switch" role="group" aria-label="Opportunity view">
-                      <button class="is-active" type="button" data-quick-mode="profit" aria-pressed="true">Top profit</button>
+                      <button class="is-active" type="button" data-quick-mode="all" aria-pressed="true">All listings</button>
+                      <button type="button" data-quick-mode="profit" aria-pressed="false">Top profit</button>
                       <button type="button" data-quick-mode="pawn" aria-pressed="false">Pawn-first metals</button>
                       <button type="button" data-quick-mode="thin" aria-pressed="false">Likely + / below target</button>
                       <button type="button" data-quick-mode="closing" aria-pressed="false">Closing ≤ 5 min</button>
@@ -512,11 +513,11 @@
                   <label><span>Estimated sales tax</span><span class="suffix-input"><input name="taxRate" type="number" min="0" max="20" step="0.1" /><b>%</b></span><small>Applied to purchase, premium, and inbound shipping.</small></label>
                   <label><span>Buyer premium</span><span class="suffix-input"><input name="buyerPremium" type="number" min="0" max="50" step="0.1" /><b>%</b></span><small>Set to zero when the auction has no premium.</small></label>
                   <label><span>Outbound shipping</span><span class="money-input"><b>$</b><input name="outboundShipping" type="number" min="0" step="0.01" /></span><small>Average shipping cost when resold.</small></label>
-                  <label><span>Repair / testing reserve</span><span class="money-input"><b>$</b><input name="repairReserve" type="number" min="0" step="0.01" /></span><small>Default condition uncertainty reserve.</small></label>
-                  <label><span>Return / loss reserve</span><span class="money-input"><b>$</b><input name="returnReserve" type="number" min="0" step="0.01" /></span><small>Buffer for returns, loss, or dispute costs.</small></label>
-                  <label><span>Minimum profit target</span><span class="money-input"><b>$</b><input name="minimumProfit" type="number" min="0" step="1" /></span><small>The ceiling preserves at least this much downside profit.</small></label>
+                  <label><span>Repair / testing reserve</span><span class="money-input"><b>$</b><input name="repairReserve" type="number" min="0" step="0.01" /></span><small>Planning reserve used only when the listing has no item-specific amount.</small></label>
+                  <label><span>Return / loss reserve</span><span class="money-input"><b>$</b><input name="returnReserve" type="number" min="0" step="0.01" /></span><small>Planning buffer used only when the listing has no item-specific amount.</small></label>
+                  <label><span>Minimum profit target</span><span class="money-input"><b>$</b><input name="minimumProfit" type="number" min="0" step="1" /></span><small>Default $25; the ceiling also preserves the configured percentage margin.</small></label>
                   <label><span>Target margin</span><span class="suffix-input"><input name="targetMargin" type="number" min="0" max="90" step="1" /><b>%</b></span><small>Applied to conservative resale value.</small></label>
-                  <label><span>Assumed inbound shipping</span><span class="money-input"><b>$</b><input name="assumedInboundShipping" type="number" min="0" step="1" /></span><small>Conservative fallback so every evidence-backed item receives a ceiling.</small></label>
+                  <label><span>Assumed inbound shipping</span><span class="money-input"><b>$</b><input name="assumedInboundShipping" type="number" min="0" step="1" /></span><small>Provisional fallback only. Rows label it as estimated until a destination quote is known.</small></label>
                   <label><span>Online asking-price haircut</span><span class="suffix-input"><input name="askingPriceHaircut" type="number" min="0" max="80" step="1" /><b>%</b></span><small>Discount applied when used asking prices are the best available online evidence.</small></label>
                   <label><span>Near-match completed-sale reserve</span><span class="suffix-input"><input name="analogCompHaircut" type="number" min="20" max="70" step="1" /><b>%</b></span><small>Extra reserve when unique items can only be priced from materially similar completed sales.</small></label>
                   <label><span>New-retail replacement haircut</span><span class="suffix-input"><input name="retailReplacementHaircut" type="number" min="20" max="80" step="1" /><b>%</b></span><small>Condition and resale discount when only matched new-retail offers exist.</small></label>

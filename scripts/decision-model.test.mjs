@@ -435,3 +435,14 @@ test("single-metal gold listings remain eligible for conservative melt analysis"
   assert.equal(result.strictMetalPurityReject, false);
   assert.equal(result.hasPawnEstimate, true);
 });
+
+test("a stale stored metal weight that disagrees with a leading-decimal title is rejected", () => {
+  const model = loadModel();
+  const item = baseItem({ title: "Charming 14K Yellow Gold Pendant .8g" });
+  const result = model.assess(item);
+  assert.equal(result.metalWeightMismatch, true);
+  assert.equal(result.strictMetalPurityReject, true);
+  assert.match(result.metalPurityRejectionReason, /10\.00 g.*0\.80 g/i);
+  assert.equal(result.hasPawnEstimate, false);
+  assert.equal(result.maxBid, 0);
+});

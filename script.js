@@ -4,6 +4,7 @@
   const STORAGE_KEY = "bidaipro.auction-workspace.v1";
   const CLOUD_CONTROL_KEY = "bidaipro.cloud-refresh.v1";
   const CLOUD_TOKEN_KEY = "bidaipro.github-token.session";
+  const SETTINGS_REVISION = 2;
   const MAX_IMPORT_ROWS = 5000;
   const QUEUE_PAGE_SIZE = 250;
   const VIEW_TITLES = {
@@ -19,11 +20,11 @@
     taxRate: 8.25,
     buyerPremium: 0,
     outboundShipping: 14,
-    repairReserve: 25,
-    returnReserve: 18,
-    minimumProfit: 50,
+    repairReserve: 12,
+    returnReserve: 8,
+    minimumProfit: 25,
     targetMargin: 22,
-    assumedInboundShipping: 25,
+    assumedInboundShipping: 18,
     analogCompHaircut: 40,
     askingPriceHaircut: 30,
     retailReplacementHaircut: 45,
@@ -44,10 +45,10 @@
 
   const AUCTION_MARKETS = [
     { key: "shopgoodwill", name: "ShopGoodwill", domain: "shopgoodwill.com", homeUrl: "https://shopgoodwill.com/", focus: "Donated goods, jewelry, collectibles, electronics" },
-    { key: "ebay", name: "eBay Auctions", domain: "ebay.com", homeUrl: "https://www.ebay.com/", focus: "General merchandise and worldwide collectibles" },
+    { key: "ebay", name: "eBay Auctions", domain: "ebay.com", homeUrl: "https://www.ebay.com/", setupUrl: "https://developer.ebay.com/my/keys", focus: "General merchandise and worldwide collectibles" },
     { key: "hibid", name: "HiBid", domain: "hibid.com", homeUrl: "https://hibid.com/", focus: "Estate, equipment, vehicles, jewelry, local auctions" },
     { key: "liveauctioneers", name: "LiveAuctioneers", domain: "liveauctioneers.com", homeUrl: "https://www.liveauctioneers.com/", focus: "Art, antiques, coins, jewelry, collectibles" },
-    { key: "invaluable", name: "Invaluable", domain: "invaluable.com", homeUrl: "https://www.invaluable.com/", focus: "Fine art, decorative art, jewelry, auction houses" },
+    { key: "invaluable", name: "Invaluable", domain: "invaluable.com", homeUrl: "https://www.invaluable.com/", setupUrl: "https://www.invaluable.com/inv/apiinfo/", focus: "Fine art, decorative art, jewelry, auction houses" },
     { key: "govdeals", name: "GovDeals", domain: "govdeals.com", homeUrl: "https://www.govdeals.com/", focus: "Government surplus, vehicles, equipment, real estate" },
     { key: "publicsurplus", name: "Public Surplus", domain: "publicsurplus.com", homeUrl: "https://www.publicsurplus.com/", focus: "Government and educational surplus" },
     { key: "propertyroom", name: "PropertyRoom", domain: "propertyroom.com", homeUrl: "https://www.propertyroom.com/", focus: "Police surplus, jewelry, electronics, vehicles" },
@@ -281,13 +282,23 @@
     try {
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (!stored || typeof stored !== "object") throw new Error("empty");
+      const settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
+      if (Number(stored.settingsRevision || 0) < SETTINGS_REVISION) {
+        // Migrate the original one-size-fits-all stack only when a value was
+        // never customized. Explicit user choices remain authoritative.
+        if (Number(stored.settings?.repairReserve) === 25) settings.repairReserve = DEFAULT_SETTINGS.repairReserve;
+        if (Number(stored.settings?.returnReserve) === 18) settings.returnReserve = DEFAULT_SETTINGS.returnReserve;
+        if (Number(stored.settings?.minimumProfit) === 50) settings.minimumProfit = DEFAULT_SETTINGS.minimumProfit;
+        if (Number(stored.settings?.assumedInboundShipping) === 25) settings.assumedInboundShipping = DEFAULT_SETTINGS.assumedInboundShipping;
+      }
       return {
         userItems: Array.isArray(stored.userItems) ? stored.userItems : [],
         watchIds: Array.isArray(stored.watchIds) ? stored.watchIds : [],
-        settings: { ...DEFAULT_SETTINGS, ...(stored.settings || {}) },
+        settings,
+        settingsRevision: SETTINGS_REVISION,
       };
     } catch (_error) {
-      return { userItems: [], watchIds: [], settings: { ...DEFAULT_SETTINGS } };
+      return { userItems: [], watchIds: [], settings: { ...DEFAULT_SETTINGS }, settingsRevision: SETTINGS_REVISION };
     }
   }
 
@@ -400,10 +411,11 @@
   let selectedId = "";
   let historicalIndexCache = null;
   let visibleQueueLimit = QUEUE_PAGE_SIZE;
-  let queueMode = "profit";
+  let queueMode = "all";
 
   function saveWorkspace() {
     try {
+      workspace.settingsRevision = SETTINGS_REVISION;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
       return true;
     } catch (_error) {
@@ -725,6 +737,7 @@
       : Number(value);
     const forecast = forecastFor(item);
     const currentBid = Math.max(0, Number(item.currentBid) || 0);
+    const currentBidKnown = item.currentBidKnown !== false;
     const expectedClose = forecast.status === "available" ? Number(forecast.expected) : null;
     const modeledBid = expectedClose ?? currentBid;
     const marketplaceFee = configuredNumber(item.marketplaceFee, s.marketplaceFee);
@@ -1001,19 +1014,31 @@
           : resaleEvidenceKind === "retail-replacement"
             ? (newRetailSources.slice(0, 3).join(" + ") || "General retail marketplace")
             : "No proven resale channel";
-    const listingMaterialText = `${String(item.title || "")} ${String(item.category || "")} ${String(item.metalEstimate?.nonMetalWarning || "")}`.toLowerCase();
+    // Category names such as "Jewelry & Gemstones" describe the catalog bin,
+    // not necessarily the item. Purity gates must use item-specific evidence.
+    const listingMaterialText = `${String(item.title || "")} ${String(item.metalEstimate?.nonMetalWarning || "")}`.toLowerCase();
     const preciousMetalIntent = Boolean(item.metalEstimate) || /\b(?:gold|silver|sterling|palladium|platinum)\b/.test(listingMaterialText);
     let metalPurityRejectionReason = null;
     if (preciousMetalIntent) {
       const hasGoldMaterial = /\bgold\b|\b(?:10|14|18|22|24)\s*k(?:t|arat)?\b/.test(listingMaterialText);
       const hasSilverMaterial = /\bsilver\b|\bsterling\b|\b(?:925|999|\.925|\.999)\b/.test(listingMaterialText);
       const otherMetal = listingMaterialText.match(/\b(palladium|platinum|rhodium|tungsten|titanium|copper|bronze|brass|stainless steel|steel|pewter|nickel|base metal)\b/);
-      const nonMetalMaterial = listingMaterialText.match(/\b(diamond|gem|gemstone|pearl|ruby|sapphire|emerald|opal|crystal|enamel|cz|cubic zirconia|moissanite|movement|leather|resin)\b/);
+      const nonMetalMaterial = listingMaterialText.match(/\b(diamonds?|gem(?:stone)?s?|pearls?|rub(?:y|ies)|sapphires?|emeralds?|opals?|crystals?|enamel|cz|cubic zirconia|zircon|moissanite|stones?|turquoise|jade(?:ite)?|bead(?:ed|s)?|faux|movement|leather|resin|plastic|glass|wood|rubber|ceramic)\b/);
       if (hasGoldMaterial && hasSilverMaterial) metalPurityRejectionReason = "Rejected: the listing describes both gold and silver.";
       else if (otherMetal) metalPurityRejectionReason = `Rejected: the listing also describes ${otherMetal[1]}.`;
       else if (/\b(?:mixed[ -]?metal|multi[ -]?metal|two[ -]?tone|tri[ -]?(?:color|tone)|bi[ -]?metal)\b/.test(listingMaterialText)) metalPurityRejectionReason = "Rejected: the listing explicitly describes a mixed-metal item.";
       else if (nonMetalMaterial) metalPurityRejectionReason = `Rejected: the stated weight may include ${nonMetalMaterial[1]} or another non-metal material.`;
       else if (/\b(?:plate(?:d)?|filled|overlay|bonded|clad|electroplate(?:d)?|vermeil|gold tone|silver tone)\b/.test(listingMaterialText)) metalPurityRejectionReason = "Rejected: plated, filled, bonded, vermeil, or tone material is not a single-metal pawn candidate.";
+    }
+    const titleWeightMatch = String(item.title || "").toLowerCase()
+      .match(/(?:^|[^\d.])((?:\d+(?:\.\d+)?|\.\d+))\s*(?:g|grams?)\b/);
+    const titleWeightGrams = titleWeightMatch ? Number(titleWeightMatch[1]) : null;
+    const storedMetalWeightGrams = Number(item.metalEstimate?.grossWeightGrams);
+    const metalWeightMismatch = Number.isFinite(titleWeightGrams) && titleWeightGrams > 0
+      && Number.isFinite(storedMetalWeightGrams) && storedMetalWeightGrams > 0
+      && Math.abs(storedMetalWeightGrams - titleWeightGrams) > Math.max(0.01, titleWeightGrams * 0.01);
+    if (!metalPurityRejectionReason && metalWeightMismatch) {
+      metalPurityRejectionReason = `Rejected: the stored ${storedMetalWeightGrams.toFixed(2)} g metal weight does not match the ${titleWeightGrams.toFixed(2)} g source-title weight.`;
     }
     const strictMetalPurityReject = Boolean(metalPurityRejectionReason);
     const hasForecast = forecast.status === "available";
@@ -1080,11 +1105,11 @@
       ? Math.max(0, (Math.max(0, pawnCashEstimate - pawnTestingReserve) / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
       : 0;
     const minimumProfitTarget = Math.max(0, Number(s.minimumProfit) || 0);
-    const pawnSafeNow = hasPawnEstimate && pawnMaxBid > currentBid;
-    const retailSafeNow = resaleDecisionAvailable && resaleMaxBid > currentBid;
+    const pawnSafeNow = currentBidKnown && hasPawnEstimate && pawnMaxBid > currentBid;
+    const retailSafeNow = currentBidKnown && resaleDecisionAvailable && resaleMaxBid > currentBid;
     const onlineSafeNow = retailSafeNow;
-    const pawnLikelyProfitable = hasPawnEstimate && pawnProfitAtCurrentBid > 0;
-    const retailLikelyProfitable = resaleDecisionAvailable && profitAtCurrentBid > 0;
+    const pawnLikelyProfitable = currentBidKnown && hasPawnEstimate && pawnProfitAtCurrentBid > 0;
+    const retailLikelyProfitable = currentBidKnown && resaleDecisionAvailable && profitAtCurrentBid > 0;
     const onlineLikelyProfitable = retailLikelyProfitable;
     const highestEligibleCeiling = strictMetalPurityReject
       ? 0
@@ -1133,17 +1158,17 @@
     const decisionApproved = !strictMetalPurityReject && (pawnSafeNow || retailSafeNow);
     const decisionVerdict = decisionApproved ? "YES" : "NO";
     const hasDecisionInputs = hasPawnEstimate || resaleDecisionAvailable;
-    const decisionProfitAtCurrentBid = strictMetalPurityReject
+    const decisionProfitAtCurrentBid = strictMetalPurityReject || !currentBidKnown
       ? null
       : exitType === "pawn"
       ? pawnProfitAtCurrentBid
       : resaleDecisionAvailable ? profitAtCurrentBid : null;
-    const decisionProfitLow = strictMetalPurityReject
+    const decisionProfitLow = strictMetalPurityReject || !currentBidKnown
       ? null
       : exitType === "pawn"
       ? pawnProfitLow
       : resaleDecisionAvailable ? onlineProfitLowAtCurrentBid : null;
-    const decisionProfitHigh = strictMetalPurityReject
+    const decisionProfitHigh = strictMetalPurityReject || !currentBidKnown
       ? null
       : exitType === "pawn"
       ? pawnProfitHigh
@@ -1246,6 +1271,7 @@
       expectedClose,
       modeledBid,
       currentBid,
+      currentBidKnown,
       forecast,
       hasForecast,
       marketplaceFee,
@@ -1313,6 +1339,7 @@
       pawnProfitHigh,
       hasMetalEstimate,
       metalEvidenceTitleConflict,
+      metalWeightMismatch,
       strictMetalPurityReject,
       metalPurityRejectionReason,
       hasPawnEstimate,
@@ -1498,11 +1525,14 @@
     const rowProfitLabel = a.decisionApproved
       ? (a.exitType === "pawn" ? "Likely pawn profit" : "Likely retail profit")
       : researchRead ? "Internet market read" : "Final decision";
-    const rowDecisionValue = a.decisionApproved
-      ? money(rowProfit)
-      : a.recommendationState === "no-margin" ? `OVER BY ${money(Math.max(0, -a.bidHeadroom))}`
-        : a.recommendationState === "no-demand" ? "DEMAND FAIL"
-          : researchRead ? researchRead.value : "RESEARCH";
+    const rowDecisionValue = !a.currentBidKnown
+      ? "BID UNKNOWN"
+      : a.decisionApproved
+        ? money(rowProfit)
+        : a.recommendationState === "no-margin" && a.maxBid > 0 ? `OVER BY ${money(Math.max(0, -a.bidHeadroom))}`
+          : a.recommendationState === "no-margin" ? "NO TARGET-SAFE BID"
+            : a.recommendationState === "no-demand" ? "DEMAND FAIL"
+              : researchRead ? researchRead.value : "RESEARCH";
     const rowDecisionClass = a.decisionApproved
       ? "positive"
       : researchRead?.tone === "reference" ? "research" : "negative";
@@ -1531,8 +1561,8 @@
           </span>
           <span class="score-mini" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
-        <div class="money-cell"><span>Observed / landed</span><strong>${money(item.currentBid)}</strong><small>${money(a.currentAcquisition)} landed · ${a.hasForecast ? `expected ${money(a.expectedClose)}` : "close unmodeled"} · ${Number(item.bidCount) || 0} bids</small></div>
-        <div class="money-cell"><span>Target-safe / break-even</span><strong>${money(a.maxBid)}</strong><small>${money(a.breakEvenBid)} break-even · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}${a.shippingEstimated ? " · shipping estimated" : ""}</small></div>
+        <div class="money-cell"><span>${a.currentBidKnown ? "Observed" : "Opening price"} / ${a.shippingEstimated ? "est. landed" : "landed"}</span><strong>${money(item.currentBid)}</strong><small>${money(a.currentAcquisition)} ${a.shippingEstimated ? "estimated" : "recorded"} landed · ${a.hasForecast ? `expected ${money(a.expectedClose)}` : "close unmodeled"} · ${Number(item.bidCount) || 0} bids${a.currentBidKnown ? "" : " · live bid not exposed"}</small></div>
+        <div class="money-cell"><span>Target-safe / break-even</span><strong>${a.maxBid > 0 ? money(a.maxBid) : "Not established"}</strong><small>${a.breakEvenBid > 0 ? `${money(a.breakEvenBid)} break-even` : "No evidence-qualified ceiling"}${a.maxBid > 0 ? ` · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}` : ""}${a.shippingEstimated ? " · shipping provisional" : ""}</small></div>
         <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowDecisionClass}">${rowDecisionValue}</strong><small>${escapeHtml(exitSummary)}</small></div>
         <div class="row-actions">
           <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
@@ -2138,7 +2168,9 @@
       .filter(({ item, assessment }) => {
         const haystack = [item.title, item.category, item.resaleVertical, item.authenticationEvidence, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
         const closingWithinFiveMinutes = assessment.hours >= 0 && assessment.hours <= 5 / 60;
-        const matchesMode = queueMode === "closing"
+        const matchesMode = queueMode === "all"
+          ? true
+          : queueMode === "closing"
           ? item.status === "active" && closingWithinFiveMinutes
           : queueMode === "pawn" ? assessment.hasPawnEstimate
             : queueMode === "thin" ? !assessment.decisionApproved && (assessment.pawnLikelyProfitable || assessment.retailLikelyProfitable)
@@ -2258,20 +2290,22 @@ function renderMarketplaceCoverage() {
       const checkedAt = latest || (Number.isFinite(healthCheckedAt) ? healthCheckedAt : null);
       const authorizationRequired = health?.status === "authorization-required" || (!health && !connected);
       const sourceStatusLabel = connected
-        ? "REAL RECORDS CONNECTED"
+        ? health?.coverageComplete === true || health?.status === "connected-complete"
+          ? "REAL RECORDS · COMPLETE LEDGER"
+          : "REAL RECORDS · PARTIAL COVERAGE"
           : authorizationRequired ? "AUTHORIZATION REQUIRED"
           : health?.status === "temporarily-unavailable" ? "PUBLIC COLLECTOR TEMPORARILY UNAVAILABLE"
             : "PUBLIC COLLECTOR READY";
       const footerStatus = connected
-        ? `Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))}`
+        ? `${health?.message ? escapeHtml(health.message) : "Stored records from the latest public check."} Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))}`
         : health?.message ? escapeHtml(health.message)
           : checkedAt ? `Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))} · no current records`
             : "0 ingested · feed not configured";
       return `<article class="marketplace-card ${connected ? "is-connected" : "is-awaiting"}">
         <div class="marketplace-card-head"><span class="marketplace-monogram" aria-hidden="true">${escapeHtml(market.name.split(/\s+/).map((part) => part[0]).join("").slice(0, 3).toUpperCase())}</span><div><strong>${escapeHtml(market.name)}</strong><small>${escapeHtml(sourceStatusLabel)}</small></div></div>
         <p>${escapeHtml(market.focus)}</p>
-        <dl><div><dt>Active</dt><dd>${active.length}</dd></div><div><dt>Bid changes</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest <= 1 / 12 ? "5s" : fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : `${fastest / 60}h`) : "—"}</dd></div></dl>
-        <div class="marketplace-card-footer"><span>${footerStatus}</span><div>${!connected && authorizationRequired && market.key !== "ebay" ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Add authorized feed</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
+        <dl><div><dt>Stored active</dt><dd>${active.length}</dd></div><div><dt>Bid changes</dt><dd>${observations}</dd></div><div><dt>Fastest cadence</dt><dd>${fastest ? (fastest <= 1 / 12 ? "5s" : fastest === 0.5 ? "30s" : fastest < 60 ? `${fastest}m` : fastest === 60 ? "1h" : `${fastest / 60}h`) : "—"}</dd></div></dl>
+        <div class="marketplace-card-footer"><span>${footerStatus}</span><div>${!connected && authorizationRequired && market.setupUrl ? `<a href="${escapeHtml(market.setupUrl)}" target="_blank" rel="noreferrer noopener">Set up access ↗</a>` : ""}${!connected && authorizationRequired && market.key !== "ebay" ? `<button type="button" data-connect-source="${escapeHtml(market.key)}">Add authorized feed</button>` : ""}<a href="${escapeHtml(market.homeUrl)}" target="_blank" rel="noreferrer noopener">Visit site ↗</a></div></div>
       </article>`;
     }).join("");
   }
@@ -2346,7 +2380,9 @@ function renderMarketplaceCoverage() {
   function renderOpportunities() {
     populateCategories();
     populateSources();
-    const queueTitle = queueMode === "closing"
+    const queueTitle = queueMode === "all"
+      ? "All listings, strongest evidence first"
+      : queueMode === "closing"
       ? "Closing within five minutes"
       : queueMode === "pawn" ? "Pawn-first precious metals"
         : queueMode === "thin" ? "Likely positive, but below the safety target"
@@ -2392,7 +2428,7 @@ function renderMarketplaceCoverage() {
   }
 
   function setQueueMode(mode) {
-    if (!["profit", "pawn", "thin", "closing", "research"].includes(mode)) return;
+    if (!["all", "profit", "pawn", "thin", "closing", "research"].includes(mode)) return;
     queueMode = mode;
     selectedId = "";
     visibleQueueLimit = QUEUE_PAGE_SIZE;

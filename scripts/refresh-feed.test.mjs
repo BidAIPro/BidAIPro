@@ -461,6 +461,99 @@ test("source-described gold weight receives a live melt ceiling without becoming
   assert.equal(item.intrinsicValueEvidence, undefined);
 });
 
+test("a leading-decimal gram weight is not inflated by ten times", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "shopgoodwill-decimal-metal-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url) => {
+      if (String(url) === "https://api.gold-api.com/price/XAU") {
+        return new Response(JSON.stringify({ currency: "USD", price: 3100, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://api.gold-api.com/price/XAG") {
+        return new Response(JSON.stringify({ currency: "USD", price: 35, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://buyerapi.shopgoodwill.com/api/ItemDetail/GetItemDetailModelByItemId/272052015") {
+        return new Response(JSON.stringify({
+          itemId: 272052015,
+          title: "Charming 14K Yellow Gold Pendant .8g",
+          currentPrice: 23,
+          numberOfBids: 6,
+          endTime: "2099-08-02T04:08:05",
+          serverTime: "2099-08-01T04:08:05",
+          category: "Jewelry",
+        }), { status: 200 });
+      }
+      throw new Error("Unexpected URL: " + url);
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "false",
+        BIDAI_SHOPGOODWILL_MODE: "items",
+        BIDAI_SHOPGOODWILL_ITEM_IDS: "272052015",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const item = (await readEnvelope(join(fixture.data, "live-snapshots.js"))).items[0];
+  assert.equal(item.metalEstimate.grossWeightGrams, 0.8);
+  assert.ok(item.metalEstimate.meltCeiling > 46 && item.metalEstimate.meltCeiling < 47);
+});
+
+test("faux stones and turquoise cannot create a pawn melt estimate", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const preloadPath = join(fixture.root, "shopgoodwill-stone-metal-fetch.mjs");
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (url) => {
+      if (String(url) === "https://api.gold-api.com/price/XAU") {
+        return new Response(JSON.stringify({ currency: "USD", price: 3100, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://api.gold-api.com/price/XAG") {
+        return new Response(JSON.stringify({ currency: "USD", price: 35, updatedAt: new Date().toISOString() }), { status: 200 });
+      }
+      if (String(url) === "https://buyerapi.shopgoodwill.com/api/ItemDetail/GetItemDetailModelByItemId/272052016") {
+        return new Response(JSON.stringify({
+          itemId: 272052016,
+          title: "Sterling Faux Stones & Turquoise Necklace 133.97 Grams",
+          currentPrice: 127,
+          numberOfBids: 9,
+          endTime: "2099-08-02T04:08:05",
+          serverTime: "2099-08-01T04:08:05",
+          category: "Jewelry",
+        }), { status: 200 });
+      }
+      throw new Error("Unexpected URL: " + url);
+    };
+  `, "utf8");
+
+  const result = await runNode(
+    ["--import", pathToFileURL(preloadPath).href, join(fixture.scripts, "refresh-feed.mjs")],
+    {
+      cwd: fixture.root,
+      env: {
+        ...process.env,
+        BIDAI_SOURCE_AUTHORIZED: "false",
+        BIDAI_SHOPGOODWILL_MODE: "items",
+        BIDAI_SHOPGOODWILL_ITEM_IDS: "272052016",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const item = (await readEnvelope(join(fixture.data, "live-snapshots.js"))).items[0];
+  assert.equal(item.metalEstimate, undefined);
+});
+
 test("mixed, plated, rhodium, gold, silver, and CZ wording cannot create a pawn melt estimate", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));

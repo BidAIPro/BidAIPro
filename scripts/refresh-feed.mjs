@@ -533,7 +533,7 @@ function strictMetalRejectionReason(record) {
   if (/\b(?:mixed[ -]?metal|multi[ -]?metal|two[ -]?tone|tri[ -]?(?:color|tone)|bi[ -]?metal|gold\s*(?:and|&)\s*silver|silver\s*(?:and|&)\s*gold)\b/.test(normalized)) {
     return "The listing explicitly describes a mixed-metal item.";
   }
-  const nonMetal = normalized.match(/\b(diamond|gem|gemstone|pearl|ruby|sapphire|emerald|opal|crystal|enamel|cz|cubic zirconia|moissanite|movement|leather|resin)\b/);
+  const nonMetal = normalized.match(/\b(diamonds?|gem(?:stone)?s?|pearls?|rub(?:y|ies)|sapphires?|emeralds?|opals?|crystals?|enamel|cz|cubic zirconia|zircon|moissanite|stones?|turquoise|jade(?:ite)?|bead(?:ed|s)?|faux|movement|leather|resin|plastic|glass|wood|rubber|ceramic)\b/);
   if (nonMetal) return `The stated weight may include ${nonMetal[1]} or another non-metal material.`;
   return null;
 }
@@ -542,7 +542,9 @@ function metalEstimateFor(record, quotes) {
   const title = text(record?.title);
   const normalized = title.toLowerCase();
   if (strictMetalRejectionReason(record)) return null;
-  const weightMatch = normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:g|grams?)\b/);
+  // The left guard prevents a leading decimal such as ".8g" from being
+  // misread as "8g" when the engine starts a later match after the period.
+  const weightMatch = normalized.match(/(?:^|[^\d.])((?:\d+(?:\.\d+)?|\.\d+))\s*(?:g|grams?)\b/);
   if (!weightMatch) return null;
   const grossWeightGrams = Number(weightMatch[1]);
   if (!(grossWeightGrams > 0) || grossWeightGrams > 100_000) return null;
@@ -2070,6 +2072,12 @@ async function run() {
       if (!wasSupplied && priorState && Object.prototype.hasOwnProperty.call(priorState, field)) {
         merged[field] = priorState[field];
       }
+    }
+    // ShopGoodwill metal evidence is recomputed from the current source title
+    // and fresh spot quotes on every detail refresh. Do not retain a prior
+    // estimate when the current listing fails the strict single-metal gate.
+    if (item.sourceKey === "shopgoodwill" && !Object.prototype.hasOwnProperty.call(item, "metalEstimate")) {
+      delete merged.metalEstimate;
     }
     const immutableForecastSource = duplicate?.observedAt === snapshotItem.observedAt && duplicate?.forecast
       ? duplicate
