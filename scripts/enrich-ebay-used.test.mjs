@@ -97,6 +97,7 @@ test("five matched used listings produce online used price statistics", async (t
       const parsed = new URL(target);
       if (!target.includes("/buy/browse/v1/item_summary/search")) throw new Error("Unexpected URL");
       if (parsed.searchParams.get("filter") !== "conditions:{USED},buyingOptions:{FIXED_PRICE|BEST_OFFER}") throw new Error("Missing used fixed-price filter");
+      if (!parsed.searchParams.get("q").split(" ").includes("5")) throw new Error("Single-digit model token was dropped");
       if (options.headers.authorization !== "Bearer test-token") throw new Error("Missing bearer token");
       return new Response(JSON.stringify(payload), { status: 200 });
     };

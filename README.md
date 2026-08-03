@@ -105,7 +105,11 @@ To populate real active-used averages and medians as the fallback tier, create a
 - `BIDAI_EBAY_CLIENT_ID` — eBay production application client ID;
 - `BIDAI_EBAY_CLIENT_SECRET` — matching eBay production client secret.
 
-The scheduled workflow runs this enrichment on the hourly/manual pass, obtains a short-lived OAuth token at runtime, and stays under the documented default Browse API call budget by processing at most 150 stale targets per run. Target selection is round-robin across footwear, watches, jewelry, hats, collectibles, electronics, and other merchandise so one busy category cannot consume the batch. It stores neither credential nor token in the repository. With no credentials or production approval, the step is a byte-stable no-op and the app continues to show `$0` for unsupported online-resale ceilings.
+The scheduled workflow runs this enrichment on the hourly/manual pass, obtains a short-lived OAuth token at runtime, and stays under the documented default Browse API call budget by processing at most 100 stale targets per run. Each identifiable item uses a concise brand/model query and, only when needed, one fallback query. Target selection is round-robin across footwear, watches, jewelry, hats, collectibles, electronics, and other merchandise so one busy category cannot consume the batch. It stores neither credential nor token in the repository. With no credentials or production approval, the step is a byte-stable no-op and the app labels unsupported items **No independent market price** instead of copying the auction bid into a resale estimate.
+
+### Independent-price rule
+
+The observed auction bid is an acquisition cost, never a resale comparable. BidAI Pro shows a resale number only when it can cite independent evidence: matched completed sales, at least five matched used offers, a multi-merchant retail set, a specialty price guide, verified precious-metal inputs, or the stored public-web research ledger. Every evidence-backed item retains source links, observation time, sample size, range, and the planning reserve applied to that source. If no defensible external match exists, the interface says **Not found yet** and calculates neither profit nor a price-based ceiling.
 
 To add broad retail/used-market coverage and supported collectible price guides, add either or both secrets:
 

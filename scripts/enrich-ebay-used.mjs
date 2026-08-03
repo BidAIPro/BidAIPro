@@ -16,6 +16,16 @@ const STOP_WORDS = new Set([
   "auction", "authentic", "authenticated", "beautiful", "goodwill", "item", "lot", "nice", "preowned", "shopgoodwill", "used",
 ]);
 
+const LISTING_NOISE_WORDS = new Set([
+  "assorted", "bundle", "case", "cable", "charger", "collection", "complete", "estate", "foam", "hard", "includes",
+  "misc", "mixed", "mount", "mounts", "nwt", "open", "parts", "set", "tested", "untested", "usb", "working",
+]);
+
+const GENERIC_PRODUCT_WORDS = new Set([
+  "925", "sterling", "silver", "gold", "platinum", "palladium", "metal", "jewelry", "ring", "necklace", "bracelet",
+  "earring", "earrings", "pendant", "chain", "watch", "watches", "vintage", "women", "womens", "men", "mens", "ladies",
+]);
+
 function cleanText(value, fallback = "") {
   const normalized = String(value ?? "").normalize("NFKC").trim();
   return normalized || fallback;
@@ -46,12 +56,33 @@ function tokens(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
-    .filter((token) => token.length >= 2 && !STOP_WORDS.has(token)))];
+    .filter((token) => (token.length >= 2 || /^\d$/.test(token)) && !STOP_WORDS.has(token)))];
+}
+
+function queryCandidatesFor(item) {
+  const titleTokens = tokens(item?.title);
+  const modelTokens = tokens(item?.modelKey);
+  const conciseTokens = titleTokens.filter((token) => !LISTING_NOISE_WORDS.has(token));
+  const candidates = [
+    modelTokens.slice(0, 9),
+    conciseTokens.slice(0, 8),
+    conciseTokens.slice(0, 6),
+    titleTokens.slice(0, 10),
+  ]
+    .map((parts) => parts.join(" ").slice(0, 100))
+    .filter((query) => query.split(/\s+/).length >= 3);
+  return [...new Set(candidates)].slice(0, 2);
 }
 
 function queryFor(item) {
-  const titleTokens = tokens(item?.title).slice(0, 12);
-  return titleTokens.join(" ").slice(0, 100);
+  return queryCandidatesFor(item)[0] || "";
+}
+
+function hasDistinctIdentity(item) {
+  const titleTokens = tokens(item?.title);
+  const distinctive = titleTokens.filter((token) => !GENERIC_PRODUCT_WORDS.has(token) && !LISTING_NOISE_WORDS.has(token));
+  const modelLike = titleTokens.some((token) => /[a-z]/.test(token) && /\d/.test(token));
+  return modelLike || distinctive.length >= 2;
 }
 
 function matchScore(targetTitle, candidateTitle) {
@@ -116,11 +147,11 @@ function targetPriority(item) {
 }
 
 function selectTargets(items) {
-  const limit = Math.min(500, positiveInteger(process.env.BIDAI_EBAY_USED_BATCH_SIZE, 150));
+  const limit = Math.min(500, positiveInteger(process.env.BIDAI_EBAY_USED_BATCH_SIZE, 100));
   const candidates = items
     .filter((item) => item?.status === "active" && cleanText(item?.title) && !hasFreshAskingMarket(item))
     .filter((item) => !item?.metalEstimate)
-    .filter((item) => queryFor(item).split(" ").length >= 3)
+    .filter((item) => hasDistinctIdentity(item) && queryFor(item).split(" ").length >= 3)
     .sort((left, right) => targetPriority(right) - targetPriority(left));
   const buckets = new Map();
   for (const item of candidates) {
@@ -166,14 +197,14 @@ function shippingTotal(summary) {
   return costs.length ? Math.min(...costs) : 0;
 }
 
-function normalizeListing(summary, target) {
+function normalizeListing(summary, target, matchTitle = target?.title) {
   const condition = cleanText(summary?.condition);
   const currency = cleanText(summary?.price?.currency, "USD").toUpperCase();
   const price = money(summary?.price?.value);
   const url = httpUrl(summary?.itemWebUrl || summary?.itemHref);
   const externalId = cleanText(summary?.itemId || summary?.legacyItemId).slice(0, 200);
   const title = cleanText(summary?.title).slice(0, 500);
-  const score = matchScore(target.title, title);
+  const score = matchScore(matchTitle, title);
   if (currency !== "USD" || !price || !url || !externalId || !/used|pre-owned|preowned/i.test(condition) || score < 65) return null;
   const shipping = shippingTotal(summary);
   return {
@@ -191,31 +222,37 @@ function normalizeListing(summary, target) {
 }
 
 async function searchUsedListings(target, accessToken, marketplaceId) {
-  const query = queryFor(target);
-  const url = new URL(SEARCH_URL);
-  url.searchParams.set("q", query);
-  url.searchParams.set("filter", "conditions:{USED},buyingOptions:{FIXED_PRICE|BEST_OFFER}");
-  url.searchParams.set("limit", String(MAX_LISTINGS));
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "x-ebay-c-marketplace-id": marketplaceId,
-      "accept-language": "en-US",
-    },
-  });
-  if (!response.ok) {
-    const error = new Error(`eBay Browse search failed with HTTP ${response.status}.`);
-    error.status = response.status;
-    throw error;
-  }
-  const payload = await response.json();
+  const queries = queryCandidatesFor(target);
   const unique = new Map();
-  for (const summary of Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : []) {
-    const listing = normalizeListing(summary, target);
-    if (listing && !unique.has(listing.externalId)) unique.set(listing.externalId, listing);
+  const queriesTried = [];
+  for (const query of queries) {
+    queriesTried.push(query);
+    const url = new URL(SEARCH_URL);
+    url.searchParams.set("q", query);
+    url.searchParams.set("filter", "conditions:{USED},buyingOptions:{FIXED_PRICE|BEST_OFFER}");
+    url.searchParams.set("limit", String(MAX_LISTINGS));
+    const response = await fetch(url, {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "x-ebay-c-marketplace-id": marketplaceId,
+        "accept-language": "en-US",
+      },
+    });
+    if (!response.ok) {
+      const error = new Error(`eBay Browse search failed with HTTP ${response.status}.`);
+      error.status = response.status;
+      throw error;
+    }
+    const payload = await response.json();
+    for (const summary of Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : []) {
+      const listing = normalizeListing(summary, target, query);
+      if (listing && !unique.has(listing.externalId)) unique.set(listing.externalId, listing);
+    }
+    if (unique.size >= 5) break;
   }
   const listings = [...unique.values()].slice(0, MAX_LISTINGS);
   const asOf = new Date().toISOString();
+  const query = queriesTried.at(-1) || queryFor(target);
   if (listings.length < 5) {
     return {
       askingMarket: {
@@ -224,6 +261,7 @@ async function searchUsedListings(target, accessToken, marketplaceId) {
         currency: "USD",
         asOf,
         query,
+        queriesTried,
         usedOnly: true,
         sampleSize: listings.length,
         reason: "Fewer than five sufficiently matched used listings",
@@ -240,6 +278,7 @@ async function searchUsedListings(target, accessToken, marketplaceId) {
       currency: "USD",
       asOf,
       query,
+      queriesTried,
       usedOnly: true,
       sampleSize: listings.length,
       priceLow: quantile(totals, 0.2),

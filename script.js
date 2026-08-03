@@ -1087,48 +1087,38 @@
       && resaleLow <= resaleMedian
       && resaleHigh >= resaleMedian
       && resaleEvidenceKind !== "none";
-    // Every live auction record has a real online price: at minimum, its
-    // observed source-market price. Keep that value visible as a low-confidence
-    // market floor when stronger resale evidence has not arrived yet. This is
-    // deliberately separate from the bid-safe decision gate below; showing the
-    // best available price must never silently turn a source auction bid into a
-    // claimed completed resale comparable.
-    const sourcePriceCandidates = [
-      currentBid,
-      Number(item.openingPrice),
-      Number(item.startingPrice),
-      Number(item.buyNowPrice),
-      Number(forecast.sourceEstimate),
-    ].filter((value) => Number.isFinite(value) && value > 0);
-    const sourceAuctionLow = sourcePriceCandidates.length ? Math.min(...sourcePriceCandidates) : 0;
-    const sourceAuctionMedian = sourcePriceCandidates.length ? quantile(sourcePriceCandidates, 0.5) : 0;
-    const sourceAuctionHigh = sourcePriceCandidates.length ? Math.max(...sourcePriceCandidates) : 0;
+    // Acquisition-market bids are never resale evidence. A missing independent
+    // market match must remain missing; copying the current bid into a resale
+    // field creates circular estimates and makes unrelated items look similarly
+    // priced. Only completed sales, matched external offers, specialty guides,
+    // verified metal value, or the auditable public-web ledger can populate the
+    // price estimate below.
     const bestPriceKind = hasResaleEvidence
       ? resaleEvidenceKind
       : hasResearchEstimate ? "web-research"
-        : "source-auction-floor";
+        : "unpriced";
     const bestPriceLow = hasResaleEvidence
       ? Number(rawMarketLow)
-      : hasResearchEstimate ? Number(researchRawLow) : sourceAuctionLow;
+      : hasResearchEstimate ? Number(researchRawLow) : null;
     const bestPriceMedian = hasResaleEvidence
       ? Number(rawMarketMedian)
-      : hasResearchEstimate ? Number(researchRawMedian) : sourceAuctionMedian;
+      : hasResearchEstimate ? Number(researchRawMedian) : null;
     const bestPriceAverage = hasResaleEvidence
       ? Number(rawMarketAverage ?? rawMarketMedian)
-      : hasResearchEstimate ? Number(researchRawAverage ?? researchRawMedian) : sourceAuctionMedian;
+      : hasResearchEstimate ? Number(researchRawAverage ?? researchRawMedian) : null;
     const bestPriceHigh = hasResaleEvidence
       ? Number(rawMarketHigh)
-      : hasResearchEstimate ? Number(researchRawHigh) : sourceAuctionHigh;
-    const hasPriceEstimate = bestPriceMedian > 0;
+      : hasResearchEstimate ? Number(researchRawHigh) : null;
+    const hasPriceEstimate = Number(bestPriceMedian) > 0;
     const bestPriceSampleSize = hasResaleEvidence
       ? (resaleEvidenceKind === "completed" ? resaleEvidenceCount
         : resaleEvidenceKind === "analog-completed" ? analogEvidenceCount
           : resaleEvidenceKind === "specialty-guide" ? 1
             : resaleEvidenceKind === "used-market" ? uniqueUsedListings.length : retailNewOffers.length)
-      : hasResearchEstimate ? researchSampleSize : sourcePriceCandidates.length;
+      : hasResearchEstimate ? researchSampleSize : 0;
     const bestPricePlanningFactor = hasResaleEvidence
       ? evidencePlanningFactor
-      : hasResearchEstimate ? researchPlanningFactor : 0.3;
+      : hasResearchEstimate ? researchPlanningFactor : 0;
     const bestPricePlanningValue = hasPriceEstimate ? bestPriceMedian * bestPricePlanningFactor : 0;
     const bestPriceEstimatedNet = hasPriceEstimate ? netResale(bestPriceMedian) : null;
     const bestPriceConservativeNet = hasPriceEstimate ? netResale(bestPricePlanningValue) : null;
@@ -1149,12 +1139,22 @@
       : 0;
     const bestPriceLabel = hasResaleEvidence
       ? "Evidence-qualified resale price"
-      : hasResearchEstimate ? "Public-web resale estimate" : "Live online-auction price floor";
+      : hasResearchEstimate ? "Public-web resale estimate" : "No independent market price";
     const bestPriceBasis = hasResaleEvidence
       ? `${resaleEvidenceKind} market evidence`
       : hasResearchEstimate
         ? `${researchSoldCount} sold and ${researchAskingCount} asking/retail public-web observations`
-        : "current or source-stated online auction price; resale value is not independently validated";
+        : "awaiting a matched external sale, offer, specialty guide, or verified metal value; the auction bid is excluded";
+    const pricingChecks = [item.resaleMarket, item.askingMarket, item.retailMarket, item.specialtyMarket, item.researchMarket]
+      .filter((value) => value && typeof value === "object");
+    const pricingCheckTimes = pricingChecks
+      .map((value) => Date.parse(value.asOf || value.researchedAt || value.checkedAt || ""))
+      .filter(Number.isFinite);
+    const pricingLastCheckedAt = pricingCheckTimes.length
+      ? new Date(Math.max(...pricingCheckTimes)).toISOString()
+      : null;
+    const pricingAttempted = pricingChecks.some((value) => ["available", "insufficient", "unavailable", "error", "reference-only"].includes(String(value.status || "").toLowerCase()));
+    const pricingStatus = hasPriceEstimate ? "priced" : pricingAttempted ? "no-match" : "queued";
     const demandLookbackDays = 90;
     const demandAsOf = Math.min(Date.now(), evidenceCutoff);
     const selectedCompletedEvidence = resaleEvidenceKind === "analog-completed" ? uniqueAnalogEvidence : uniqueResaleEvidence;
@@ -1503,6 +1503,9 @@
       bestPriceBreakEvenBid,
       bestPriceLabel,
       bestPriceBasis,
+      pricingStatus,
+      pricingAttempted,
+      pricingLastCheckedAt,
       hasResearchEstimate,
       researchRawLow,
       researchRawMedian,
@@ -1674,8 +1677,9 @@
     };
   }
 
-  function signalLabel(signal) {
-    return { candidate: "Candidate", watch: "Watch", research: "Priced · verify", avoid: "Avoid" }[signal] || "Priced · verify";
+  function signalLabel(signal, assessment = null) {
+    if (signal === "research") return assessment?.hasPriceEstimate ? "Priced · verify" : "Pricing queued";
+    return { candidate: "Candidate", watch: "Watch", avoid: "Avoid" }[signal] || "Pricing queued";
   }
 
   function recommendationLabel(state) {
@@ -1685,7 +1689,7 @@
       "retail-safe": "YES · Retail profit",
       "no-demand": "NO · Demand unproven",
       "no-margin": "NO · Margin too low",
-      "no-evidence": "NO · Price proxy only",
+      "no-evidence": "NO · No market price",
     }[state] || "NO · Do not bid";
   }
 
@@ -1742,10 +1746,12 @@
               ? '<span class="status-pill asking-exit">ONLINE · RETAIL PROXY</span>'
               : a.hasResearchEstimate
                 ? '<span class="status-pill asking-exit">WEB PRICE ESTIMATE</span>'
-                : '<span class="status-pill asking-exit">AUCTION PRICE FLOOR</span>';
+                : '<span class="status-pill asking-exit">MARKET PRICE QUEUED</span>';
     const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(recommendationLabel(a.recommendationState))}</span>`;
     const researchRead = publicResearch ? publicResearchMarketRead(publicResearch, a.currentAcquisition) : null;
     const rowProfit = a.decisionProfitAtCurrentBid;
+    const rowAvailableProfit = a.decisionProfitAtCurrentBid
+      ?? (a.exitType === "pawn" ? a.pawnProfitAtCurrentBid : a.bestPriceProfitAtCurrentBid);
     const rowProfitLabel = a.decisionApproved
       ? (a.exitType === "pawn" ? "Likely pawn profit" : "Likely retail profit")
       : "Estimated profit now";
@@ -1754,7 +1760,7 @@
       : a.decisionApproved
         ? money(rowProfit)
         : a.recommendationState === "no-margin" && a.maxBid > 0 ? `OVER BY ${money(Math.max(0, -a.bidHeadroom))}`
-          : `EST. ${money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid)}`;
+          : Number.isFinite(rowAvailableProfit) ? `EST. ${money(rowAvailableProfit)}` : "NO PRICE YET";
     const rowDecisionClass = a.decisionApproved
       ? "positive"
       : researchRead?.tone === "reference" ? "research" : "negative";
@@ -1770,7 +1776,7 @@
               ? `${money(a.rawMarketMedian)} new-retail median · ${Math.round(a.retailReplacementHaircut * 100)}% resale haircut`
               : a.hasResearchEstimate
                 ? `${money(a.researchRawMedian)} researched median (${money(a.researchRawLow)}–${money(a.researchRawHigh)}) · ${a.researchSoldCount} sold + ${a.researchAskingCount} asking/retail · provisional, not bid-safe`
-                : `${money(a.bestPriceMedian)} live online-auction floor (${money(a.bestPriceLow)}–${money(a.bestPriceHigh)}) · resale match pending · not bid-safe`;
+                : `No independent resale price yet · ${a.pricingStatus === "no-match" ? `last search found no defensible match${a.pricingLastCheckedAt ? ` ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}` : ""}` : "queued for external market research"} · auction bid excluded`;
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open the profitability analysis${sourceUrl ? `; use the source link to visit ${escapeHtml(marketplace.name)}` : "; source listing URL unavailable"}">
         <div class="item-cell">
@@ -1779,12 +1785,12 @@
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal, a)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
         <div class="money-cell"><span>${a.currentBidKnown ? "Observed" : "Opening price"} / ${a.shippingEstimated ? "est. landed" : "landed"}</span><strong>${money(item.currentBid)}</strong><small>${money(a.currentAcquisition)} ${a.shippingEstimated ? "estimated" : "recorded"} landed · ${a.hasForecast ? `expected ${money(a.expectedClose)}` : "close unmodeled"} · ${Number(item.bidCount) || 0} bids${a.currentBidKnown ? "" : " · live bid not exposed"}</small></div>
-        <div class="money-cell"><span>Safe / price-based limit</span><strong>${a.maxBid > 0 ? money(a.maxBid) : `${money(a.bestPriceProvisionalMaxBid)} provisional`}</strong><small>${a.maxBid > 0 ? `${a.breakEvenBid > 0 ? `${money(a.breakEvenBid)} break-even` : "No evidence-qualified break-even"} · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}` : `${money(a.bestPriceBreakEvenBid)} estimated break-even · ${escapeHtml(a.bestPriceLabel.toLowerCase())} only`}${a.shippingEstimated ? " · shipping provisional" : ""}</small></div>
+        <div class="money-cell"><span>Safe / price-based limit</span><strong>${a.maxBid > 0 ? money(a.maxBid) : a.hasPriceEstimate ? `${money(a.bestPriceProvisionalMaxBid)} provisional` : "Not established"}</strong><small>${a.maxBid > 0 ? `${a.breakEvenBid > 0 ? `${money(a.breakEvenBid)} break-even` : "No evidence-qualified break-even"} · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}` : a.hasPriceEstimate ? `${money(a.bestPriceBreakEvenBid)} estimated break-even · ${escapeHtml(a.bestPriceLabel.toLowerCase())} only` : "Waiting for an independent external market price"}${a.shippingEstimated ? " · shipping provisional" : ""}</small></div>
         <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowDecisionClass}">${rowDecisionValue}</strong><small>${escapeHtml(exitSummary)}</small></div>
         <div class="row-actions">
           <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
@@ -2005,7 +2011,8 @@
     const snapshotPlan = snapshotPlanFor(item);
     const acquisitionComparables = a.forecast.comparables || [];
     const resaleComparables = resaleComparablesFor(item);
-    const displayedProfit = a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid;
+    const displayedProfit = a.decisionProfitAtCurrentBid
+      ?? (a.exitType === "pawn" ? a.pawnProfitAtCurrentBid : a.bestPriceProfitAtCurrentBid);
     const displayedAcquisition = a.currentAcquisition;
     const displayedExitValue = a.exitType === "pawn" ? a.pawnCashEstimate : a.bestPriceMedian;
     const displayedExitCosts = a.exitType === "pawn"
@@ -2033,6 +2040,12 @@
     const marketOfferLinks = (Array.isArray(item.retailMarket?.offers) ? item.retailMarket.offers : [])
       .filter((entry) => safeHttpUrl(entry?.url) && Number(entry?.matchScore) >= 65)
       .slice(0, 8);
+    const pricingSearchQuery = encodeURIComponent(String(item.modelKey || item.title || "").trim());
+    const pricingSearchLinks = [
+      { label: "eBay completed listings", url: `https://www.ebay.com/sch/i.html?_nkw=${pricingSearchQuery}&LH_Complete=1&LH_Sold=1` },
+      { label: "eBay used listings", url: `https://www.ebay.com/sch/i.html?_nkw=${pricingSearchQuery}&LH_ItemCondition=3000` },
+      { label: "Google Shopping", url: `https://www.google.com/search?tbm=shop&q=${pricingSearchQuery}` },
+    ];
     const specialtySourceUrl = a.hasSpecialtyEvidence ? safeHttpUrl(item.specialtyMarket?.sourceUrl) : "";
     const pawnRouteLabel = a.strictMetalPurityReject
       ? "FAIL · Mixed metal/material rejected"
@@ -2041,7 +2054,7 @@
       : a.pawnSafeNow ? "PASS · Pawn profit clears target"
         : "FAIL · Pawn profit does not clear target";
     const onlineRouteLabel = !a.hasResaleEvidence
-      ? a.hasResearchEstimate ? "REFERENCE · Web price estimate only" : "REFERENCE · Live auction price floor"
+      ? a.hasResearchEstimate ? "REFERENCE · Web price estimate only" : "PENDING · Independent market price"
       : !a.retailDemandPass
         ? "FAIL · Price found, but demand is unproven"
         : a.retailSafeNow ? "PASS · Retail profit clears target"
@@ -2059,7 +2072,7 @@
             ? `NO. At the observed bid, every evidence-qualified route misses the configured profit target. The most you should have paid is ${money(a.maxBid)}.`
             : a.hasResearchEstimate
               ? `NO safe bid yet. Internet research suggests a ${money(a.researchRawMedian)} resale midpoint (${money(a.researchRawLow)}–${money(a.researchRawHigh)} observed), with an estimated ${money(a.researchProfitAtCurrentBid)} profit after the configured costs at the current bid. This is a best guess, not a safe ceiling, because exact-item price and demand evidence remain incomplete.`
-              : `NO safe bid yet. The best available price is ${money(a.bestPriceMedian)} (${money(a.bestPriceLow)}–${money(a.bestPriceHigh)}), producing an estimated ${money(a.bestPriceProfitAtCurrentBid)} after configured costs. That value is a live online-auction floor, not a verified resale match, so it cannot create a safe ceiling by itself.`;
+              : `NO safe bid yet. No independent resale price has been found. The observed auction bid is an acquisition cost and is deliberately excluded from resale valuation. ${a.pricingStatus === "no-match" ? "The latest external search did not produce a defensible match." : "This item is queued for external market-price research."}`;
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
       ? item.evidence
@@ -2079,7 +2092,7 @@
     const routeName = a.exitType === "pawn"
       ? "Pawn shop / precious-metal buyer"
       : a.exitType === "online-resale" ? a.retailChannel
-        : a.hasResearchEstimate ? "Online resale · web estimate" : "Online resale · auction price proxy";
+        : a.hasResearchEstimate ? "Online resale · web estimate" : "Online resale · price research pending";
     const coverageChecks = [
       { label: "Source listing", pass: Boolean(sourceUrl), detail: sourceUrl ? `${marketplace.name} link available` : "Canonical listing link missing" },
       { label: "Identity", pass: Boolean(item.modelKey || item.identifiedAs), detail: item.identifiedAs || item.modelKey || "Exact identity not supplied" },
@@ -2087,7 +2100,7 @@
       { label: "Inbound shipping", pass: a.shippingKnown, detail: a.shippingKnown ? `${money(a.shipping)} recorded` : `${money(a.shipping)} assumption only` },
       { label: "Close forecast", pass: a.hasForecast, detail: a.hasForecast ? `${a.forecast.exactModelCount} exact-model outcomes` : `${a.forecast.exactModelCount}/5 required outcomes` },
       { label: "Pawn valuation", pass: a.hasPawnEstimate, detail: a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled cash` : a.metalEvidenceTitleConflict ? "Rejected: plated or non-solid metal wording" : "No verified metal valuation" },
-      { label: "Retail pricing", pass: a.hasPriceEstimate, detail: `${money(a.bestPriceMedian)} · ${a.bestPriceLabel}; ${a.hasResaleEvidence ? a.resaleEvidenceType : "not bid-safe"}` },
+      { label: "Retail pricing", pass: a.hasPriceEstimate, detail: a.hasPriceEstimate ? `${money(a.bestPriceMedian)} · ${a.bestPriceLabel}; ${a.hasResaleEvidence ? a.resaleEvidenceType : "not bid-safe"}` : `${a.bestPriceLabel}; auction bid excluded` },
       { label: "Retail demand", pass: a.retailDemandPass, detail: a.hasRetailDemandEvidence ? `${a.retailDemandScore}/100 · ${a.retailDemandEvidenceType}` : "No sell-through or sales-volume proof" },
       { label: "Internet research", pass: Boolean(publicResearch), detail: publicResearch ? `${publicResearch.results.length} public results reviewed; reference-only until evidence gates pass` : "No public web research stored yet" },
     ];
@@ -2103,7 +2116,7 @@
     else if (!a.hasPawnEstimate) missingIntelligence.push("Pawn value is withheld because fresh precious-metal spot, purity, and weight evidence is incomplete or inapplicable.");
     if (!a.hasResaleEvidence) missingIntelligence.push(publicResearch
       ? `Internet research reviewed ${publicResearch.results.length} result${publicResearch.results.length === 1 ? "" : "s"} and produced a provisional ${money(a.bestPriceMedian)} market estimate, but it is not strong enough to become a safe ceiling without better identity, condition, and demand evidence.`
-      : `${money(a.bestPriceMedian)} is displayed from the live online-auction record; a closely matched resale price is still needed before that number can support a bid ceiling.`);
+      : `No independent market price has been found; the live auction bid is excluded from resale valuation. A closely matched external sale, offer set, guide, or verified metal value is still required.`);
     if (a.hasResaleEvidence && !a.retailDemandPass) missingIntelligence.push(`Retail demand does not clear the required ${a.minimumRetailDemandScore.toFixed(0)}/100 threshold.`);
     if (["is-stale", "is-invalid", "is-unknown"].includes(freshness.className)) missingIntelligence.push(`The auction was last checked ${freshness.short}; refresh it before relying on the observed bid.`);
     const dueDiligence = [
@@ -2112,7 +2125,7 @@
       item.authenticationStatus === "source-stated" ? "Treat the seller's authentication wording as a claim only; verify the named authenticator and certificate independently." : "Do not pay an authenticity premium without independent authentication evidence.",
       a.hasMetalEstimate ? "Have purity and recoverable weight tested on calibrated equipment; stones, movement, band, and non-metal parts can reduce payable metal." : "Do not assume a pawn shop will buy this item or assign it a cash value without a category-specific quote.",
       a.hasPawnEstimate ? "Call at least two local precious-metal buyers or pawn shops for their current payout percentage before the auction closes." : "If pursuing a local cash exit, obtain a written or same-day buyer indication before bidding.",
-      a.hasResaleEvidence ? `Recheck the newest matched evidence on ${a.retailChannel}; compare the same condition, completeness, and model variant.` : a.hasResearchEstimate ? `Open every cited result in the internet research ledger and verify that its brand, condition, size, and sold/asking state are truly comparable before relying on the ${money(a.researchRawMedian)} estimate.` : `Treat the ${money(a.bestPriceMedian)} auction-floor estimate as a price reference only until a closely matched sold or retail record is connected.`,
+      a.hasResaleEvidence ? `Recheck the newest matched evidence on ${a.retailChannel}; compare the same condition, completeness, and model variant.` : a.hasResearchEstimate ? `Open every cited result in the internet research ledger and verify that its brand, condition, size, and sold/asking state are truly comparable before relying on the ${money(a.researchRawMedian)} estimate.` : "Do not infer resale value from the auction bid; wait for the external pricing collector to attach a closely matched sold record, offer set, or specialty guide.",
       a.retailDemandPass ? `Plan for the measured demand case: ${a.retailDemandEvidenceType}.` : "Do not treat active listings, reviews, watchers, or auction bids as proof that a used unit will sell.",
       "Recalculate taxes, buyer premium, selling fee, outbound shipping, repair/testing, and return/loss reserve for your actual accounts.",
     ];
@@ -2136,7 +2149,7 @@
           <div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.externalId)} · ${escapeHtml(item.category)} · ${escapeHtml(item.resaleVertical || "Other")}</p><small>Evidence-weighted profit ranking score: ${a.rankingScore}/100 · research coverage: ${a.researchCoverageScore}/100</small></div>
           <span class="score-ring" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal, true)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
-        <div class="detail-signal"><span class="signal-pill ${a.signal}">${signalLabel(a.signal)}</span><span>${escapeHtml(item.identifiedAs || "Identity requires verification")}</span><span>${escapeHtml(routeName)}</span><span class="snapshot-freshness ${freshness.className}">${escapeHtml(freshness.label)} · ${escapeHtml(freshness.short)}</span></div>
+        <div class="detail-signal"><span class="signal-pill ${a.signal}">${signalLabel(a.signal, a)}</span><span>${escapeHtml(item.identifiedAs || "Identity requires verification")}</span><span>${escapeHtml(routeName)}</span><span class="snapshot-freshness ${freshness.className}">${escapeHtml(freshness.label)} · ${escapeHtml(freshness.short)}</span></div>
       </div>
       <div class="detail-body">
         <section class="exit-decision-panel ${recommendationClass(a.recommendationState)}">
@@ -2161,15 +2174,15 @@
               <div class="exit-route-title"><span>2</span><div><small>GATE TWO</small><strong>Retail resale · price + demand</strong></div></div>
               <div class="exit-route-state ${a.onlineSafeNow ? "is-safe" : "is-thin"}">${escapeHtml(onlineRouteLabel)}</div>
               <dl>
-                <div><dt>${a.hasResaleEvidence ? "Likely sale price" : "Best price estimate"}</dt><dd>${money(a.bestPriceMedian)}</dd></div>
-                <div><dt>Estimated profit now</dt><dd>${money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid)}</dd></div>
-                <div><dt>Price source</dt><dd>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : marketplace.name)}</dd></div>
+                <div><dt>${a.hasResaleEvidence ? "Likely sale price" : "Best price estimate"}</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
+                <div><dt>Estimated profit now</dt><dd>${Number.isFinite(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) ? money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
+                <div><dt>Price source</dt><dd>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : "External research pending")}</dd></div>
                 <div><dt>Demand gate</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `FAIL · ${a.retailDemandScore}/100`}</dd></div>
                 <div><dt>Target-safe bid</dt><dd>${money(a.resaleMaxBid)}</dd></div>
-                ${!a.hasResaleEvidence ? `<div><dt>Price-based max</dt><dd>${money(a.bestPriceProvisionalMaxBid)}</dd></div>` : ""}
-                <div><dt>${a.hasResaleEvidence ? "Modeled break-even" : "Estimated break-even"}</dt><dd>${money(a.hasResaleEvidence ? a.resaleBreakEvenBid : a.bestPriceBreakEvenBid)}</dd></div>
+                ${!a.hasResaleEvidence ? `<div><dt>Price-based max</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceProvisionalMaxBid) : "Not established"}</dd></div>` : ""}
+                <div><dt>${a.hasResaleEvidence ? "Modeled break-even" : "Estimated break-even"}</dt><dd>${a.hasPriceEstimate ? money(a.hasResaleEvidence ? a.resaleBreakEvenBid : a.bestPriceBreakEvenBid) : "Not established"}</dd></div>
               </dl>
-              <small class="exit-route-foot">${a.hasResaleEvidence ? `Price proof: ${escapeHtml(a.resaleEvidenceType)}. Demand proof: ${escapeHtml(a.retailDemandEvidenceType)}. Required demand score: ${a.minimumRetailDemandScore.toFixed(0)}/100.` : `${escapeHtml(a.bestPriceLabel)} range ${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} from ${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"}. The estimate uses the ${money(a.bestPriceMedian)} midpoint and a ${Math.round((1 - a.bestPricePlanningFactor) * 100)}% uncertainty reserve. It is not a safe ceiling.`}</small>
+              <small class="exit-route-foot">${a.hasResaleEvidence ? `Price proof: ${escapeHtml(a.resaleEvidenceType)}. Demand proof: ${escapeHtml(a.retailDemandEvidenceType)}. Required demand score: ${a.minimumRetailDemandScore.toFixed(0)}/100.` : a.hasPriceEstimate ? `${escapeHtml(a.bestPriceLabel)} range ${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} from ${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"}. The estimate uses the ${money(a.bestPriceMedian)} midpoint and a ${Math.round((1 - a.bestPricePlanningFactor) * 100)}% uncertainty reserve. It is not a safe ceiling.` : `No price is shown until an independent external source returns a defensible match. ${a.pricingLastCheckedAt ? `Last checked ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "Research is queued."}`}</small>
             </article>
           </div>
         </section>
@@ -2180,9 +2193,9 @@
           <article class="${a.decisionApproved ? "is-positive" : "is-negative"}"><span>Final answer</span><strong>${escapeHtml(a.decisionVerdict)}</strong><small>${escapeHtml(recommendationLabel(a.recommendationState))}</small></article>
           <article><span>Highest safe bid</span><strong>${money(a.maxBid)}</strong><small>${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} remaining headroom` : `${money(Math.abs(a.bidHeadroom))} above the ceiling`}</small></article>
           <article><span>Likely pawn cash</span><strong>${a.hasPawnEstimate ? money(a.pawnCashEstimate) : "Unavailable"}</strong><small>${a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled range` : "verified metal inputs required"}</small></article>
-          <article><span>Best online price</span><strong>${money(a.bestPriceMedian)} est.</strong><small>${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}</small></article>
+          <article><span>Best online price</span><strong>${a.hasPriceEstimate ? `${money(a.bestPriceMedian)} est.` : "Not found yet"}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}` : "independent market research pending · auction bid excluded"}</small></article>
           <article><span>Retail popularity</span><strong>${escapeHtml(popularityLabel)}</strong><small>${a.hasRetailDemandEvidence ? `${a.retailDemandScore}/100 · ${escapeHtml(a.retailDemandEvidenceType)}` : "no demand proof"}</small></article>
-          <article><span>Estimated profit now</span><strong class="${(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) >= 0 ? "positive" : "negative"}">${money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid)} est.</strong><small>${a.decisionProfitAtCurrentBid !== null ? (a.roi === null ? "ROI unavailable" : `${percent(a.roi)} modeled ROI on landed cost`) : `${escapeHtml(a.bestPriceLabel.toLowerCase())} · not bid-safe`}</small></article>
+          <article><span>Estimated profit now</span><strong class="${Number.isFinite(displayedProfit) && displayedProfit >= 0 ? "positive" : "negative"}">${Number.isFinite(displayedProfit) ? `${money(displayedProfit)} est.` : "Unavailable"}</strong><small>${a.decisionProfitAtCurrentBid !== null ? (a.roi === null ? "ROI unavailable" : `${percent(a.roi)} modeled ROI on landed cost`) : a.exitType === "pawn" && a.hasPawnEstimate ? "pawn cash less landed cost and testing reserve" : a.hasPriceEstimate ? `${escapeHtml(a.bestPriceLabel.toLowerCase())} · not bid-safe` : "requires independent resale price"}</small></article>
           <article><span>Likely time to sell</span><strong>${a.medianDaysToSell === null ? "Not measured" : `${a.medianDaysToSell.toFixed(1)} days`}</strong><small>${a.hasLiquidityEvidence ? `${percent(a.sellThroughRate)} sell-through` : "completed-sale velocity required"}</small></article>
         </section>
         <div class="dossier-columns">
@@ -2211,7 +2224,7 @@
         <div class="bid-metrics">
           <div class="bid-metric"><span>${item.status === "ended" ? "Final recorded bid" : "Observed bid"}</span><strong>${money(item.status === "ended" && item.finalPrice ? item.finalPrice : item.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids · ${timeLabel(item)} · ${escapeHtml(freshness.short)}</small></div>
           <div class="bid-metric"><span>Expected close</span><strong>${a.hasForecast ? money(a.expectedClose) : "Insufficient history"}</strong><small>${a.hasForecast ? `${money(a.forecast.low)}–${money(a.forecast.high)}` : `${a.forecast.exactModelCount}/5 exact-model outcomes`}</small></div>
-          <div class="bid-metric primary"><span>Target-safe ceiling</span><strong>${money(a.maxBid)}</strong><small>${a.maxBid <= 0 ? `Separate price-based max ${money(a.bestPriceProvisionalMaxBid)} · estimated break-even ${money(a.bestPriceBreakEvenBid)} · ` : `Modeled break-even ${money(a.breakEvenBid)} · `}${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? ` · includes ${money(a.shipping)} estimated inbound shipping` : ""}</small></div>
+          <div class="bid-metric primary"><span>Target-safe ceiling</span><strong>${a.maxBid > 0 ? money(a.maxBid) : "Not established"}</strong><small>${a.maxBid <= 0 ? a.hasPriceEstimate ? `Separate price-based max ${money(a.bestPriceProvisionalMaxBid)} · estimated break-even ${money(a.bestPriceBreakEvenBid)} · ` : "No independent market price · " : `Modeled break-even ${money(a.breakEvenBid)} · `}${escapeHtml(a.safeCeilingBasis)}${a.shippingEstimated ? ` · includes ${money(a.shipping)} estimated inbound shipping` : ""}</small></div>
         </div>
         <section class="forecast-basis-panel ${a.hasForecast ? "is-available" : "is-insufficient"}">
           <div class="forecast-basis-head"><div><span>FORECAST BASIS</span><h4>${a.hasForecast ? escapeHtml(a.forecast.method) : "Insufficient similar completed auctions"}</h4></div><strong>${a.hasForecast ? `${Math.round(a.forecast.confidence * 100)}% model confidence` : "Not ranked"}</strong></div>
@@ -2244,12 +2257,12 @@
             </div>` : a.hasRetailDemandEvidence
               ? `<div class="cost-risk-grid"><div><span>Demand proof</span><strong>${escapeHtml(a.retailDemandEvidenceType)}</strong></div><div><span>Demand gate</span><strong>${a.retailDemandPass ? "PASS" : "FAIL"} · ${a.retailDemandScore}/100</strong><small>minimum required ${a.minimumRetailDemandScore.toFixed(0)}/100</small></div><div><span>Modeled sale likelihood</span><strong>${a.retailDemandPass ? percent(a.onlineSaleLikelihood) : "Not approved"}</strong><small>planning signal, not a guarantee</small></div><div><span>Suggested channel</span><strong>${escapeHtml(a.retailChannel)}</strong></div></div>`
               : `<div class="no-history-state"><strong>Price found; retail demand unproven</strong><p>${a.productInterestKnown ? `${a.productReviewCountMax.toLocaleString()} product reviews show interest, but reviews do not prove resale sell-through. ` : ""}Active offers and auction bids do not show that comparable used items actually sell. Retail receives a $0 ceiling until completed-sale frequency, sell-through, or annual unit volume is available.</p></div>`}
-          ` : `<div class="profit-scenarios price-proxy-scenarios">
+          ` : a.hasPriceEstimate ? `<div class="profit-scenarios price-proxy-scenarios">
             <div class="downside"><span>Best available low</span><strong>${money(a.bestPriceLow)}</strong><small>${escapeHtml(a.bestPriceLabel)}</small></div>
             <div class="base"><span>Best price estimate</span><strong>${money(a.bestPriceMedian)}</strong><small>${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"}</small></div>
             <div><span>Average estimate</span><strong>${money(a.bestPriceAverage)}</strong><small>${escapeHtml(a.bestPriceBasis)}</small></div>
             <div class="upside"><span>Best available high</span><strong>${money(a.bestPriceHigh)}</strong><small>price-based max ${money(a.bestPriceProvisionalMaxBid)} · not bid-safe</small></div>
-          </div><div class="no-history-state"><strong>Price found; resale match still unverified</strong><p>The numeric estimate is always shown. This record currently relies on the source auction's real online price floor, so the safe ceiling remains $0 until closely matched resale and demand evidence is connected.</p></div>`}
+          </div><div class="no-history-state"><strong>External price found; resale match still provisional</strong><p>The value comes from independent public-web observations, not the auction bid. A safe ceiling still requires stronger identity and demand evidence.</p></div>` : `<div class="no-history-state"><strong>No independent market price yet</strong><p>${escapeHtml(a.bestPriceBasis)} ${a.pricingLastCheckedAt ? `Last external check: ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "The item is queued for the next configured market-price collection pass."}</p></div><div class="market-source-links"><span>VERIFY THE MARKET NOW</span>${pricingSearchLinks.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.label)} ↗</a>`).join("")}</div>`}
         </section>
         <section class="detail-section channel-playbook">
           <div class="detail-section-heading"><h4>Where and how this item could be sold</h4><span>channel-by-channel exit plan</span></div>
@@ -2268,13 +2281,13 @@
             <article class="channel-plan-card ${a.hasResaleEvidence && a.retailDemandPass ? "has-evidence" : "is-unavailable"}">
               <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : marketplace.name)}</strong></div>
               <dl>
-                <div><dt>Best price estimate</dt><dd>${money(a.bestPriceMedian)}</dd></div>
-                <div><dt>Estimated net proceeds</dt><dd>${money(a.bestPriceEstimatedNet)}</dd></div>
+                <div><dt>Best price estimate</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
+                <div><dt>Estimated net proceeds</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceEstimatedNet) : "Unavailable"}</dd></div>
                 <div><dt>Demand</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `FAIL · ${a.retailDemandScore}/100`}</dd></div>
-                <div><dt>Estimated profit now</dt><dd>${money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid)}</dd></div>
+                <div><dt>Estimated profit now</dt><dd>${Number.isFinite(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) ? money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
                 <div><dt>Typical sale time</dt><dd>${a.medianDaysToSell === null ? "Not measured" : `${a.medianDaysToSell.toFixed(1)} days`}</dd></div>
               </dl>
-              <p>${a.hasResaleEvidence ? `Price basis: ${escapeHtml(a.resaleEvidenceType)}. Demand basis: ${escapeHtml(a.retailDemandEvidenceType)}.` : `Price basis: ${escapeHtml(a.bestPriceBasis)}. The number is visible for planning, but no online channel is approved until closely matched resale and demand evidence is present.`}</p>
+              <p>${a.hasResaleEvidence ? `Price basis: ${escapeHtml(a.resaleEvidenceType)}. Demand basis: ${escapeHtml(a.retailDemandEvidenceType)}.` : a.hasPriceEstimate ? `Price basis: ${escapeHtml(a.bestPriceBasis)}. The number is visible for planning, but no online channel is approved until closely matched resale and demand evidence is present.` : `Price basis: ${escapeHtml(a.bestPriceBasis)} No profit or bid ceiling is calculated from the auction bid.`}</p>
             </article>
             <article class="channel-plan-card dealer-reference ${a.hasDirectRetailerBuy ? "has-evidence" : "is-unavailable"}">
               <div><span>ALTERNATE DEALER REFERENCE</span><strong>Specialty retailer / dealer</strong></div>

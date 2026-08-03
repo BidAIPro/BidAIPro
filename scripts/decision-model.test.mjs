@@ -381,12 +381,37 @@ test("an unsupported item receives zero ceilings instead of an invented exit", (
   assert.equal(result.decisionProfitAtCurrentBid, null);
   assert.equal(result.rankingScore, 0);
   assert.equal(result.bidHeadroom, -result.currentBid);
-  assert.equal(result.hasPriceEstimate, true);
-  assert.equal(result.bestPriceKind, "source-auction-floor");
-  assert.equal(result.bestPriceMedian, result.currentBid);
-  assert.ok(Number.isFinite(result.bestPriceProfitAtCurrentBid));
-  assert.ok(Number.isFinite(result.bestPriceBreakEvenBid));
-  assert.equal(result.bestPriceLabel, "Live online-auction price floor");
+  assert.equal(result.hasPriceEstimate, false);
+  assert.equal(result.bestPriceKind, "unpriced");
+  assert.equal(result.bestPriceMedian, null);
+  assert.equal(result.bestPriceProfitAtCurrentBid, null);
+  assert.equal(result.bestPriceBreakEvenBid, 0);
+  assert.equal(result.bestPriceLabel, "No independent market price");
+  assert.equal(result.pricingStatus, "queued");
+});
+
+test("an unsuccessful external lookup stays unpriced and reports the last check", () => {
+  const model = loadModel();
+  const checkedAt = new Date().toISOString();
+  const item = baseItem({
+    comparableSales: [],
+    resaleMarket: null,
+    askingMarket: {
+      status: "insufficient",
+      asOf: checkedAt,
+      query: "example identifiable item",
+      sampleSize: 2,
+      reason: "Fewer than five matched used offers",
+      listings: [],
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasPriceEstimate, false);
+  assert.equal(result.bestPriceMedian, null);
+  assert.equal(result.pricingStatus, "no-match");
+  assert.equal(result.pricingAttempted, true);
+  assert.equal(result.pricingLastCheckedAt, checkedAt);
 });
 
 test("public web research produces a provisional price and profit estimate without becoming a safe ceiling", () => {

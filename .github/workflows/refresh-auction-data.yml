@@ -116,7 +116,10 @@ jobs:
           BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
           BIDAI_EBAY_CLIENT_SECRET: ${{ secrets.BIDAI_EBAY_CLIENT_SECRET }}
           BIDAI_EBAY_MARKETPLACE_ID: "EBAY_US"
-          BIDAI_EBAY_USED_BATCH_SIZE: "150"
+          # Each target may use one concise query plus one fallback query. A
+          # 100-target hourly batch stays within eBay's default 5,000-call
+          # daily allowance even during the initial catalog backfill.
+          BIDAI_EBAY_USED_BATCH_SIZE: "100"
         run: node scripts/enrich-ebay-used.mjs
 
       - name: Enrich with broad and specialty market prices

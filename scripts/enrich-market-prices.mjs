@@ -15,6 +15,16 @@ const STOP_WORDS = new Set([
   "auction", "authentic", "authenticated", "beautiful", "goodwill", "item", "lot", "nice", "preowned", "shopgoodwill", "used",
 ]);
 
+const LISTING_NOISE_WORDS = new Set([
+  "assorted", "bundle", "case", "cable", "charger", "collection", "complete", "estate", "foam", "hard", "includes",
+  "misc", "mixed", "mount", "mounts", "nwt", "open", "parts", "set", "tested", "untested", "usb", "working",
+]);
+
+const GENERIC_PRODUCT_WORDS = new Set([
+  "925", "sterling", "silver", "gold", "platinum", "palladium", "metal", "jewelry", "ring", "necklace", "bracelet",
+  "earring", "earrings", "pendant", "chain", "watch", "watches", "vintage", "women", "womens", "men", "mens", "ladies",
+]);
+
 const SPECIALTY_PATTERN = /video game|gaming|console|playstation|xbox|nintendo|gameboy|game boy|pokemon|trading card|sports card|comic|funko|lego|coin|currency/i;
 
 function cleanText(value, fallback = "") {
@@ -52,11 +62,22 @@ function tokens(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
-    .filter((token) => token.length >= 2 && !STOP_WORDS.has(token)))];
+    .filter((token) => (token.length >= 2 || /^\d$/.test(token)) && !STOP_WORDS.has(token)))];
 }
 
 function queryFor(item) {
-  return tokens(item?.title).slice(0, 12).join(" ").slice(0, 120);
+  const titleTokens = tokens(item?.title);
+  const modelTokens = tokens(item?.modelKey);
+  const conciseTokens = titleTokens.filter((token) => !LISTING_NOISE_WORDS.has(token));
+  const parts = modelTokens.length >= 3 ? modelTokens.slice(0, 9) : conciseTokens.slice(0, 9);
+  return parts.join(" ").slice(0, 120);
+}
+
+function hasDistinctIdentity(item) {
+  const titleTokens = tokens(item?.title);
+  const distinctive = titleTokens.filter((token) => !GENERIC_PRODUCT_WORDS.has(token) && !LISTING_NOISE_WORDS.has(token));
+  const modelLike = titleTokens.some((token) => /[a-z]/.test(token) && /\d/.test(token));
+  return modelLike || distinctive.length >= 2;
 }
 
 function matchScore(targetTitle, candidateTitle) {
@@ -135,7 +156,7 @@ function targetPriority(item) {
 function selectTargets(items, field, limit, specialtyOnly = false) {
   return items
     .filter((item) => item?.status === "active" && cleanText(item?.title) && !isFresh(item?.[field], field === "specialtyMarket" ? 47 : 23))
-    .filter((item) => queryFor(item).split(" ").length >= 3)
+    .filter((item) => hasDistinctIdentity(item) && queryFor(item).split(" ").length >= 3)
     .filter((item) => !specialtyOnly || SPECIALTY_PATTERN.test(`${item?.title || ""} ${item?.category || ""} ${item?.resaleVertical || ""}`))
     .sort((left, right) => targetPriority(right) - targetPriority(left))
     .slice(0, limit);
