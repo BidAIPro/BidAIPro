@@ -462,6 +462,52 @@ test("public web research produces a provisional price and profit estimate witho
   assert.equal(result.researchProvisionalMaxBid, 0);
 });
 
+test("a real Google Shopping analog produces a conservative price without becoming an exact resale comp", () => {
+  const model = loadModel();
+  const offers = Array.from({ length: 6 }, (_, index) => ({
+    id: `analog-${index}`,
+    title: `Similar model market offer ${index}`,
+    url: `https://merchant.example/analog-${index}`,
+    source: index % 2 ? "Merchant A" : "Merchant B",
+    condition: "used",
+    matchScore: 45 + index,
+    price: 100 + index * 10,
+    totalPrice: 100 + index * 10,
+  }));
+  const item = baseItem({
+    comparableSales: [],
+    resaleMarket: null,
+    retailMarket: {
+      status: "available",
+      channel: "Google Shopping via SearchAPI",
+      provider: "searchapi",
+      asOf: new Date().toISOString(),
+      offers,
+      analog: {
+        sampleSize: 6,
+        sourceCount: 2,
+        priceLow: 110,
+        priceMedian: 125,
+        priceAverage: 125,
+        priceHigh: 140,
+        conditionBasis: "used/refurbished",
+        planningReservePercent: 55,
+      },
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasMarketAnalogEstimate, true);
+  assert.equal(result.hasResaleEvidence, false);
+  assert.equal(result.bestPriceKind, "market-analog");
+  assert.equal(result.bestPriceMedian, 125);
+  assert.equal(result.bestPriceSampleSize, 6);
+  assert.ok(Math.abs(result.bestPricePlanningFactor - 0.45) < 1e-9);
+  assert.equal(result.bestPriceLabel, "Broad-market analog estimate");
+  assert.equal(result.maxBid, 0);
+  assert.ok(Number.isFinite(result.bestPriceProfitAtCurrentBid));
+});
+
 test("category browsing groups detailed source paths into populated parent categories", () => {
   const model = loadModel();
   assert.equal(model.categoryRootFor("Clothing > Shoes > Men's"), "Clothing");

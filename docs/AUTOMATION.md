@@ -154,7 +154,9 @@ The included `scripts/enrich-market-prices.mjs` step adds two independent option
 
 | Secret | Provider and purpose |
 | --- | --- |
-| `BIDAI_SERPAPI_KEY` | SerpApi Google Shopping results for broad used/refurbished and new-retail offer research. |
+| `BIDAI_SEARCHAPI_KEY` | Preferred SearchAPI Google Shopping results for broad used/refurbished, new-retail, and conservative analog research. |
+| `BIDAI_SERPAPI_KEY` | Alternate SerpApi Google Shopping provider used when SearchAPI is not configured. |
+| `BIDAI_MARKET_PRICE_BATCH_SIZE` | Maximum unique Shopping queries per hourly/manual run; defaults to 200 and caps at 500. |
 | `BIDAI_PRICECHARTING_TOKEN` | Paid PriceCharting current guide, retailer buy/sell, and yearly unit-volume evidence for supported specialty categories. |
 
 SerpApi results must be USD-priced, have a stable public offer or product link, share at least 65% of significant target-title tokens with at least three tokens in common, and produce at least five qualifying offers from at least two merchants in the same condition group. Used/refurbished and new/unspecified offers are stored separately. New-retail prices never masquerade as used prices and receive a default 45% condition/resale haircut. Product rating and review counts are stored only as interest evidence; they do not create sell-through or modeled resale speed.
@@ -221,7 +223,7 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | `resaleMarketHistory` | array | Up to 365 timestamped validated market summaries retained for price and velocity learning. |
 | `askingMarket` | object | Current active-used asking-price evidence, kept separate from completed sales and validated again in the browser. |
 | `askingMarketHistory` | array | Up to 365 timestamped summaries of active-used asking prices for longitudinal learning. |
-| `retailMarket` | object | Multi-merchant Google Shopping evidence with used and new condition groups, raw offer links, statistics, and product-interest fields. |
+| `retailMarket` | object | Multi-merchant Google Shopping evidence with used, new, and broader analog groups, raw offer links, statistics, provider provenance, and product-interest fields. |
 | `retailMarketHistory` | array | Up to 365 timestamped broad-market summaries for longitudinal price learning. |
 | `specialtyMarket` | object | Strictly matched specialty guide values, direct retailer buy/sell references, raw annual unit volume, and provider link. |
 | `metalEstimate` | object | Source-described purity/weight plus a fresh live spot quote and gross melt ceiling; informational until independently tested. |

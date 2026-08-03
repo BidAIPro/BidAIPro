@@ -76,12 +76,104 @@ test("missing market credentials is a byte-stable no-op", async (t) => {
   const before = await readFile(sample.path, "utf8");
   const result = await runNode([join(sample.root, "scripts", "enrich-market-prices.mjs")], {
     cwd: sample.root,
-    env: { ...process.env, BIDAI_SERPAPI_KEY: "", BIDAI_PRICECHARTING_TOKEN: "" },
+    env: { ...process.env, BIDAI_SERPAPI_KEY: "", BIDAI_SEARCHAPI_KEY: "", BIDAI_PRICECHARTING_TOKEN: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /No-op/);
   assert.equal(await readFile(sample.path, "utf8"), before);
+});
+
+test("SearchAPI analog offers give duplicate listings one real conservative benchmark with one query", async (t) => {
+  const sample = await fixture();
+  t.after(() => rm(sample.root, { recursive: true, force: true }));
+  const envelope = await readEnvelope(sample.path);
+  envelope.items.push({ ...envelope.items[0], id: "shopgoodwill-456", externalId: "456" });
+  await writeFile(sample.path, `${OUTPUT_PREFIX}${JSON.stringify(envelope)};\n`, "utf8");
+  const shopping = { shopping_results: Array.from({ length: 6 }, (_, index) => ({
+    product_id: `analog-${index}`,
+    title: `Sony PlayStation 5 Console Standard Used Bundle ${index}`,
+    extracted_price: 100 + index * 10,
+    product_link: `https://www.google.com/shopping/product/analog-${index}`,
+    seller: index % 2 ? "Merchant A" : "Merchant B",
+    durability: "Pre-owned",
+  })) };
+  const preload = join(sample.root, "mock-fetch.mjs");
+  await writeFile(preload, `
+    const shopping = JSON.parse(Buffer.from(process.env.TEST_SHOPPING, "base64").toString("utf8"));
+    let calls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      if (!String(url).includes("searchapi.io")) throw new Error("Unexpected provider URL");
+      if (options.headers?.authorization !== "Bearer search-key") throw new Error("Missing SearchAPI bearer token");
+      calls += 1;
+      if (calls > 1) throw new Error("Duplicate query was not deduplicated");
+      return new Response(JSON.stringify(shopping), { status: 200 });
+    };
+  `, "utf8");
+  const result = await runNode(["--import", pathToFileURL(preload).href, join(sample.root, "scripts", "enrich-market-prices.mjs")], {
+    cwd: sample.root,
+    env: {
+      ...process.env,
+      BIDAI_SEARCHAPI_KEY: "search-key",
+      BIDAI_SERPAPI_KEY: "",
+      BIDAI_PRICECHARTING_TOKEN: "",
+      TEST_SHOPPING: Buffer.from(JSON.stringify(shopping)).toString("base64"),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /using 1 Google Shopping query/);
+  const items = (await readEnvelope(sample.path)).items;
+  assert.equal(items[0].retailMarket.provider, "searchapi");
+  assert.equal(items[0].retailMarket.status, "available");
+  assert.equal(items[0].retailMarket.analog.sampleSize, 6);
+  assert.equal(items[0].retailMarket.analog.sourceCount, 2);
+  assert.equal(items[0].retailMarket.analog.priceMedian, 125);
+  assert.equal(items[0].retailMarket.analog.planningReservePercent, 55);
+  assert.deepEqual(items[1].retailMarket, items[0].retailMarket);
+});
+
+test("a unique item falls back to a real category-level Shopping benchmark", async (t) => {
+  const sample = await fixture();
+  t.after(() => rm(sample.root, { recursive: true, force: true }));
+  const envelope = await readEnvelope(sample.path);
+  envelope.items[0].title = "One Of A Kind Hand Painted Mystery Object";
+  envelope.items[0].modelKey = "";
+  envelope.items[0].category = "Cameras & Camcorders";
+  await writeFile(sample.path, `${OUTPUT_PREFIX}${JSON.stringify(envelope)};\n`, "utf8");
+  const categoryResults = { shopping_results: Array.from({ length: 6 }, (_, index) => ({
+    product_id: `category-${index}`,
+    title: `Vintage Cameras Camcorders Equipment ${index}`,
+    extracted_price: 50 + index * 10,
+    product_link: `https://www.google.com/shopping/product/category-${index}`,
+    seller: index % 2 ? "Merchant A" : "Merchant B",
+  })) };
+  const preload = join(sample.root, "mock-fetch.mjs");
+  await writeFile(preload, `
+    const categoryResults = JSON.parse(Buffer.from(process.env.TEST_SHOPPING, "base64").toString("utf8"));
+    globalThis.fetch = async (url) => {
+      const query = new URL(String(url)).searchParams.get("q");
+      return new Response(JSON.stringify(query === "cameras camcorders" ? categoryResults : { shopping_results: [] }), { status: 200 });
+    };
+  `, "utf8");
+  const result = await runNode(["--import", pathToFileURL(preload).href, join(sample.root, "scripts", "enrich-market-prices.mjs")], {
+    cwd: sample.root,
+    env: {
+      ...process.env,
+      BIDAI_SEARCHAPI_KEY: "search-key",
+      BIDAI_SERPAPI_KEY: "",
+      BIDAI_PRICECHARTING_TOKEN: "",
+      TEST_SHOPPING: Buffer.from(JSON.stringify(categoryResults)).toString("base64"),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const item = (await readEnvelope(sample.path)).items[0];
+  assert.equal(item.retailMarket.status, "available");
+  assert.deepEqual(item.retailMarket.queriesTried, ["one kind hand painted mystery object", "cameras camcorders"]);
+  assert.equal(item.retailMarket.analog.categoryAnalogCount, 6);
+  assert.equal(item.retailMarket.analog.priceMedian, 75);
+  assert.match(item.retailMarket.analog.note, /category match/);
 });
 
 test("matched shopping offers and a specialty guide produce separate real price signals", async (t) => {

@@ -126,8 +126,9 @@ jobs:
         continue-on-error: true
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
+          BIDAI_SEARCHAPI_KEY: ${{ secrets.BIDAI_SEARCHAPI_KEY }}
           BIDAI_SERPAPI_KEY: ${{ secrets.BIDAI_SERPAPI_KEY }}
-          BIDAI_SERPAPI_BATCH_SIZE: "40"
+          BIDAI_MARKET_PRICE_BATCH_SIZE: "200"
           BIDAI_PRICECHARTING_TOKEN: ${{ secrets.BIDAI_PRICECHARTING_TOKEN }}
           BIDAI_PRICECHARTING_BATCH_SIZE: "20"
         run: node scripts/enrich-market-prices.mjs
