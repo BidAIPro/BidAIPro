@@ -105,6 +105,50 @@ test("the hourly workflow loads the built-in ShopGoodwill catalog without extern
   assert.equal(envelope.items[0].sourceKey, "shopgoodwill");
 });
 
+test("a blocked ShopGoodwill refresh preserves the last good snapshot and exits successfully", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const original = `${OUTPUT_PREFIX}${JSON.stringify({
+    observedAt: "2026-08-02T23:32:19.671Z",
+    lastCheckedAt: "2026-08-02T23:32:19.671Z",
+    sourceMode: "published",
+    sourceNotes: [],
+    items: [{
+      id: "retained-1",
+      externalId: "retained-1",
+      sourceKey: "shopgoodwill",
+      source: "ShopGoodwill",
+      title: "Last known good listing",
+      currentBid: 25,
+      status: "active",
+      observedAt: "2026-08-02T23:32:19.671Z",
+    }],
+  })};\n`;
+  await writeFile(fixture.outputPath, original, "utf8");
+  const preloadPath = join(fixture.root, "blocked-shopgoodwill-fetch.mjs");
+  await writeFile(preloadPath, "globalThis.fetch = async () => new Response('blocked', { status: 403 });\n", "utf8");
+
+  const result = await runNode([join(fixture.scripts, "refresh-all-sources.mjs")], {
+    cwd: fixture.root,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
+      BIDAI_SOURCE_AUTHORIZED: "false",
+      BIDAI_SHOPGOODWILL_ENABLED: "true",
+      BIDAI_SHOPGOODWILL_CATALOG_LIMIT: "1",
+      BIDAI_SHOPGOODWILL_CATEGORY_LIMIT: "1",
+      BIDAI_SHOPGOODWILL_PRIORITY_LIMIT: "0",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "9 * * * *",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /last good snapshot was retained/i);
+  assert.equal(await readFile(fixture.outputPath, "utf8"), original);
+});
+
 test("the five-minute wake skips sources whose auctions are more than 30 minutes away", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));

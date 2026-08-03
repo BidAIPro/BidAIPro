@@ -63,6 +63,7 @@ jobs:
           package-manager-cache: false
 
       - name: Refresh due auction sources
+        continue-on-error: true
         env:
           BIDAI_APIFY_DATASET_ID: ${{ secrets.BIDAI_APIFY_DATASET_ID }}
           BIDAI_APIFY_DATASET_IDS: ${{ secrets.BIDAI_APIFY_DATASET_IDS }}
@@ -81,6 +82,7 @@ jobs:
         run: node scripts/refresh-all-sources.mjs
 
       - name: Refresh supported public auction marketplaces
+        continue-on-error: true
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
           BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
@@ -91,9 +93,11 @@ jobs:
         run: node scripts/refresh-public-markets.mjs
 
       - name: Apply agent-researched public web evidence
+        continue-on-error: true
         run: node scripts/apply-web-research.mjs
 
       - name: Enrich with authorized completed-sale evidence
+        continue-on-error: true
         env:
           BIDAI_RESALE_SOURCE_AUTHORIZED: ${{ secrets.BIDAI_RESALE_SOURCE_AUTHORIZED }}
           BIDAI_RESALE_FEED_URL: ${{ secrets.BIDAI_RESALE_FEED_URL }}
@@ -102,6 +106,7 @@ jobs:
         run: node scripts/enrich-resale.mjs
 
       - name: Enrich with matched eBay used asking prices
+        continue-on-error: true
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
           BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
@@ -111,6 +116,7 @@ jobs:
         run: node scripts/enrich-ebay-used.mjs
 
       - name: Enrich with broad and specialty market prices
+        continue-on-error: true
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
           BIDAI_SERPAPI_KEY: ${{ secrets.BIDAI_SERPAPI_KEY }}
@@ -120,6 +126,7 @@ jobs:
         run: node scripts/enrich-market-prices.mjs
 
       - name: Publish changed snapshot data outside main
+        continue-on-error: true
         shell: bash
         run: |
           if [[ ! -f data/live-snapshots.js ]]; then
@@ -152,6 +159,12 @@ jobs:
           else
             git push origin "$snapshot_commit:refs/heads/auction-data"
           fi
+
+      - name: Verify a snapshot is available for deployment
+        shell: bash
+        run: |
+          test -s data/live-snapshots.js
+          grep -q "window.BIDAI_LIVE_SNAPSHOTS" data/live-snapshots.js
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

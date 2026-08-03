@@ -347,19 +347,31 @@ async function runSourceCycle(sources, existingItems, token, force = false) {
   const preparedSources = await mapWithConcurrency(
     sources,
     MAX_PARALLEL_COLLECTORS,
-    (config) => prepareSource(config, existingItems, Date.now(), token, force),
+    async (config) => {
+      try {
+        return await prepareSource(config, existingItems, Date.now(), token, force);
+      } catch (error) {
+        console.warn(`[refresh-all-sources] ${config.name} collector preparation failed; the last good snapshot was retained. ${error.message}`);
+        return { config, datasetId: null, skip: true, failed: true };
+      }
+    },
   );
-  for (const { config, datasetId, skip } of preparedSources) {
+  for (const { config, datasetId, skip, failed } of preparedSources) {
+    if (failed) continue;
     if (skip) continue;
-    if (config.builtin === "shopgoodwill") {
-      await runRefresh(config, null, existingItems, force);
-      continue;
+    try {
+      if (config.builtin === "shopgoodwill") {
+        await runRefresh(config, null, existingItems, force);
+        continue;
+      }
+      if (!datasetId && !config.feedUrl) {
+        console.log(`[refresh-all-sources] ${config.name} has no Dataset available in this interval; existing records were retained.`);
+        continue;
+      }
+      await runRefresh(config, datasetId, existingItems);
+    } catch (error) {
+      console.warn(`[refresh-all-sources] ${config.name} refresh failed; the last good snapshot was retained. ${error.message}`);
     }
-    if (!datasetId && !config.feedUrl) {
-      console.log(`[refresh-all-sources] ${config.name} has no Dataset available in this interval; existing records were retained.`);
-      continue;
-    }
-    await runRefresh(config, datasetId, existingItems);
   }
 }
 

@@ -1,4 +1,4 @@
-(() => {
+(async () => {
   "use strict";
 
   const STORAGE_KEY = "bidaipro.auction-workspace.v1";
@@ -79,7 +79,47 @@
     return normalizePublishedResearch(JSON.parse(json));
   }
 
+  const IS_TEST_MODE = window.BIDAI_TEST_MODE === true;
+  const SNAPSHOT_BRANCH_URL = "https://raw.githubusercontent.com/BidAIPro/BidAIPro/auction-data/data/live-snapshots.js";
+
+  async function fetchPublishedSnapshot() {
+    const candidates = [
+      new URL("data/live-snapshots.js", document.baseURI),
+      new URL(SNAPSHOT_BRANCH_URL),
+    ];
+    const failures = [];
+    for (const candidate of candidates) {
+      candidate.searchParams.set("refresh", String(Date.now()));
+      try {
+        const response = await fetch(candidate, { cache: "no-store" });
+        if (!response.ok) {
+          failures.push(`${candidate.origin}: HTTP ${response.status}`);
+          continue;
+        }
+        const snapshot = parsePublishedSnapshotScript(await response.text());
+        if (!snapshot.items.length) {
+          failures.push(`${candidate.origin}: no usable listings`);
+          continue;
+        }
+        return snapshot;
+      } catch (error) {
+        failures.push(`${candidate.origin}: ${error.message || "request failed"}`);
+      }
+    }
+    throw new Error(`Published snapshot delivery failed (${failures.join("; ")}).`);
+  }
+
   let PUBLISHED_RESEARCH = normalizePublishedResearch(window.BIDAI_LIVE_SNAPSHOTS);
+  let publishedSnapshotLoadError = "";
+  if (!IS_TEST_MODE && !PUBLISHED_RESEARCH.items.length) {
+    try {
+      PUBLISHED_RESEARCH = await fetchPublishedSnapshot();
+    } catch (error) {
+      publishedSnapshotLoadError = error.message || "Published snapshot delivery failed.";
+      PUBLISHED_RESEARCH = { ...normalizePublishedResearch(null), sourceMode: "delivery-error" };
+      console.error(publishedSnapshotLoadError);
+    }
+  }
 
 
   const aliases = {
@@ -2288,16 +2328,19 @@ function renderMarketplaceCoverage() {
       const health = PUBLISHED_RESEARCH.sourceHealth?.[market.key] || null;
       const healthCheckedAt = Date.parse(health?.checkedAt || "");
       const checkedAt = latest || (Number.isFinite(healthCheckedAt) ? healthCheckedAt : null);
-      const authorizationRequired = health?.status === "authorization-required" || (!health && !connected);
+      const snapshotDeliveryUnavailable = PUBLISHED_RESEARCH.sourceMode === "delivery-error";
+      const authorizationRequired = health?.status === "authorization-required" || (!health && !connected && !snapshotDeliveryUnavailable);
       const sourceStatusLabel = connected
         ? health?.coverageComplete === true || health?.status === "connected-complete"
           ? "REAL RECORDS · COMPLETE LEDGER"
           : "REAL RECORDS · PARTIAL COVERAGE"
-          : authorizationRequired ? "AUTHORIZATION REQUIRED"
+          : snapshotDeliveryUnavailable ? "SNAPSHOT DELIVERY UNAVAILABLE"
+            : authorizationRequired ? "AUTHORIZATION REQUIRED"
           : health?.status === "temporarily-unavailable" ? "PUBLIC COLLECTOR TEMPORARILY UNAVAILABLE"
             : "PUBLIC COLLECTOR READY";
       const footerStatus = connected
         ? `${health?.message ? escapeHtml(health.message) : "Stored records from the latest public check."} Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))}`
+        : snapshotDeliveryUnavailable ? escapeHtml(publishedSnapshotLoadError || "The published snapshot could not be loaded.")
         : health?.message ? escapeHtml(health.message)
           : checkedAt ? `Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))} · no current records`
             : "0 ingested · feed not configured";
@@ -2365,7 +2408,8 @@ function renderMarketplaceCoverage() {
     $$('[data-source-status]').forEach((el) => {
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
       let status = "Research snapshots loaded";
-      if (!PUBLISHED_RESEARCH.items.length) status = "Awaiting research data";
+      if (PUBLISHED_RESEARCH.sourceMode === "delivery-error") status = "Snapshot delivery unavailable";
+      else if (!PUBLISHED_RESEARCH.items.length) status = "Awaiting research data";
       else if (connectedMarkets > 1) status = `${connectedMarkets} auction marketplaces connected`;
       else if (mode.includes("shopgoodwill")) status = `${PUBLISHED_RESEARCH.items.length.toLocaleString("en-US")} ShopGoodwill listings loaded`;
       else if (mode.includes("apify")) status = "Apify dataset loaded";
@@ -2684,13 +2728,9 @@ function renderMarketplaceCoverage() {
     refreshButtons.forEach((candidate) => { candidate.disabled = true; });
     if (button) button.setAttribute("aria-busy", "true");
     try {
-      const snapshotUrl = new URL("data/live-snapshots.js", document.baseURI);
-      snapshotUrl.searchParams.set("refresh", String(Date.now()));
-      const response = await fetch(snapshotUrl, { cache: "no-store" });
-      if (!response.ok) throw new Error(`Published data returned ${response.status}.`);
-      const refreshed = parsePublishedSnapshotScript(await response.text());
-      if (!refreshed.items.length) throw new Error("The published snapshot contains no usable listings.");
+      const refreshed = await fetchPublishedSnapshot();
       PUBLISHED_RESEARCH = refreshed;
+      publishedSnapshotLoadError = "";
       cloudControl.lastPublishedRefreshAt = new Date().toISOString();
       saveCloudControl();
       invalidateHistoricalIndex();
@@ -3122,7 +3162,7 @@ function renderMarketplaceCoverage() {
     setView("opportunities");
   }
 
-  if (window.BIDAI_TEST_MODE === true) {
+  if (IS_TEST_MODE) {
     window.BIDAI_TEST_API = Object.freeze({
       assess,
       categoryRootFor,
