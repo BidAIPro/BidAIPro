@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-02T22:16:03.292Z",
+  "generatedAt": "2026-08-03T02:26:09.770Z",
   "method": "Codex agent-assisted public web research",
   "findings": [
     {
@@ -615,6 +615,80 @@
           "matchType": "exact-model market check",
           "dateLabel": "Updated Jul 24, 2026",
           "note": "No current pricing data displayed"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272051995",
+      "query": "Missfeil women's white satin corset lace-up back bubble hem mini dress NWT sold price close analogs",
+      "summary": "No reliable exact-brand Missfeil resale record was found. Two close white corset/bubble-hem dress analogs sold for $25 and $60. A current NWT white bubble-hem dress is offered at $45, an unbranded satin corset bubble-hem dress ended by the seller at a $44 ask, and a low-cost current retail analog is $14. The five-price close-analog midpoint is $44 and the average is $37.60.",
+      "limitation": "This is a mixed-brand analog estimate, not an exact-item valuation. Only two observations are confirmed sold; the remaining prices are active retail/asking or ended without a sale. Brand quality, size, condition, fabric, fit, and shipping differ, so the estimate is provisional and cannot independently create a safe bid ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 5,
+        "soldSampleSize": 2,
+        "askingSampleSize": 3,
+        "low": 14,
+        "median": 44,
+        "average": 37.6,
+        "high": 60,
+        "soldReference": 42.5,
+        "askingLow": 14,
+        "askingMedian": 44,
+        "askingHigh": 45,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Aqua corset bubble-hem white mini bridal/event dress",
+          "url": "https://poshmark.com/listing/Corset-Bubble-Hem-White-Mini-Bridal-Event-Dress-68e55b6d850012699d885fba",
+          "source": "Poshmark",
+          "price": 25,
+          "listingState": "sold",
+          "matchType": "close sold analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "White corset bubble-hem mini; worn once; original retail shown as $118"
+        },
+        {
+          "title": "Oh Polly Ludmila ivory lace-up bubble-hem corset micro mini dress",
+          "url": "https://poshmark.com/listing/Oh-Polly-Ludmila-Halterneck-LaceUp-Bubble-Hem-Corset-Micro-Mini-Dress-in-Ivory-68532531d8024cf8cfbd4d72",
+          "source": "Poshmark",
+          "price": 60,
+          "listingState": "sold",
+          "matchType": "close sold analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "New with tags; branded higher-quality analog rather than an exact Missfeil match"
+        },
+        {
+          "title": "Lucy in the Sky white sleeveless bubble-hem mini dress",
+          "url": "https://poshmark.com/listing/Lucy-In-The-Sky-White-Sleeveless-Bubble-Hem-Mini-Dress-68d0d2aab944915a0b66f1f1",
+          "source": "Poshmark",
+          "price": 45,
+          "listingState": "asking",
+          "matchType": "close active analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "New with tags; original retail shown as $70; active ask is not a completed sale"
+        },
+        {
+          "title": "Unbranded white satin corset fit-and-flare bubble-hem dress",
+          "url": "https://www.ebay.com/itm/366294171016",
+          "source": "eBay",
+          "price": 44,
+          "listingState": "ended-by-seller",
+          "matchType": "close ended-unsold analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$44 ask plus $14.10 shipping; listing ended because the seller reported it was no longer available"
+        },
+        {
+          "title": "White corset bubble-hem mini dress",
+          "url": "https://smalltoo.com/products/white-corset-bubble-hem-mini-dres",
+          "source": "SmallToo",
+          "price": 14,
+          "listingState": "active-retail",
+          "matchType": "low-cost retail analog",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Current low-cost retail analog; not proof of used resale demand"
         }
       ]
     }

@@ -383,6 +383,51 @@ test("an unsupported item receives zero ceilings instead of an invented exit", (
   assert.equal(result.bidHeadroom, -result.currentBid);
 });
 
+test("public web research produces a provisional price and profit estimate without becoming a safe ceiling", () => {
+  const model = loadModel();
+  const item = baseItem({
+    title: "White satin corset bubble hem mini dress NWT",
+    category: "Clothing",
+    currentBid: 10,
+    comparableSales: [],
+    resaleMarket: null,
+    researchMarket: {
+      status: "reference-only",
+      researchedAt: new Date().toISOString(),
+      priceSummary: {
+        sampleSize: 5,
+        soldSampleSize: 2,
+        askingSampleSize: 3,
+        low: 14,
+        median: 44,
+        average: 37.6,
+        high: 60,
+        decisionEligible: false,
+      },
+      results: [
+        { title: "Sold analog one", url: "https://example.com/1", source: "Market A", price: 25, listingState: "sold" },
+        { title: "Sold analog two", url: "https://example.com/2", source: "Market A", price: 60, listingState: "sold" },
+        { title: "Active analog", url: "https://example.com/3", source: "Market B", price: 45, listingState: "asking" },
+        { title: "Ended analog", url: "https://example.com/4", source: "Market C", price: 44, listingState: "ended-by-seller" },
+        { title: "Retail analog", url: "https://example.com/5", source: "Market D", price: 14, listingState: "active-retail" },
+      ],
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasResearchEstimate, true);
+  assert.equal(result.researchRawMedian, 44);
+  assert.equal(result.researchRawAverage, 37.6);
+  assert.equal(result.researchSoldCount, 2);
+  assert.equal(result.researchAskingCount, 3);
+  assert.equal(result.researchPlanningFactor, 0.55);
+  assert.equal(result.hasResaleEvidence, false);
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.maxBid, 0);
+  assert.ok(Number.isFinite(result.researchProfitAtCurrentBid));
+  assert.equal(result.researchProvisionalMaxBid, 0);
+});
+
 test("category browsing groups detailed source paths into populated parent categories", () => {
   const model = loadModel();
   assert.equal(model.categoryRootFor("Clothing > Shoes > Men's"), "Clothing");
