@@ -68,6 +68,9 @@ jobs:
 
       - name: Refresh due auction sources
         continue-on-error: true
+        # A code push should deploy quickly from the last published snapshot.
+        # Full marketplace discovery stays on the hourly/manual refresh path.
+        if: github.event_name != 'push'
         env:
           BIDAI_APIFY_DATASET_ID: ${{ secrets.BIDAI_APIFY_DATASET_ID }}
           BIDAI_APIFY_DATASET_IDS: ${{ secrets.BIDAI_APIFY_DATASET_IDS }}
@@ -111,7 +114,9 @@ jobs:
 
       - name: Enrich with free eBay used and category asking prices
         continue-on-error: true
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
+        # Run pricing after a GitHub Desktop push too, so a deployment does not
+        # skip the only built-in free retail-value connector.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
           BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
           BIDAI_EBAY_CLIENT_SECRET: ${{ secrets.BIDAI_EBAY_CLIENT_SECRET }}
@@ -120,7 +125,7 @@ jobs:
           # Each unique product uses at most one title query plus one category
           # query. A 100-query-group hourly batch is bounded to 4,800 searches
           # per day in the worst case.
-          BIDAI_EBAY_USED_BATCH_SIZE: "100"
+          BIDAI_EBAY_USED_BATCH_SIZE: ${{ github.event_name == 'push' && '250' || '100' }}
         run: node scripts/enrich-ebay-used.mjs
 
       - name: Enrich with optional paid broad-market and specialty prices

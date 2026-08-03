@@ -3822,7 +3822,7 @@ body:has(dialog[open]) {
 
 /* Complete underwriting dossier and evidence-weighted ranking */
 .metric-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .summary-metric {
@@ -4068,6 +4068,16 @@ body:has(dialog[open]) {
 .underwriting-snapshot article.is-negative {
   background: #fff1ed;
   border-color: #e7c3b9;
+}
+
+.underwriting-snapshot article.is-caution {
+  background: #fff7e8;
+  border-color: #e3cf9f;
+}
+
+.underwriting-snapshot article.is-unknown {
+  background: #f2f4f7;
+  border-color: #d6dce4;
 }
 
 .underwriting-snapshot span,

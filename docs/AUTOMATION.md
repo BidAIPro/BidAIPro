@@ -143,7 +143,7 @@ Create an eBay production application, then add this GitHub Actions secret:
 | --- | --- |
 | `BIDAI_EBAY_CLIENT_ID` | Production eBay application client ID. |
 
-The hourly/manual workflow processes at most 100 unique stale product groups per run. Duplicate product queries share one result. A group uses one concise title query and, only when close or broad results are sparse, one category query. This bounds the worst case to 4,800 searches per day.
+The hourly/manual workflow processes at most 100 unique stale product groups per run. A GitHub Desktop push reuses the last published auction snapshot, skips the expensive full-catalog collector, and prices up to 250 stale groups before deployment. Duplicate product queries share one result. A group uses one concise title query and, only when close or broad results are sparse, one category query.
 
 Approved eBay partners may optionally add `BIDAI_EBAY_CLIENT_SECRET` and set the repository variable `BIDAI_EBAY_USE_BROWSE=true`. The script then uses client-credentials OAuth and the newer Browse API; if OAuth fails, it automatically falls back to Finding. The client secret is also used independently by the eBay auction-source collector.
 
@@ -168,9 +168,11 @@ PriceCharting is queried only for eligible games, consoles, cards, comics, Funko
 
 The default batch limits are 200 unique broad-market queries and 20 specialty targets. Broad results refresh after 23 hours; specialty values refresh after 47 hours. Missing credentials are a byte-stable no-op. Weak and empty results store only an `insufficient` state, never a guessed price. Provider tokens are used only by GitHub Actions and are never added to the published snapshot file.
 
-### Pawn-first exit decision
+### Bid-safe decision and retail-value outlook
 
-The browser independently evaluates two strict gates for every item. The pawn gate exists only when valid fresh precious-metal evidence supplies spot price, source-stated purity, and source-stated weight. Used-retail prices, active listings, and dealer buy guides cannot become pawn estimates. The retail gate first establishes price from qualifying completed sales, a matched specialty guide, five sufficiently matched used offers, or five multi-merchant new-retail offers after the stronger replacement-cost haircut. It then requires a separate demand score of at least 55/100 by default.
+The browser independently evaluates two strict bid-safe gates for every item. The pawn gate exists only when valid fresh precious-metal evidence supplies spot price, source-stated purity, and source-stated weight. Used-retail prices, active listings, and dealer buy guides cannot become pawn estimates. The retail gate first establishes price from qualifying completed sales, a matched specialty guide, five sufficiently matched used offers, or five multi-merchant new-retail offers after the stronger replacement-cost haircut. It then requires a separate demand score of at least 55/100 by default.
+
+A parallel retail-value outlook is calculated whenever any independently sourced retail price survives validation, even when demand is not yet proven. It shows the observed low/midpoint/high range, source-specific uncertainty reserve, conservative planning value, net proceeds, midpoint and conservative profit at the observed bid, price-based break-even, and a provisional limit. Those fields are informational until the demand gate passes: they never set `decisionApproved`, never create a target-safe ceiling, and never change a **NO SAFE BID** into a YES.
 
 ShopGoodwill title parsing rejects plated, filled, vermeil, overlay, bonded, clad, washed, rolled, and electroplated metal descriptions before generating a melt scenario. The browser repeats that negative-wording check against stored `metalEstimate` records, so an older or externally supplied solid-metal estimate cannot pass when the listing title explicitly describes a non-solid finish. Separately stated sterling may still be modeled as silver when gold-plated accents are excluded.
 
@@ -180,13 +182,13 @@ The recommendation hierarchy is:
 
 1. Return **YES · Pawn profit** when the precious-metal pawn ceiling remains above the observed bid and preserves the configured profit and margin.
 2. Otherwise return **YES · Retail profit** only when both the retail price gate and retail demand gate pass and the conservative retail ceiling remains above the observed bid.
-3. Return **NO · Demand unproven** when price exists but the independent demand gate fails; the retail ceiling remains `$0`.
+3. Return **NO · Demand unproven** when price exists but the independent demand gate fails; the target-safe retail ceiling remains unavailable while the separate retail-value outlook remains visible.
 4. Return **NO · Margin too low** when an evidence-qualified route exists but the observed bid is already above its target-safe ceiling.
 5. Return **NO · Evidence missing** when neither route qualifies.
 
-Each route exposes its own likely cash or sale value, profit at the observed bid, target-safe ceiling, and modeled break-even bid. Pawn liquidity and online resale popularity remain separate signals. The selected route controls ranking, but the alternative route remains visible for comparison.
+Each route exposes its own likely cash or sale value and cost stack. Decision-qualified routes expose likely profit, target-safe ceiling, and break-even. Price-only retail routes expose midpoint and conservative profit, a provisional limit explicitly marked **not safe**, and price-based break-even. Pawn liquidity and online resale popularity remain separate signals.
 
-The queue applies that hierarchy before any score: pawn-safe YES, retail-safe YES, qualified-but-over-ceiling NO, demand-failed NO, and evidence-missing NO. A relative 0–100 ranking score orders records inside a tier. Approved routes receive scores of at least 50; a margin-failed route is capped at 49, a demand-failed route is capped at 24, and a record without a qualified route scores 0. The score cannot turn a NO into a YES. Separate highest-resale and most-popular modes sort the corresponding visible values descending; popularity sorts by evidence quality before score so verified resale demand cannot be displaced by a large but weaker active-listing or auction-bid signal.
+The queue applies this hierarchy before any score: pawn-safe YES, retail-safe YES, conservative retail-value leads, qualified-but-over-ceiling NO, priced but uncertain/loss cases, and unpriced records. **Top profit ranks all matching listings rather than hiding lower-evidence records**, so changing categories does not create an empty screen merely because no strict YES exists. Approved routes remain first, followed by the strongest conservative price-based outlooks; unpriced records remain visible last. A provisional result cannot turn a NO into a YES. Separate highest-resale and most-popular modes sort the corresponding visible values descending; popularity sorts by evidence quality before score so verified resale demand cannot be displaced by a large but weaker active-listing or auction-bid signal.
 
 Clicking a record opens a complete underwriting dossier in a modal. It shows the raw listing facts, weighted research coverage, unresolved inputs, acquisition stack, pawn range, retail range, net proceeds, demand proof, sale velocity, target-safe and break-even bids, profit at key bid levels, retained bid changes, attached comparable transactions, source links, listing-specific risks, and a pre-bid verification checklist. The separate source-listing control opens the real auction page. Missing values stay labeled unavailable instead of being inferred from unrelated categories.
 

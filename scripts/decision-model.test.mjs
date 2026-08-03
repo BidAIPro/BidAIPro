@@ -292,6 +292,11 @@ test("matched used offers provide raw average and median without inventing sell-
   assert.equal(result.decisionVerdict, "NO");
   assert.equal(result.resaleMaxBid, 0);
   assert.equal(result.profitAtCurrentBid, null);
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.retailValueDecisionState, "supports-profit");
+  assert.equal(result.retailValueLead, true);
+  assert.ok(result.bestPriceConservativeProfitAtCurrentBid > 0);
+  assert.ok(result.bestPriceProvisionalMaxBid > result.currentBid);
 });
 
 test("new-retail offers remain a separately labeled and deeply discounted fallback", () => {
@@ -330,6 +335,10 @@ test("new-retail offers remain a separately labeled and deeply discounted fallba
   assert.equal(result.retailDemandPass, false);
   assert.equal(result.recommendationState, "no-demand");
   assert.equal(result.maxBid, 0);
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.retailValueDecisionState, "supports-profit");
+  assert.ok(result.bestPriceConservativeProfitAtCurrentBid > 0);
+  assert.ok(result.bestPriceProvisionalMaxBid > result.currentBid);
   assert.match(result.resaleEvidenceType, /new-retail offers/);
   assert.match(result.safeCeilingBasis, /demand did not clear/);
 });
@@ -385,6 +394,9 @@ test("an unsupported item receives zero ceilings instead of an invented exit", (
   assert.equal(result.bestPriceKind, "unpriced");
   assert.equal(result.bestPriceMedian, null);
   assert.equal(result.bestPriceProfitAtCurrentBid, null);
+  assert.equal(result.bestPriceConservativeProfitAtCurrentBid, null);
+  assert.equal(result.retailValueDecisionState, "unpriced");
+  assert.equal(result.retailValueLead, false);
   assert.equal(result.bestPriceBreakEvenBid, 0);
   assert.equal(result.bestPriceLabel, "No independent market price");
   assert.equal(result.pricingStatus, "queued");
@@ -459,6 +471,8 @@ test("public web research produces a provisional price and profit estimate witho
   assert.equal(result.decisionApproved, false);
   assert.equal(result.maxBid, 0);
   assert.ok(Number.isFinite(result.researchProfitAtCurrentBid));
+  assert.ok(Number.isFinite(result.bestPriceConservativeProfitAtCurrentBid));
+  assert.match(result.retailValueDecisionLabel, /RETAIL VALUE|PROFIT TARGET|RESERVE|BELOW COST/);
   assert.equal(result.researchProvisionalMaxBid, 0);
 });
 
@@ -506,6 +520,8 @@ test("a real Google Shopping analog produces a conservative price without becomi
   assert.equal(result.bestPriceLabel, "Broad-market analog estimate");
   assert.equal(result.maxBid, 0);
   assert.ok(Number.isFinite(result.bestPriceProfitAtCurrentBid));
+  assert.ok(Number.isFinite(result.bestPriceConservativeProfitAtCurrentBid));
+  assert.equal(result.decisionApproved, false);
 });
 
 test("category browsing groups detailed source paths into populated parent categories", () => {
@@ -632,6 +648,39 @@ test("resale-value and popularity ranking modes sort highest-first with evidence
   assert.deepEqual(byResale.map((entry) => entry.item.title), ["Higher value", "Lower value", "Unknown value"]);
   const byPopularity = [...entries].sort((left, right) => model.compareOpportunityEntries(left, right, "popular"));
   assert.deepEqual(byPopularity.map((entry) => entry.item.title), ["Unknown value", "Higher value", "Lower value"]);
+});
+
+test("Top profit keeps every listing visible and ranks bid-safe decisions before retail-value outlooks", () => {
+  const model = loadModel();
+  const assessment = (overrides = {}) => ({
+    decisionApproved: false,
+    decisionProfitAtCurrentBid: null,
+    bestPriceConservativeProfitAtCurrentBid: null,
+    retailValueDecisionRank: 0,
+    rankTier: 5,
+    rankingScore: 0,
+    resalePopularityScore: 0,
+    researchCoverageScore: 0,
+    hasPriceEstimate: false,
+    hasPawnEstimate: false,
+    pawnLikelyProfitable: false,
+    retailLikelyProfitable: false,
+    hours: 1,
+    ...overrides,
+  });
+  const safe = { item: { title: "Bid-safe", status: "active" }, assessment: assessment({ decisionApproved: true, decisionProfitAtCurrentBid: 20, retailValueDecisionRank: 4, rankTier: 1 }) };
+  const priceLead = { item: { title: "Retail value lead", status: "active" }, assessment: assessment({ hasPriceEstimate: true, bestPriceConservativeProfitAtCurrentBid: 100, retailValueDecisionRank: 4, rankTier: 2 }) };
+  const pricedLoss = { item: { title: "Priced loss", status: "active" }, assessment: assessment({ hasPriceEstimate: true, bestPriceConservativeProfitAtCurrentBid: -20, retailValueDecisionRank: 1, rankTier: 4 }) };
+  const unpriced = { item: { title: "Unpriced", status: "active" }, assessment: assessment() };
+
+  for (const entry of [safe, priceLead, pricedLoss, unpriced]) {
+    assert.equal(model.matchesQueueMode(entry.item, entry.assessment, "profit"), true);
+  }
+  const ranked = [unpriced, pricedLoss, priceLead, safe]
+    .sort((left, right) => model.compareOpportunityEntries(left, right, "profit"));
+  assert.deepEqual(ranked.map((entry) => entry.item.title), ["Bid-safe", "Retail value lead", "Priced loss", "Unpriced"]);
+  assert.equal(model.matchesQueueMode(priceLead.item, priceLead.assessment, "thin"), true);
+  assert.equal(model.matchesQueueMode(unpriced.item, unpriced.assessment, "research"), true);
 });
 
 test("a stale stored metal weight that disagrees with a leading-decimal title is rejected", () => {

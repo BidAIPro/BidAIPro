@@ -1154,10 +1154,21 @@
       : hasResearchEstimate ? researchPlanningFactor
         : hasMarketAnalogEstimate ? marketAnalogPlanningFactor : 0;
     const bestPricePlanningValue = hasPriceEstimate ? bestPriceMedian * bestPricePlanningFactor : 0;
+    const bestPriceLowNet = hasPriceEstimate ? netResale(bestPriceLow) : null;
     const bestPriceEstimatedNet = hasPriceEstimate ? netResale(bestPriceMedian) : null;
     const bestPriceConservativeNet = hasPriceEstimate ? netResale(bestPricePlanningValue) : null;
+    const bestPriceHighNet = hasPriceEstimate ? netResale(bestPriceHigh) : null;
+    const bestPriceLowProfitAtCurrentBid = hasPriceEstimate && currentBidKnown
+      ? bestPriceLowNet - currentAcquisition
+      : null;
     const bestPriceProfitAtCurrentBid = hasPriceEstimate && currentBidKnown
       ? bestPriceEstimatedNet - currentAcquisition
+      : null;
+    const bestPriceConservativeProfitAtCurrentBid = hasPriceEstimate && currentBidKnown
+      ? bestPriceConservativeNet - currentAcquisition
+      : null;
+    const bestPriceHighProfitAtCurrentBid = hasPriceEstimate && currentBidKnown
+      ? bestPriceHighNet - currentAcquisition
       : null;
     const bestPriceDesiredProfit = hasPriceEstimate
       ? Math.max(Number(s.minimumProfit) || 0, bestPricePlanningValue * (Number(s.targetMargin) || 0) / 100)
@@ -1329,12 +1340,40 @@
       ? Math.max(0, (Math.max(0, pawnCashEstimate - pawnTestingReserve) / (1 + taxRate / 100) - shipping) / (1 + buyerPremium / 100))
       : 0;
     const minimumProfitTarget = Math.max(0, Number(s.minimumProfit) || 0);
+    const retailValueDecisionState = strictMetalPurityReject
+      ? "rejected"
+      : !hasPriceEstimate ? "unpriced"
+        : !currentBidKnown ? "bid-unknown"
+          : bestPriceProvisionalMaxBid > currentBid ? "supports-profit"
+            : bestPriceConservativeProfitAtCurrentBid > 0 ? "positive-below-target"
+              : bestPriceProfitAtCurrentBid > 0 ? "uncertain-upside" : "below-cost";
+    const retailValueDecisionLabel = {
+      rejected: "REJECTED MATERIAL",
+      unpriced: "PRICE RESEARCH REQUIRED",
+      "bid-unknown": "RETAIL VALUE FOUND · BID UNKNOWN",
+      "supports-profit": "RETAIL VALUE SUPPORTS PROFIT",
+      "positive-below-target": "POSITIVE · BELOW PROFIT TARGET",
+      "uncertain-upside": "UPSIDE ONLY · RESERVE FAILS",
+      "below-cost": "RETAIL VALUE BELOW COST",
+    }[retailValueDecisionState];
+    const retailValueDecisionRank = {
+      rejected: -1,
+      unpriced: 0,
+      "bid-unknown": 1,
+      "below-cost": 1,
+      "uncertain-upside": 2,
+      "positive-below-target": 3,
+      "supports-profit": 4,
+    }[retailValueDecisionState];
     const pawnSafeNow = currentBidKnown && hasPawnEstimate && pawnMaxBid > currentBid;
     const retailSafeNow = currentBidKnown && resaleDecisionAvailable && resaleMaxBid > currentBid;
     const onlineSafeNow = retailSafeNow;
     const pawnLikelyProfitable = currentBidKnown && hasPawnEstimate && pawnProfitAtCurrentBid > 0;
     const retailLikelyProfitable = currentBidKnown && resaleDecisionAvailable && profitAtCurrentBid > 0;
     const onlineLikelyProfitable = retailLikelyProfitable;
+    const retailValueLead = !strictMetalPurityReject
+      && !(pawnSafeNow || retailSafeNow)
+      && retailValueDecisionState === "supports-profit";
     const highestEligibleCeiling = strictMetalPurityReject
       ? 0
       : Math.max(hasPawnEstimate ? pawnMaxBid : 0, resaleDecisionAvailable ? resaleMaxBid : 0);
@@ -1543,8 +1582,9 @@
     const rankTier = pawnSafeNow
       ? 0
       : retailSafeNow ? 1
-        : recommendationState === "no-margin" ? 3
-          : recommendationState === "no-demand" ? 4 : 5;
+        : retailValueLead ? 2
+          : recommendationState === "no-margin" ? 3
+            : hasPriceEstimate ? 4 : 5;
     let signal = "research";
     if (recommendationState === "no-margin") signal = "avoid";
     else if (decisionApproved && actionableSnapshot) signal = "candidate";
@@ -1592,13 +1632,22 @@
       bestPriceSampleSize,
       bestPricePlanningFactor,
       bestPricePlanningValue,
+      bestPriceLowNet,
       bestPriceEstimatedNet,
       bestPriceConservativeNet,
+      bestPriceHighNet,
+      bestPriceLowProfitAtCurrentBid,
       bestPriceProfitAtCurrentBid,
+      bestPriceConservativeProfitAtCurrentBid,
+      bestPriceHighProfitAtCurrentBid,
       bestPriceProvisionalMaxBid,
       bestPriceBreakEvenBid,
       bestPriceLabel,
       bestPriceBasis,
+      retailValueDecisionState,
+      retailValueDecisionLabel,
+      retailValueDecisionRank,
+      retailValueLead,
       pricingStatus,
       pricingAttempted,
       pricingLastCheckedAt,
@@ -1755,6 +1804,7 @@
                 ? `${retailNewOffers.length} matched new-retail offers with a ${Math.round(retailReplacementHaircut * 100)}% condition/resale haircut`
                 : "no verified resale evidence",
       hasComparableResaleEvidence,
+      resaleDecisionAvailable,
       hasAnalogResaleEvidence,
       analogEvidenceCount,
       analogCompHaircut,
@@ -1818,6 +1868,21 @@
     return "is-unknown";
   }
 
+  function retailValueDecisionClass(state) {
+    if (state === "supports-profit") return "is-positive";
+    if (["positive-below-target", "uncertain-upside", "bid-unknown"].includes(state)) return "is-caution";
+    if (["below-cost", "rejected"].includes(state)) return "is-negative";
+    return "is-unknown";
+  }
+
+  function decisionDisplayLabel(assessment) {
+    if (assessment.decisionApproved) return recommendationLabel(assessment.recommendationState);
+    if (assessment.hasPriceEstimate && ["no-evidence", "no-demand"].includes(assessment.recommendationState)) {
+      return `NO SAFE BID · ${assessment.retailValueDecisionLabel}`;
+    }
+    return recommendationLabel(assessment.recommendationState);
+  }
+
   function scoreColor(signal, dark = false) {
     if (signal === "candidate") return dark ? "#c7f36d" : "#7daa2c";
     if (signal === "watch") return "#d59035";
@@ -1841,7 +1906,6 @@
 
   function renderOpportunityRow(item, rank = null) {
     const a = assess(item);
-    const publicResearch = publicWebResearchFor(item);
     const selected = selectedId === item.id ? " is-selected" : "";
     const watched = item.watched ? " is-watched" : "";
     const statusText = item.status === "ended" ? "Ended" : timeLabel(item);
@@ -1884,24 +1948,27 @@
                 : a.hasMarketAnalogEstimate
                   ? '<span class="status-pill asking-exit">FREE MARKET ANALOG</span>'
                   : '<span class="status-pill asking-exit">MARKET PRICE QUEUED</span>';
-    const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(recommendationLabel(a.recommendationState))}</span>`;
-    const researchRead = publicResearch ? publicResearchMarketRead(publicResearch, a.currentAcquisition) : null;
+    const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(decisionDisplayLabel(a))}</span>`;
     const rowProfit = a.decisionProfitAtCurrentBid;
     const rowAvailableProfit = a.decisionProfitAtCurrentBid
-      ?? (a.exitType === "pawn" ? a.pawnProfitAtCurrentBid : a.bestPriceProfitAtCurrentBid);
+      ?? (a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnProfitAtCurrentBid : a.bestPriceConservativeProfitAtCurrentBid);
     const rowProfitLabel = a.decisionApproved
       ? (a.exitType === "pawn" ? "Likely pawn profit" : "Likely retail profit")
-      : "Estimated profit now";
+      : a.exitType === "pawn" && a.hasPawnEstimate ? "Pawn profit outlook"
+        : a.hasPriceEstimate ? "Retail value outlook" : "Retail research status";
     const rowDecisionValue = !a.currentBidKnown
       ? "BID UNKNOWN"
       : a.decisionApproved
         ? money(rowProfit)
         : a.recommendationState === "no-margin" && a.maxBid > 0 ? `OVER BY ${money(Math.max(0, -a.bidHeadroom))}`
-          : Number.isFinite(rowAvailableProfit) ? `EST. ${money(rowAvailableProfit)}` : "NO PRICE YET";
+          : Number.isFinite(rowAvailableProfit) ? `EST. ${money(rowAvailableProfit)}` : "PRICE PENDING";
     const rowDecisionClass = a.decisionApproved
       ? "positive"
-      : researchRead?.tone === "reference" ? "research" : "negative";
-    const exitSummary = a.exitType === "pawn"
+      : ["below-cost", "rejected"].includes(a.retailValueDecisionState) ? "negative" : "research";
+    const priceOutlookSummary = `${escapeHtml(a.retailValueDecisionLabel)} · retail midpoint ${money(a.bestPriceMedian)} · conservative value ${money(a.bestPricePlanningValue)} · not bid-safe until demand is proven`;
+    const exitSummary = !a.decisionApproved && a.hasPriceEstimate
+      ? priceOutlookSummary
+      : a.exitType === "pawn"
       ? `${money(a.pawnCashEstimate)} likely cash offer · ${escapeHtml(a.pawnBasisLabel)}`
       : a.hasComparableResaleEvidence
         ? `${money(a.rawMarketMedian)} sold median · ${a.hasLiquidityEvidence ? `${a.liquidityLabel} liquidity` : "velocity unknown"}${a.hasPawnEstimate ? " · cash exit did not clear target" : ""}`
@@ -1929,7 +1996,7 @@
           <span class="score-mini" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
         <div class="money-cell"><span>${a.currentBidKnown ? "Observed" : "Opening price"} / ${a.shippingEstimated ? "est. landed" : "landed"}</span><strong>${money(item.currentBid)}</strong><small>${money(a.currentAcquisition)} ${a.shippingEstimated ? "estimated" : "recorded"} landed · ${a.hasForecast ? `expected ${money(a.expectedClose)}` : "close unmodeled"} · ${Number(item.bidCount) || 0} bids${a.currentBidKnown ? "" : " · live bid not exposed"}</small></div>
-        <div class="money-cell"><span>Safe / price-based limit</span><strong>${a.maxBid > 0 ? money(a.maxBid) : a.hasPriceEstimate ? `${money(a.bestPriceProvisionalMaxBid)} provisional` : "Not established"}</strong><small>${a.maxBid > 0 ? `${a.breakEvenBid > 0 ? `${money(a.breakEvenBid)} break-even` : "No evidence-qualified break-even"} · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}` : a.hasPriceEstimate ? `${money(a.bestPriceBreakEvenBid)} estimated break-even · ${escapeHtml(a.bestPriceLabel.toLowerCase())} only` : "Waiting for an independent external market price"}${a.shippingEstimated ? " · shipping provisional" : ""}</small></div>
+        <div class="money-cell"><span>${a.maxBid > 0 ? "Safe max bid" : a.exitType === "pawn" && a.hasPawnEstimate ? "Pawn safe max" : a.hasPriceEstimate ? "Provisional max · not safe" : "Price research required"}</span><strong>${a.maxBid > 0 ? money(a.maxBid) : a.exitType === "pawn" && a.hasPawnEstimate ? money(a.pawnMaxBid) : a.hasPriceEstimate ? money(a.bestPriceProvisionalMaxBid) : "Not established"}</strong><small>${a.maxBid > 0 ? `${a.breakEvenBid > 0 ? `${money(a.breakEvenBid)} break-even` : "No evidence-qualified break-even"} · ${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} headroom` : `${money(Math.abs(a.bidHeadroom))} over ceiling`}` : a.exitType === "pawn" && a.hasPawnEstimate ? `${money(a.pawnBreakEvenBid)} pawn break-even · profit target not met` : a.hasPriceEstimate ? `${money(a.bestPriceBreakEvenBid)} estimated break-even · ${escapeHtml(a.bestPriceLabel.toLowerCase())} only · demand not proven` : "Waiting for an independent external market price"}${a.shippingEstimated ? " · shipping provisional" : ""}</small></div>
         <div class="money-cell"><span>${rowProfitLabel}</span><strong class="${rowDecisionClass}">${rowDecisionValue}</strong><small>${escapeHtml(exitSummary)}</small></div>
         <div class="row-actions">
           <button class="row-analyze" type="button" data-open-id="${escapeHtml(item.id)}" aria-label="Open BidAI analysis for ${escapeHtml(item.title)}">Analyze</button>
@@ -2054,31 +2121,6 @@
     };
   }
 
-  function publicResearchMarketRead(research, landedCost) {
-    const resultCount = research.results.length;
-    const evidenceLabel = `${resultCount} internet result${resultCount === 1 ? "" : "s"} reviewed`;
-    if (!research.referenceMedian) {
-      return {
-        value: "RESEARCHED",
-        tone: "reference",
-        detail: `${evidenceLabel} · no defensible median · not bid-safe`,
-      };
-    }
-    const referenceSpread = research.referenceMedian - Math.max(0, Number(landedCost) || 0);
-    if (referenceSpread <= 0) {
-      return {
-        value: "ABOVE REFERENCE",
-        tone: "negative",
-        detail: `${money(Math.abs(referenceSpread))} above ${money(research.referenceMedian)} reference median before resale fees`,
-      };
-    }
-    return {
-      value: `VERIFY +${money(referenceSpread)}`,
-      tone: "reference",
-      detail: `${money(referenceSpread)} gross spread to ${money(research.referenceMedian)} reference median · seller fees and risk not cleared`,
-    };
-  }
-
   function renderPublicWebResearch(item) {
     const research = publicWebResearchFor(item);
     if (!research) return "";
@@ -2151,10 +2193,16 @@
     const acquisitionComparables = a.forecast.comparables || [];
     const resaleComparables = resaleComparablesFor(item);
     const displayedProfit = a.decisionProfitAtCurrentBid
-      ?? (a.exitType === "pawn" ? a.pawnProfitAtCurrentBid : a.bestPriceProfitAtCurrentBid);
+      ?? (a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnProfitAtCurrentBid : a.bestPriceProfitAtCurrentBid);
+    const displayedProfitLow = a.decisionProfitLow
+      ?? (a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnProfitLow : a.bestPriceConservativeProfitAtCurrentBid);
+    const displayedProfitBase = a.decisionProfitAtCurrentBid
+      ?? (a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnProfitAtCurrentBid : a.bestPriceProfitAtCurrentBid);
+    const displayedProfitHigh = a.decisionProfitHigh
+      ?? (a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnProfitHigh : a.bestPriceHighProfitAtCurrentBid);
     const displayedAcquisition = a.currentAcquisition;
-    const displayedExitValue = a.exitType === "pawn" ? a.pawnCashEstimate : a.bestPriceMedian;
-    const displayedExitCosts = a.exitType === "pawn"
+    const displayedExitValue = a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnCashEstimate : a.bestPriceMedian;
+    const displayedExitCosts = a.exitType === "pawn" && a.hasPawnEstimate
       ? a.pawnTestingReserve
       : Math.max(0, a.bestPriceMedian - a.bestPriceEstimatedNet);
     const maxWaterfall = Math.max(displayedExitValue, displayedAcquisition, displayedExitCosts, Math.abs(displayedProfit), 1);
@@ -2193,10 +2241,10 @@
       : a.pawnSafeNow ? "PASS · Pawn profit clears target"
         : "FAIL · Pawn profit does not clear target";
     const onlineRouteLabel = !a.hasResaleEvidence
-      ? a.hasResearchEstimate ? "REFERENCE · Web price estimate only"
-        : a.hasMarketAnalogEstimate ? `REFERENCE · ${a.marketAnalogChannel}` : "PENDING · Independent market price"
+      ? a.hasResearchEstimate ? `${a.retailValueDecisionLabel} · WEB REFERENCE`
+        : a.hasMarketAnalogEstimate ? `${a.retailValueDecisionLabel} · ${a.marketAnalogChannel}` : "PENDING · Independent market price"
       : !a.retailDemandPass
-        ? "FAIL · Price found, but demand is unproven"
+        ? `${a.retailValueDecisionLabel} · DEMAND UNPROVEN`
         : a.retailSafeNow ? "PASS · Retail profit clears target"
           : "FAIL · Retail margin does not clear target";
     const verdictHeadline = a.decisionApproved ? `YES — BID UP TO ${money(a.maxBid)}` : "NO — DO NOT BID";
@@ -2207,7 +2255,7 @@
         : a.recommendationState === "retail-safe"
         ? `YES. The pawn gate did not qualify, but retail does: sell through ${a.retailChannel}, supported by ${a.retailDemandEvidenceType}. Do not exceed ${money(a.resaleMaxBid)}.`
         : a.recommendationState === "no-demand"
-          ? `NO. A market price was found, but there is not enough proof that the item can be resold reliably. Active listings and product reviews alone do not justify a bid ceiling.`
+          ? `NO safe bid. The retail value estimate is ${money(a.bestPriceMedian)} and the conservative profit at the observed bid is ${money(a.bestPriceConservativeProfitAtCurrentBid)}, but there is not enough proof that the item can be resold reliably. Active listings and product reviews alone do not justify a safe ceiling.`
           : a.recommendationState === "no-margin"
             ? `NO. At the observed bid, every evidence-qualified route misses the configured profit target. The most you should have paid is ${money(a.maxBid)}.`
             : a.hasResearchEstimate
@@ -2273,12 +2321,13 @@
     ];
     const landedAtBid = (bid) => ((Math.max(0, bid) * (1 + a.buyerPremium / 100) + a.shipping) * (1 + a.taxRate / 100));
     const pawnProfitAtBid = (bid) => a.hasPawnEstimate ? a.pawnCashEstimate - landedAtBid(bid) - a.pawnTestingReserve : null;
-    const retailProfitAtBid = (bid) => a.hasResaleEvidence && a.retailDemandPass ? a.netResaleMedian - landedAtBid(bid) : null;
+    const retailProfitAtBid = (bid) => a.hasPriceEstimate ? a.bestPriceEstimatedNet - landedAtBid(bid) : null;
     const bidLadder = [
       { label: "Observed now", bid: a.currentBid, note: `${Number(item.bidCount) || 0} bids recorded` },
-      { label: "Target-safe ceiling", bid: a.maxBid, note: a.safeCeilingBasis },
+      ...(a.maxBid > 0 ? [{ label: "Target-safe ceiling", bid: a.maxBid, note: a.safeCeilingBasis }] : []),
+      ...(a.maxBid <= 0 && a.hasPriceEstimate ? [{ label: "Provisional retail limit", bid: a.bestPriceProvisionalMaxBid, note: `${a.retailValueDecisionLabel}; price-based only, not bid-safe` }] : []),
       ...(a.hasForecast ? [{ label: "Expected close", bid: a.expectedClose, note: `${money(a.forecast.low)}–${money(a.forecast.high)} modeled range` }] : []),
-      ...(a.breakEvenBid > 0 ? [{ label: "Modeled break-even", bid: a.breakEvenBid, note: "Estimated profit reaches $0 on the selected route" }] : []),
+      ...((a.breakEvenBid || a.bestPriceBreakEvenBid) > 0 ? [{ label: "Modeled break-even", bid: a.breakEvenBid || a.bestPriceBreakEvenBid, note: a.breakEvenBid > 0 ? "Estimated profit reaches $0 on the approved route" : "Retail-value estimate reaches $0; demand is not proven" }] : []),
     ];
     const profitCell = (value, unavailable) => value === null
       ? `<span class="not-approved">${escapeHtml(unavailable)}</span>`
@@ -2313,31 +2362,34 @@
               <small class="exit-route-foot">${a.hasPawnEstimate ? `${escapeHtml(a.pawnBasisLabel)} · ${a.pawnLowPercent.toFixed(0)}% low / ${a.pawnPayoutPercent.toFixed(0)}% likely payout cases · verify with an actual buyer` : "Pawn receives no estimated value unless the listing supplies usable precious-metal purity and weight with a fresh spot quote."}</small>
             </article>
             <article class="exit-route-card ${a.decisionApproved && a.exitType === "online-resale" ? "is-selected" : ""}">
-              <div class="exit-route-title"><span>2</span><div><small>GATE TWO</small><strong>Retail resale · price + demand</strong></div></div>
+              <div class="exit-route-title"><span>2</span><div><small>GATE TWO</small><strong>Retail resale · value + demand</strong></div></div>
               <div class="exit-route-state ${a.onlineSafeNow ? "is-safe" : "is-thin"}">${escapeHtml(onlineRouteLabel)}</div>
               <dl>
-                <div><dt>${a.hasResaleEvidence ? "Likely sale price" : "Best price estimate"}</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
-                <div><dt>Estimated profit now</dt><dd>${Number.isFinite(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) ? money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
+                <div><dt>Retail value midpoint</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
+                <div><dt>Conservative planning value</dt><dd>${a.hasPriceEstimate ? money(a.bestPricePlanningValue) : "Unavailable"}</dd></div>
+                <div><dt>Midpoint profit now</dt><dd>${Number.isFinite(a.bestPriceProfitAtCurrentBid) ? money(a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
+                <div><dt>Conservative profit now</dt><dd>${Number.isFinite(a.bestPriceConservativeProfitAtCurrentBid) ? money(a.bestPriceConservativeProfitAtCurrentBid) : "Unavailable"}</dd></div>
                 <div><dt>Price source</dt><dd>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : "External research pending")}</dd></div>
-                <div><dt>Demand gate</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `FAIL · ${a.retailDemandScore}/100`}</dd></div>
-                <div><dt>Target-safe bid</dt><dd>${money(a.resaleMaxBid)}</dd></div>
-                ${!a.hasResaleEvidence ? `<div><dt>Price-based max</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceProvisionalMaxBid) : "Not established"}</dd></div>` : ""}
-                <div><dt>${a.hasResaleEvidence ? "Modeled break-even" : "Estimated break-even"}</dt><dd>${a.hasPriceEstimate ? money(a.hasResaleEvidence ? a.resaleBreakEvenBid : a.bestPriceBreakEvenBid) : "Not established"}</dd></div>
+                <div><dt>Demand gate</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `NOT PROVEN · ${a.retailDemandScore}/100`}</dd></div>
+                <div><dt>Target-safe bid</dt><dd>${a.resaleMaxBid > 0 ? money(a.resaleMaxBid) : "Not established"}</dd></div>
+                ${!a.resaleDecisionAvailable ? `<div><dt>Provisional max · not safe</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceProvisionalMaxBid) : "Not established"}</dd></div>` : ""}
+                <div><dt>${a.resaleDecisionAvailable ? "Modeled break-even" : "Price-based break-even"}</dt><dd>${a.hasPriceEstimate ? money(a.resaleDecisionAvailable ? a.resaleBreakEvenBid : a.bestPriceBreakEvenBid) : "Not established"}</dd></div>
               </dl>
               <small class="exit-route-foot">${a.hasResaleEvidence ? `Price proof: ${escapeHtml(a.resaleEvidenceType)}. Demand proof: ${escapeHtml(a.retailDemandEvidenceType)}. Required demand score: ${a.minimumRetailDemandScore.toFixed(0)}/100.` : a.hasPriceEstimate ? `${escapeHtml(a.bestPriceLabel)} range ${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} from ${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"}. The estimate uses the ${money(a.bestPriceMedian)} midpoint and a ${Math.round((1 - a.bestPricePlanningFactor) * 100)}% uncertainty reserve. It is not a safe ceiling.` : `No price is shown until an independent external source returns a defensible match. ${a.pricingLastCheckedAt ? `Last checked ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "Research is queued."}`}</small>
             </article>
           </div>
         </section>
         <section class="underwriting-snapshot" aria-label="Underwriting snapshot">
-          <article><span>Profit rank</span><strong>${escapeHtml(rankLabel)}</strong><small>YES decisions first, then closest evidence-backed misses</small></article>
+          <article><span>Profit rank</span><strong>${escapeHtml(rankLabel)}</strong><small>bid-safe first, then conservative retail-value outlooks</small></article>
           <article><span>Observed bid</span><strong>${money(a.currentBid)}</strong><small>${Number(item.bidCount) || 0} bids · ${escapeHtml(timeLabel(item))}</small></article>
           <article><span>Landed cost now</span><strong>${money(a.currentAcquisition)}</strong><small>bid + premium + inbound shipping + tax</small></article>
-          <article class="${a.decisionApproved ? "is-positive" : "is-negative"}"><span>Final answer</span><strong>${escapeHtml(a.decisionVerdict)}</strong><small>${escapeHtml(recommendationLabel(a.recommendationState))}</small></article>
-          <article><span>Highest safe bid</span><strong>${money(a.maxBid)}</strong><small>${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} remaining headroom` : `${money(Math.abs(a.bidHeadroom))} above the ceiling`}</small></article>
+          <article class="${a.decisionApproved ? "is-positive" : "is-negative"}"><span>Bid-safe answer</span><strong>${escapeHtml(a.decisionVerdict)}</strong><small>${escapeHtml(decisionDisplayLabel(a))}</small></article>
+          <article><span>Highest safe bid</span><strong>${a.maxBid > 0 ? money(a.maxBid) : "Not established"}</strong><small>${a.maxBid > 0 ? (a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} remaining headroom` : `${money(Math.abs(a.bidHeadroom))} above the ceiling`) : "price alone cannot create a safe bid"}</small></article>
           <article><span>Likely pawn cash</span><strong>${a.hasPawnEstimate ? money(a.pawnCashEstimate) : "Unavailable"}</strong><small>${a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled range` : "verified metal inputs required"}</small></article>
-          <article><span>Best online price</span><strong>${a.hasPriceEstimate ? `${money(a.bestPriceMedian)} est.` : "Not found yet"}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}` : "independent market research pending · auction bid excluded"}</small></article>
+          <article><span>Retail value estimate</span><strong>${a.hasPriceEstimate ? `${money(a.bestPriceMedian)} midpoint` : "Not found yet"}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}` : "independent market research pending · auction bid excluded"}</small></article>
+          <article class="${retailValueDecisionClass(a.retailValueDecisionState)}"><span>Retail value decision</span><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceConservativeProfitAtCurrentBid)} conservative · ${money(a.bestPriceProfitAtCurrentBid)} midpoint profit at observed bid` : "external price research has not returned a defensible match"}</small></article>
           <article><span>Retail popularity</span><strong>${escapeHtml(a.popularityLabel)}</strong><small>${a.popularityEvidenceLevel !== "none" ? `${a.popularityScore}/100 · ${escapeHtml(a.popularityEvidenceType)}` : "no popularity evidence"}</small></article>
-          <article><span>Estimated profit now</span><strong class="${Number.isFinite(displayedProfit) && displayedProfit >= 0 ? "positive" : "negative"}">${Number.isFinite(displayedProfit) ? `${money(displayedProfit)} est.` : "Unavailable"}</strong><small>${a.decisionProfitAtCurrentBid !== null ? (a.roi === null ? "ROI unavailable" : `${percent(a.roi)} modeled ROI on landed cost`) : a.exitType === "pawn" && a.hasPawnEstimate ? "pawn cash less landed cost and testing reserve" : a.hasPriceEstimate ? `${escapeHtml(a.bestPriceLabel.toLowerCase())} · not bid-safe` : "requires independent resale price"}</small></article>
+          <article><span>Profit outlook now</span><strong class="${Number.isFinite(displayedProfit) && displayedProfit >= 0 ? "positive" : "negative"}">${Number.isFinite(displayedProfit) ? `${money(displayedProfit)} est.` : "Unavailable"}</strong><small>${a.decisionProfitAtCurrentBid !== null ? (a.roi === null ? "ROI unavailable" : `${percent(a.roi)} modeled ROI on landed cost`) : a.exitType === "pawn" && a.hasPawnEstimate ? "pawn cash less landed cost and testing reserve" : a.hasPriceEstimate ? `${money(a.bestPriceConservativeProfitAtCurrentBid)} after uncertainty reserve · not bid-safe` : "requires independent resale price"}</small></article>
           <article><span>Likely time to sell</span><strong>${a.medianDaysToSell === null ? "Not measured" : `${a.medianDaysToSell.toFixed(1)} days`}</strong><small>${a.hasLiquidityEvidence ? `${percent(a.sellThroughRate)} sell-through` : "completed-sale velocity required"}</small></article>
         </section>
         <div class="dossier-columns">
@@ -2401,10 +2453,10 @@
               : `<div class="no-history-state"><strong>Price found; retail demand unproven</strong><p>${a.productInterestKnown ? `${a.productReviewCountMax.toLocaleString()} product reviews show interest, but reviews do not prove resale sell-through. ` : ""}Active offers and auction bids do not show that comparable used items actually sell. Retail receives a $0 ceiling until completed-sale frequency, sell-through, or annual unit volume is available.</p></div>`}
           ` : a.hasPriceEstimate ? `<div class="profit-scenarios price-proxy-scenarios">
             <div class="downside"><span>Best available low</span><strong>${money(a.bestPriceLow)}</strong><small>${escapeHtml(a.bestPriceLabel)}</small></div>
-            <div class="base"><span>Best price estimate</span><strong>${money(a.bestPriceMedian)}</strong><small>${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"}</small></div>
-            <div><span>Average estimate</span><strong>${money(a.bestPriceAverage)}</strong><small>${escapeHtml(a.bestPriceBasis)}</small></div>
+            <div class="base"><span>Retail value midpoint</span><strong>${money(a.bestPriceMedian)}</strong><small>${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"} · average ${money(a.bestPriceAverage)}</small></div>
+            <div><span>Conservative planning value</span><strong>${money(a.bestPricePlanningValue)}</strong><small>${Math.round((1 - a.bestPricePlanningFactor) * 100)}% uncertainty reserve applied</small></div>
             <div class="upside"><span>Best available high</span><strong>${money(a.bestPriceHigh)}</strong><small>price-based max ${money(a.bestPriceProvisionalMaxBid)} · not bid-safe</small></div>
-          </div><div class="no-history-state"><strong>External price found; resale match still provisional</strong><p>The value comes from independent public-web observations, not the auction bid. A safe ceiling still requires stronger identity and demand evidence.</p></div>` : `<div class="no-history-state"><strong>No independent market price yet</strong><p>${escapeHtml(a.bestPriceBasis)} ${a.pricingLastCheckedAt ? `Last external check: ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "The item is queued for the next configured market-price collection pass."}</p></div><div class="market-source-links"><span>VERIFY THE MARKET NOW</span>${pricingSearchLinks.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.label)} ↗</a>`).join("")}</div>`}
+          </div><div class="no-history-state"><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><p>The independent retail-value midpoint implies ${money(a.bestPriceProfitAtCurrentBid)} after costs at the observed bid; the conservative reserved case is ${money(a.bestPriceConservativeProfitAtCurrentBid)}. This remains a price-based planning result until demand is verified.</p></div>` : `<div class="no-history-state"><strong>No independent market price yet</strong><p>${escapeHtml(a.bestPriceBasis)} ${a.pricingLastCheckedAt ? `Last external check: ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "The item is queued for the next configured market-price collection pass."}</p></div><div class="market-source-links"><span>VERIFY THE MARKET NOW</span>${pricingSearchLinks.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.label)} ↗</a>`).join("")}</div>`}
         </section>
         <section class="detail-section channel-playbook">
           <div class="detail-section-heading"><h4>Where and how this item could be sold</h4><span>channel-by-channel exit plan</span></div>
@@ -2420,13 +2472,15 @@
               </dl>
               <p>${a.hasPawnEstimate ? "Evidence supports a precious-metal liquidation estimate, not a guaranteed offer. Test purity and weight, then quote multiple buyers." : "No dollar value is shown because this record lacks the verified precious-metal inputs required for a defensible pawn estimate."}</p>
             </article>
-            <article class="channel-plan-card ${a.hasResaleEvidence && a.retailDemandPass ? "has-evidence" : "is-unavailable"}">
+            <article class="channel-plan-card ${a.hasPriceEstimate ? "has-evidence" : "is-unavailable"}">
               <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : marketplace.name)}</strong></div>
               <dl>
                 <div><dt>Best price estimate</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
+                <div><dt>Conservative planning value</dt><dd>${a.hasPriceEstimate ? money(a.bestPricePlanningValue) : "Unavailable"}</dd></div>
                 <div><dt>Estimated net proceeds</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceEstimatedNet) : "Unavailable"}</dd></div>
-                <div><dt>Demand</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `FAIL · ${a.retailDemandScore}/100`}</dd></div>
-                <div><dt>Estimated profit now</dt><dd>${Number.isFinite(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) ? money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
+                <div><dt>Demand</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `NOT PROVEN · ${a.retailDemandScore}/100`}</dd></div>
+                <div><dt>Midpoint profit now</dt><dd>${Number.isFinite(a.bestPriceProfitAtCurrentBid) ? money(a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
+                <div><dt>Conservative profit now</dt><dd>${Number.isFinite(a.bestPriceConservativeProfitAtCurrentBid) ? money(a.bestPriceConservativeProfitAtCurrentBid) : "Unavailable"}</dd></div>
                 <div><dt>Typical sale time</dt><dd>${a.medianDaysToSell === null ? "Not measured" : `${a.medianDaysToSell.toFixed(1)} days`}</dd></div>
               </dl>
               <p>${a.hasResaleEvidence ? `Price basis: ${escapeHtml(a.resaleEvidenceType)}. Demand basis: ${escapeHtml(a.retailDemandEvidenceType)}.` : a.hasPriceEstimate ? `Price basis: ${escapeHtml(a.bestPriceBasis)}. The number is visible for planning, but no online channel is approved until closely matched resale and demand evidence is present.` : `Price basis: ${escapeHtml(a.bestPriceBasis)} No profit or bid ceiling is calculated from the auction bid.`}</p>
@@ -2444,17 +2498,17 @@
           </div>
         </section>
         <section class="detail-section">
-          <div class="detail-section-heading"><h4>${a.exitType === "pawn" ? "Immediate cash-exit waterfall" : "Online-resale profit waterfall"}</h4><span>${escapeHtml(a.safeCeilingBasis)}</span></div>
+          <div class="detail-section-heading"><h4>${a.exitType === "pawn" && a.hasPawnEstimate ? "Immediate cash-exit waterfall" : "Retail-value profit waterfall"}</h4><span>${escapeHtml(a.decisionApproved ? a.safeCeilingBasis : `${a.retailValueDecisionLabel} · not bid-safe until demand is proven`)}</span></div>
           <div class="waterfall">
-            <div class="waterfall-row"><span>${a.exitType === "pawn" ? "Likely pawn / cash-buyer offer" : "Planning resale value"}</span><span class="waterfall-track"><i style="--width:${width(displayedExitValue)}"></i></span><strong>${money(displayedExitValue)}</strong></div>
+            <div class="waterfall-row"><span>${a.exitType === "pawn" && a.hasPawnEstimate ? "Likely pawn / cash-buyer offer" : "Retail value midpoint"}</span><span class="waterfall-track"><i style="--width:${width(displayedExitValue)}"></i></span><strong>${a.hasPriceEstimate || a.hasPawnEstimate ? money(displayedExitValue) : "Unavailable"}</strong></div>
             <div class="waterfall-row cost"><span>Landed at observed bid</span><span class="waterfall-track"><i style="--width:${width(displayedAcquisition)}"></i></span><strong>−${money(displayedAcquisition)}</strong></div>
             <div class="waterfall-row cost"><span>${a.exitType === "pawn" ? "Testing reserve" : "Sell + risk costs"}</span><span class="waterfall-track"><i style="--width:${width(displayedExitCosts)}"></i></span><strong>−${money(displayedExitCosts)}</strong></div>
-            <div class="waterfall-row profit ${displayedProfit !== null && displayedProfit < 0 ? "negative" : ""}"><span>Likely profit if won now</span><span class="waterfall-track"><i style="--width:${width(displayedProfit)}"></i></span><strong>${displayedProfit === null ? (a.recommendationState === "no-demand" ? "Demand gate failed" : "No approved exit") : money(displayedProfit)}</strong></div>
+            <div class="waterfall-row profit ${displayedProfit !== null && displayedProfit < 0 ? "negative" : ""}"><span>${a.decisionProfitAtCurrentBid !== null ? "Likely profit if won now" : "Midpoint retail profit if won now"}</span><span class="waterfall-track"><i style="--width:${width(displayedProfit)}"></i></span><strong>${displayedProfit === null ? "No independent price" : money(displayedProfit)}</strong></div>
           </div>
-          ${displayedProfit !== null ? `<div class="profit-scenarios">
-            <div class="downside"><span>Low cash case</span><strong>${money(a.decisionProfitLow)}</strong><small>${money(a.exitType === "pawn" ? a.pawnCashLow : a.resaleLow)} exit value</small></div>
-            <div class="base"><span>Likely case</span><strong>${money(a.decisionProfitAtCurrentBid)}</strong><small>${money(a.exitType === "pawn" ? a.pawnCashEstimate : a.resaleMedian)} exit value</small></div>
-            <div class="upside"><span>High cash case</span><strong>${money(a.decisionProfitHigh)}</strong><small>${money(a.exitType === "pawn" ? a.pawnCashHigh : a.resaleHigh)} exit value</small></div>
+          ${[displayedProfitLow, displayedProfitBase, displayedProfitHigh].every(Number.isFinite) ? `<div class="profit-scenarios">
+            <div class="downside"><span>${a.decisionProfitAtCurrentBid !== null ? "Low case" : "Conservative reserved case"}</span><strong>${money(displayedProfitLow)}</strong><small>${money(a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnCashLow : a.bestPricePlanningValue)} exit value</small></div>
+            <div class="base"><span>Midpoint case</span><strong>${money(displayedProfitBase)}</strong><small>${money(a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnCashEstimate : a.bestPriceMedian)} exit value</small></div>
+            <div class="upside"><span>High case</span><strong>${money(displayedProfitHigh)}</strong><small>${money(a.exitType === "pawn" && a.hasPawnEstimate ? a.pawnCashHigh : a.bestPriceHigh)} exit value</small></div>
           </div>` : ""}
         </section>
         <section class="detail-section cost-risk-panel">
@@ -2475,13 +2529,13 @@
         <section class="detail-section bid-ladder-panel">
           <div class="detail-section-heading"><h4>Profit at every important bid level</h4><span>current assumptions applied consistently</span></div>
           <div class="comparable-sales-list"><table class="comparable-sales-table bid-ladder-table">
-            <thead><tr><th scope="col">Bid level</th><th scope="col">Bid</th><th scope="col">Landed cost</th><th scope="col">Pawn profit</th><th scope="col">Retail profit</th><th scope="col">Meaning</th></tr></thead>
+            <thead><tr><th scope="col">Bid level</th><th scope="col">Bid</th><th scope="col">Landed cost</th><th scope="col">Pawn profit</th><th scope="col">Retail value profit*</th><th scope="col">Meaning</th></tr></thead>
             <tbody>${bidLadder.map((level) => {
               const pawnProfit = pawnProfitAtBid(level.bid);
               const retailProfit = retailProfitAtBid(level.bid);
-              return `<tr><td><strong>${escapeHtml(level.label)}</strong></td><td>${money(level.bid)}</td><td>${money(landedAtBid(level.bid))}</td><td>${profitCell(pawnProfit, "No pawn evidence")}</td><td>${profitCell(retailProfit, a.hasResaleEvidence ? "Demand not approved" : "No retail price")}</td><td><small>${escapeHtml(level.note)}</small></td></tr>`;
+              return `<tr><td><strong>${escapeHtml(level.label)}</strong></td><td>${money(level.bid)}</td><td>${money(landedAtBid(level.bid))}</td><td>${profitCell(pawnProfit, "No pawn evidence")}</td><td>${profitCell(retailProfit, "No retail price")}</td><td><small>${escapeHtml(level.note)}</small></td></tr>`;
             }).join("")}</tbody>
-          </table></div>
+          </table></div><p class="risk-note">* Retail-value profit uses the best independent price midpoint after configured costs. It is not a bid-safe exit unless the separate demand gate passes.</p>
         </section>
         ${item.metalEstimate ? `<section class="detail-section cost-risk-panel">
           <div class="detail-section-heading"><h4>Pawn / precious-metal exit</h4><span>${a.hasMetalEstimate ? `${a.pawnLowPercent.toFixed(0)}%–${a.pawnHighPercent.toFixed(0)}% modeled offer range` : "quote stale or invalid"}</span></div>
@@ -2561,7 +2615,17 @@
     const { item: a, assessment: assessmentA } = left;
     const { item: b, assessment: assessmentB } = right;
     if (a.status !== b.status) return a.status === "active" ? -1 : 1;
-    if (mode === "resale") {
+    if (mode === "profit") {
+      const safeDifference = Number(assessmentB.decisionApproved) - Number(assessmentA.decisionApproved);
+      if (safeDifference) return safeDifference;
+      const valueDecisionDifference = Number(assessmentB.retailValueDecisionRank || 0) - Number(assessmentA.retailValueDecisionRank || 0);
+      if (valueDecisionDifference) return valueDecisionDifference;
+      const profitA = assessmentA.decisionProfitAtCurrentBid ?? assessmentA.bestPriceConservativeProfitAtCurrentBid;
+      const profitB = assessmentB.decisionProfitAtCurrentBid ?? assessmentB.bestPriceConservativeProfitAtCurrentBid;
+      if (Number.isFinite(profitA) !== Number.isFinite(profitB)) return Number.isFinite(profitB) ? 1 : -1;
+      const profitDifference = Number(profitB) - Number(profitA);
+      if (profitDifference) return profitDifference;
+    } else if (mode === "resale") {
       if (assessmentA.hasPriceEstimate !== assessmentB.hasPriceEstimate) return assessmentA.hasPriceEstimate ? -1 : 1;
       const valueDifference = Number(assessmentB.bestPriceMedian || 0) - Number(assessmentA.bestPriceMedian || 0);
       if (valueDifference) return valueDifference;
@@ -2593,6 +2657,19 @@
     return String(a.title || "").localeCompare(String(b.title || ""));
   }
 
+  function matchesQueueMode(item, assessment, mode = queueMode) {
+    const closingWithinFiveMinutes = assessment.hours >= 0 && assessment.hours <= 5 / 60;
+    if (["all", "profit", "resale", "popular"].includes(mode)) return true;
+    if (mode === "closing") return item.status === "active" && closingWithinFiveMinutes;
+    if (mode === "pawn") return assessment.hasPawnEstimate;
+    if (mode === "thin") {
+      return !assessment.decisionApproved
+        && (assessment.pawnLikelyProfitable || assessment.retailLikelyProfitable || assessment.retailValueDecisionRank >= 2);
+    }
+    if (mode === "research") return !assessment.hasPriceEstimate && assessment.rankTier === 5;
+    return true;
+  }
+
   function filteredItems() {
     const query = String($("#global-search")?.value || "").trim().toLowerCase();
     const signal = $("#signal-filter")?.value || "all";
@@ -2604,17 +2681,8 @@
       .map((item) => ({ item, assessment: assess(item) }))
       .filter(({ item, assessment }) => {
         const haystack = [item.title, item.category, item.resaleVertical, item.authenticationEvidence, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
-        const closingWithinFiveMinutes = assessment.hours >= 0 && assessment.hours <= 5 / 60;
-        const matchesMode = ["all", "resale", "popular"].includes(queueMode)
-          ? true
-          : queueMode === "closing"
-          ? item.status === "active" && closingWithinFiveMinutes
-          : queueMode === "pawn" ? assessment.hasPawnEstimate
-            : queueMode === "thin" ? !assessment.decisionApproved && (assessment.pawnLikelyProfitable || assessment.retailLikelyProfitable)
-              : queueMode === "research" ? assessment.rankTier === 5
-                : assessment.rankTier < 5;
         return (!query || haystack.includes(query)) &&
-          matchesMode &&
+          matchesQueueMode(item, assessment, queueMode) &&
           (signal === "all" || assessment.signal === signal) &&
           (category === "all" || categoryRootFor(item.category) === category) &&
           (vertical === "all" || (item.resaleVertical || "Other") === vertical) &&
@@ -2735,18 +2803,22 @@ function renderMarketplaceCoverage() {
   function renderStats() {
     const active = activeItems();
     const assessments = active.map(assess);
-    const valued = assessments.filter((item) => item.decisionProfitAtCurrentBid !== null);
-    const upside = valued.length ? Math.max(0, ...valued.map((item) => item.decisionProfitAtCurrentBid)) : 0;
+    const valued = assessments.filter((item) => item.decisionProfitAtCurrentBid !== null || item.bestPriceConservativeProfitAtCurrentBid !== null);
+    const upside = valued.length
+      ? Math.max(0, ...valued.map((item) => item.decisionProfitAtCurrentBid ?? item.bestPriceConservativeProfitAtCurrentBid ?? 0))
+      : 0;
     const urgent = active.filter((item) => hoursRemaining(item) >= 0 && hoursRemaining(item) <= 5 / 60).length;
     const confidence = valued.length ? valued.reduce((total, item) => total + item.confidence, 0) / valued.length : 0;
     const observations = allItems().reduce((total, item) => total + (Array.isArray(item.observations) ? item.observations.length : 0), 0);
     const connectedMarkets = new Set(allItems().map((item) => item.sourceKey).filter(Boolean)).size;
     const approved = assessments.filter((item) => item.decisionApproved).length;
     const pawnUnderwritten = assessments.filter((item) => item.hasPawnEstimate).length;
+    const retailPriced = assessments.filter((item) => item.hasPriceEstimate).length;
     const retailDemandQualified = assessments.filter((item) => item.retailDemandPass).length;
-    const thinPositive = assessments.filter((item) => !item.decisionApproved && (item.pawnLikelyProfitable || item.retailLikelyProfitable)).length;
+    const thinPositive = assessments.filter((item) => !item.decisionApproved && (item.pawnLikelyProfitable || item.retailLikelyProfitable || item.retailValueDecisionRank >= 2)).length;
     $$('[data-stat-approved]').forEach((el) => { el.textContent = approved.toLocaleString("en-US"); });
     $$('[data-stat-pawn-qualified]').forEach((el) => { el.textContent = pawnUnderwritten.toLocaleString("en-US"); });
+    $$('[data-stat-retail-priced]').forEach((el) => { el.textContent = retailPriced.toLocaleString("en-US"); });
     $$('[data-stat-retail-qualified]').forEach((el) => { el.textContent = retailDemandQualified.toLocaleString("en-US"); });
     $$('[data-stat-thin-positive]').forEach((el) => { el.textContent = thinPositive.toLocaleString("en-US"); });
     $("[data-stat-upside]").textContent = money(upside);
@@ -2808,12 +2880,14 @@ function renderMarketplaceCoverage() {
       ? "All listings, strongest evidence first"
       : queueMode === "resale"
         ? "Highest estimated resale value first"
-        : queueMode === "popular"
+      : queueMode === "popular"
           ? "Most popular items first"
+      : queueMode === "profit"
+        ? "Profit outlook · bid-safe first, then retail-value estimates"
       : queueMode === "closing"
       ? "Closing within five minutes"
       : queueMode === "pawn" ? "Pawn-first precious metals"
-        : queueMode === "thin" ? "Likely positive, but below the safety target"
+        : queueMode === "thin" ? "Retail-value leads · upside visible, safe gate not met"
           : queueMode === "research" ? "Research gaps — no bid until evidence improves" : "Highest profit likelihood first";
     if ($("#queue-heading")) $("#queue-heading").textContent = queueTitle;
     $$('[data-quick-mode]').forEach((button) => {
@@ -2832,10 +2906,6 @@ function renderMarketplaceCoverage() {
     const emptyCopy = $("p", empty);
     if (emptyHeading) emptyHeading.textContent = "No listings match";
     if (emptyCopy) emptyCopy.textContent = "Broaden the filters or connect a source to ingest current auction records.";
-    if (!items.length && queueMode === "profit") {
-      if (emptyHeading) emptyHeading.textContent = "No evidence-backed profit opportunities match";
-      if (emptyCopy) emptyCopy.textContent = "BidAI Pro will not place unresearched listings in Top profit. Change the filters or inspect an item's internet-research ledger after evidence is collected.";
-    }
     list.hidden = items.length === 0;
     const pagination = $("[data-queue-pagination]");
     const count = $("[data-queue-visible-count]");
@@ -2882,7 +2952,7 @@ function renderMarketplaceCoverage() {
       const marketplace = marketplaceFor(item);
       return `<article class="watch-card">
         <div class="watch-card-top"><span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span><div><h4>${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</h4><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${timeLabel(item)}</p></div></div>
-        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Best exit</span><strong>${escapeHtml(recommendationLabel(a.recommendationState))}</strong></div><div><span>Target-safe ceiling</span><strong>${money(a.maxBid)}</strong></div><div><span>Likely profit now</span><strong>${a.decisionProfitAtCurrentBid === null ? "Unavailable" : money(a.decisionProfitAtCurrentBid)}</strong></div></div>
+        <div class="watch-card-metrics"><div><span>Observed bid</span><strong>${money(item.currentBid)}</strong></div><div><span>Bid-safe answer</span><strong>${escapeHtml(decisionDisplayLabel(a))}</strong></div><div><span>Target-safe ceiling</span><strong>${a.maxBid > 0 ? money(a.maxBid) : "Not established"}</strong></div><div><span>${a.decisionProfitAtCurrentBid !== null ? "Likely profit now" : "Retail-value profit"}</span><strong>${Number.isFinite(a.decisionProfitAtCurrentBid ?? a.bestPriceConservativeProfitAtCurrentBid) ? money(a.decisionProfitAtCurrentBid ?? a.bestPriceConservativeProfitAtCurrentBid) : "Unavailable"}</strong></div></div>
         <div class="watch-card-actions"><button class="button button-primary" type="button" data-open-id="${escapeHtml(item.id)}">Open analysis</button>${sourceUrl ? `<a class="button button-dark" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener">Source listing ↗</a>` : ""}<button class="button button-quiet" type="button" data-watch-id="${escapeHtml(item.id)}">Remove</button></div>
       </article>`;
     }).join("");
@@ -3572,6 +3642,7 @@ function renderMarketplaceCoverage() {
       categoryRootFor,
       compareOpportunityEntries,
       isActiveOpportunity,
+      matchesQueueMode,
       normalizePublishedResearch,
       parsePublishedSnapshotScript,
       recommendationLabel,
@@ -3622,6 +3693,8 @@ function renderMarketplaceCoverage() {
     if (categoryJumpButton) {
       setView("opportunities");
       populateCategories();
+      queueMode = "all";
+      if ($("#signal-filter")) $("#signal-filter").value = "all";
       $("#category-filter").value = categoryJumpButton.dataset.categoryJump;
       visibleQueueLimit = QUEUE_PAGE_SIZE;
       renderOpportunities();

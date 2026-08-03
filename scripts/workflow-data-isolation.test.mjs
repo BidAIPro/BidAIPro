@@ -24,6 +24,9 @@ test("generated snapshots are isolated from main and still deployed", async () =
   assert.match(refresh, /actions\/deploy-pages@/);
   assert.match(refresh, /Verify a snapshot is available for deployment/);
   assert.match(refresh, /continue-on-error:\s*true/);
+  assert.match(refresh, /name: Refresh due auction sources[\s\S]*?if: github\.event_name != 'push'[\s\S]*?refresh-all-sources\.mjs/);
+  assert.match(refresh, /name: Enrich with free eBay used and category asking prices[\s\S]*?if: github\.event_name == 'push'[\s\S]*?enrich-ebay-used\.mjs/);
+  assert.match(refresh, /BIDAI_EBAY_USED_BATCH_SIZE:.*'250'.*'100'/);
   assert.doesNotMatch(index, /<script[^>]+src=["']data\/live-snapshots\.js/i);
   assert.match(script, /raw\.githubusercontent\.com\/BidAIPro\/BidAIPro\/auction-data\/data\/live-snapshots\.js/);
   assert.match(script, /async function fetchPublishedSnapshot/);

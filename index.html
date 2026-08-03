@@ -125,7 +125,7 @@
               <div>
                 <span class="section-kicker"><i></i> AUCTION COMMAND CENTER</span>
                 <h2 id="opportunities-heading">Every item. Every exit. Every dollar.</h2>
-                <p>BidAI Pro ranks the strongest evidence-backed profit opportunities first, then opens a complete underwriting dossier covering landed cost, pawn cash, online resale, demand, sale speed, profit scenarios, bid ceilings, comparables, risks, and every missing fact.</p>
+                <p>BidAI Pro ranks bid-safe opportunities first, then price-based retail outlooks, and opens a complete underwriting dossier covering landed cost, pawn cash, retail value, demand, sale speed, profit scenarios, bid ceilings, comparables, risks, and every missing fact.</p>
               </div>
               <div class="snapshot-mode" role="status">
                 <span class="mode-dot" aria-hidden="true"></span>
@@ -173,7 +173,7 @@
               </article>
               <article class="summary-metric">
                 <div class="metric-icon lime" aria-hidden="true">↗</div>
-                <div><span>Top profit now</span><strong data-stat-upside>$0</strong><small>Best modeled exit at the observed bid</small></div>
+                <div><span>Top profit outlook</span><strong data-stat-upside>$0</strong><small>Best safe or conservative price-based spread</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon orange" aria-hidden="true">◷</div>
@@ -185,24 +185,28 @@
                 <div><span>Pawn underwritten</span><strong data-stat-pawn-qualified>0</strong><small>Fresh metal, purity, and weight evidence</small></div>
               </article>
               <article class="summary-metric">
+                <div class="metric-icon blue" aria-hidden="true">$</div>
+                <div><span>Retail priced</span><strong data-stat-retail-priced>0</strong><small>Independent retail-value estimate available</small></div>
+              </article>
+              <article class="summary-metric">
                 <div class="metric-icon blue" aria-hidden="true">D</div>
                 <div><span>Retail demand pass</span><strong data-stat-retail-qualified>0</strong><small>Independent demand clears threshold</small></div>
               </article>
               <article class="summary-metric">
                 <div class="metric-icon neutral" aria-hidden="true">≋</div>
-                <div><span>Likely positive, below target</span><strong data-stat-thin-positive>0</strong><small>Potential profit, but safety target failed</small></div>
-                <button class="summary-card-hitbox" type="button" data-quick-mode="thin" aria-label="Show likely positive items that remain below the safety target"></button>
+                <div><span>Retail value leads</span><strong data-stat-thin-positive>0</strong><small>Price shows upside, but the safe gate failed</small></div>
+                <button class="summary-card-hitbox" type="button" data-quick-mode="thin" aria-label="Show listings with price-based retail upside that are not bid-safe"></button>
               </article>
             </div>
 
             <section class="ranking-doctrine" aria-label="Ranking methodology">
-              <div><span>PROFIT RANKING DOCTRINE</span><strong>YES first. Closest evidence-backed misses next. Unknowns last.</strong></div>
+              <div><span>PROFIT RANKING DOCTRINE</span><strong>Bid-safe YES decisions first. Retail-value estimates next. Unpriced items remain visible.</strong></div>
               <ol>
                 <li><b>1</b><span>Pawn-safe precious metals</span></li>
                 <li><b>2</b><span>Retail-safe with proven demand</span></li>
-                <li><b>3</b><span>Qualified route, margin too low</span></li>
-                <li><b>4</b><span>Price found, demand failed</span></li>
-                <li><b>5</b><span>Insufficient evidence</span></li>
+                <li><b>3</b><span>Retail value supports profit · demand unproven</span></li>
+                <li><b>4</b><span>Priced, but below target or too uncertain</span></li>
+                <li><b>5</b><span>Price research required</span></li>
               </ol>
             </section>
 
@@ -218,7 +222,7 @@
                       <button type="button" data-quick-mode="resale" aria-pressed="false">Highest resale value</button>
                       <button type="button" data-quick-mode="popular" aria-pressed="false">Most popular</button>
                       <button type="button" data-quick-mode="pawn" aria-pressed="false">Pawn-first metals</button>
-                      <button type="button" data-quick-mode="thin" aria-pressed="false">Likely + / below target</button>
+                      <button type="button" data-quick-mode="thin" aria-pressed="false">Retail value leads</button>
                       <button type="button" data-quick-mode="closing" aria-pressed="false">Closing ≤ 5 min</button>
                       <button type="button" data-quick-mode="research" aria-pressed="false">Research gaps</button>
                     </div>
@@ -266,7 +270,7 @@
                   </div>
                 </div>
                 <div class="queue-labels" aria-hidden="true">
-                  <span>RANK / ITEM / BEST EXIT</span><span>OBSERVED / LANDED</span><span>SAFE / BREAK-EVEN</span><span>PROFIT DECISION</span><span>OPEN</span>
+                  <span>RANK / ITEM / BEST EXIT</span><span>OBSERVED / LANDED</span><span>SAFE / BREAK-EVEN</span><span>PROFIT OUTLOOK</span><span>OPEN</span>
                 </div>
                 <div class="opportunity-list" data-opportunity-list></div>
                 <div class="queue-pagination" data-queue-pagination hidden>
