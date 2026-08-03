@@ -739,10 +739,11 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function fetchShopGoodwillJson(path, options = {}) {
+async function fetchShopGoodwillJson(path, options = {}, maximumAttempts = 4) {
   const url = new URL(path, SHOPGOODWILL_API_ORIGIN);
+  const attemptLimit = boundedInteger(maximumAttempts, 4, 1, 4);
   let lastStatus = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
     let response;
     try {
       response = await fetch(url, {
@@ -758,7 +759,7 @@ async function fetchShopGoodwillJson(path, options = {}) {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
-      if (attempt === 3) throw new Error("The ShopGoodwill public catalog request failed.");
+      if (attempt === attemptLimit - 1) throw new Error("The ShopGoodwill public catalog request failed.");
       await sleep(500 * (attempt + 1));
       continue;
     }
@@ -771,7 +772,7 @@ async function fetchShopGoodwillJson(path, options = {}) {
       }
     }
     lastStatus = response.status;
-    if (![403, 429, 500, 502, 503, 504].includes(response.status) || attempt === 3) break;
+    if (![403, 429, 500, 502, 503, 504].includes(response.status) || attempt === attemptLimit - 1) break;
     const retryAfterSeconds = Number.parseInt(response.headers.get("retry-after") || "", 10);
     await sleep(Number.isFinite(retryAfterSeconds)
       ? Math.min(10_000, retryAfterSeconds * 1_000)
@@ -832,11 +833,11 @@ function shopGoodwillSearchRequest(page, searchText = "", categoryId = null) {
   };
 }
 
-async function fetchShopGoodwillSearchPage(page, searchText = "", categoryId = null) {
+async function fetchShopGoodwillSearchPage(page, searchText = "", categoryId = null, maximumAttempts = 4) {
   const payload = await fetchShopGoodwillJson(SHOPGOODWILL_SEARCH_PATH, {
     method: "POST",
     body: JSON.stringify(shopGoodwillSearchRequest(page, searchText, categoryId)),
-  });
+  }, maximumAttempts);
   const items = payload?.searchResults?.items;
   if (!Array.isArray(items)) throw new Error("The ShopGoodwill catalog response did not include listing items.");
   return payload;
@@ -844,7 +845,10 @@ async function fetchShopGoodwillSearchPage(page, searchText = "", categoryId = n
 
 async function fetchOptionalShopGoodwillSearchPage(page, searchText = "", categoryId = null) {
   try {
-    return await fetchShopGoodwillSearchPage(page, searchText, categoryId);
+    // The first catalog page already received the full retry policy. Optional
+    // expansion pages get one attempt so a source-wide block cannot turn
+    // hundreds of bounded requests into a workflow-long retry storm.
+    return await fetchShopGoodwillSearchPage(page, searchText, categoryId, 1);
   } catch (error) {
     const scope = categoryId ? `category ${categoryId}` : (searchText ? `keyword ${JSON.stringify(searchText)}` : "broad catalog");
     console.warn(`[refresh-feed] Skipped ${scope} page ${page}: ${error.message}`);

@@ -24,7 +24,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A complete catalog pass can legitimately exceed 30 minutes when the
+    # public marketplaces expose hundreds of detail pages. Individual source
+    # failures remain isolated, but the successful sources still need enough
+    # time to publish their checkpoint.
+    timeout-minutes: 60
     steps:
       - name: Check out main
         uses: actions/checkout@v6

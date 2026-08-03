@@ -2333,13 +2333,15 @@ function renderMarketplaceCoverage() {
       const sourceStatusLabel = connected
         ? health?.coverageComplete === true || health?.status === "connected-complete"
           ? "REAL RECORDS · COMPLETE LEDGER"
-          : "REAL RECORDS · PARTIAL COVERAGE"
+          : "REAL RECORDS · PARTIAL SAMPLE"
           : snapshotDeliveryUnavailable ? "SNAPSHOT DELIVERY UNAVAILABLE"
             : authorizationRequired ? "AUTHORIZATION REQUIRED"
           : health?.status === "temporarily-unavailable" ? "PUBLIC COLLECTOR TEMPORARILY UNAVAILABLE"
             : "PUBLIC COLLECTOR READY";
       const footerStatus = connected
-        ? `${health?.message ? escapeHtml(health.message) : "Stored records from the latest public check."} Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))}`
+        ? `${Number(health?.discoveredTotal) > 0 && Number(health?.itemCount) >= 0
+          ? `${Number(health.itemCount).toLocaleString("en-US")} of ${Number(health.discoveredTotal).toLocaleString("en-US")} discovered URLs sampled this check. `
+          : ""}${health?.message ? escapeHtml(health.message) : "Stored records from the latest public check."} Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))}`
         : snapshotDeliveryUnavailable ? escapeHtml(publishedSnapshotLoadError || "The published snapshot could not be loaded.")
         : health?.message ? escapeHtml(health.message)
           : checkedAt ? `Checked ${escapeHtml(formatDateTime(new Date(checkedAt).toISOString()))} · no current records`
