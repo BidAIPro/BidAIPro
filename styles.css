@@ -4523,6 +4523,32 @@ body:has(dialog[open]) {
   background: #fff3c9;
 }
 
+.status-pill.value-signal {
+  color: #203d18;
+  border-color: #b7d987;
+  background: #eaf6d7;
+}
+
+.status-pill.popularity-signal {
+  color: #24456c;
+  border-color: #b7cce5;
+  background: #e9f1fb;
+}
+
+.status-pill.popularity-signal.is-verified-demand {
+  color: #315313;
+  border-color: #b6d984;
+  background: #e8f6d2;
+}
+
+.status-pill.popularity-signal.is-auction-interest,
+.status-pill.value-signal.is-unknown,
+.status-pill.popularity-signal.is-unknown {
+  color: #68716b;
+  border-color: #d3d7d2;
+  background: #f1f2ef;
+}
+
 @media (max-width: 520px) {
   .marketplace-grid {
     grid-template-columns: 1fr;

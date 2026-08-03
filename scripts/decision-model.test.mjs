@@ -579,6 +579,61 @@ test("single-metal gold listings remain eligible for conservative melt analysis"
   assert.equal(result.hasPawnEstimate, true);
 });
 
+test("fresh eBay active-listing depth produces a labeled market-presence score without passing resale demand", () => {
+  const model = loadModel();
+  const item = baseItem({
+    comparableSales: [],
+    resaleMarket: null,
+    askingMarket: {
+      status: "insufficient",
+      asOf: new Date().toISOString(),
+      listings: [],
+      marketPresence: {
+        evidenceType: "active-listing-depth",
+        asOf: new Date().toISOString(),
+        searchResultCount: 243,
+        matchedListingCount: 18,
+        sellerCount: 9,
+      },
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.marketPresenceKnown, true);
+  assert.equal(result.popularityEvidenceLevel, "market-presence");
+  assert.ok(result.popularityScore > 0);
+  assert.match(result.popularityEvidenceType, /competing supply, not completed sales/i);
+  assert.equal(result.hasRetailDemandEvidence, false);
+  assert.equal(result.retailDemandPass, false);
+  assert.equal(result.onlinePopularityKnown, false);
+});
+
+test("resale-value and popularity ranking modes sort highest-first with evidence quality visible", () => {
+  const model = loadModel();
+  const assessment = (overrides = {}) => ({
+    hasPriceEstimate: false,
+    bestPriceMedian: 0,
+    bestPriceSampleSize: 0,
+    popularityEvidenceRank: 0,
+    popularityScore: 0,
+    rankTier: 5,
+    rankingScore: 0,
+    decisionProfitAtCurrentBid: null,
+    resalePopularityScore: 0,
+    researchCoverageScore: 0,
+    ...overrides,
+  });
+  const entries = [
+    { item: { title: "Lower value", status: "active" }, assessment: assessment({ hasPriceEstimate: true, bestPriceMedian: 200, popularityEvidenceRank: 2, popularityScore: 90 }) },
+    { item: { title: "Higher value", status: "active" }, assessment: assessment({ hasPriceEstimate: true, bestPriceMedian: 900, popularityEvidenceRank: 3, popularityScore: 55 }) },
+    { item: { title: "Unknown value", status: "active" }, assessment: assessment({ popularityEvidenceRank: 4, popularityScore: 80 }) },
+  ];
+  const byResale = [...entries].sort((left, right) => model.compareOpportunityEntries(left, right, "resale"));
+  assert.deepEqual(byResale.map((entry) => entry.item.title), ["Higher value", "Lower value", "Unknown value"]);
+  const byPopularity = [...entries].sort((left, right) => model.compareOpportunityEntries(left, right, "popular"));
+  assert.deepEqual(byPopularity.map((entry) => entry.item.title), ["Unknown value", "Higher value", "Lower value"]);
+});
+
 test("a stale stored metal weight that disagrees with a leading-decimal title is rejected", () => {
   const model = loadModel();
   const item = baseItem({ title: "Charming 14K Yellow Gold Pendant .8g" });

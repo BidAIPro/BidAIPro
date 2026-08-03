@@ -247,7 +247,7 @@ function first(value, fallback = null) {
   return Array.isArray(value) ? (value[0] ?? fallback) : (value ?? fallback);
 }
 
-function findingSummaries(payload) {
+function findingSearchResult(payload) {
   const response = first(payload?.findItemsAdvancedResponse, {});
   const ack = cleanText(first(response?.ack));
   if (ack && !/success|warning/i.test(ack)) {
@@ -255,8 +255,10 @@ function findingSummaries(payload) {
     throw new Error(message);
   }
   const searchResult = first(response?.searchResult, {});
+  const pagination = first(response?.paginationOutput, {});
   const items = Array.isArray(searchResult?.item) ? searchResult.item : [];
-  return items.map((item) => {
+  const totalEntries = Math.max(0, Math.round(Number(first(pagination?.totalEntries, items.length)) || 0));
+  const summaries = items.map((item) => {
     const price = first(first(item?.sellingStatus, {})?.currentPrice, {});
     const shipping = first(first(item?.shippingInfo, {})?.shippingServiceCost, {});
     const condition = first(item?.condition, {});
@@ -277,6 +279,7 @@ function findingSummaries(payload) {
       seller: { username: cleanText(first(seller?.sellerUserName), "marketplace seller") },
     };
   });
+  return { summaries, totalEntries };
 }
 
 async function searchFinding(query, appId) {
@@ -301,7 +304,7 @@ async function searchFinding(query, appId) {
     error.status = response.status;
     throw error;
   }
-  return findingSummaries(await response.json());
+  return findingSearchResult(await response.json());
 }
 
 function shippingTotal(summary) {
@@ -347,11 +350,15 @@ async function searchUsedListings(target, accessToken, marketplaceId, findingApp
   const primaryQuery = queryFor(target);
   const unique = new Map();
   const queriesTried = [];
+  const queryMetrics = [];
   const collect = async (query, categoryFallback = false) => {
     queriesTried.push(query);
     let summaries;
+    let totalEntries = 0;
     if (findingAppId) {
-      summaries = await searchFinding(query, findingAppId);
+      const result = await searchFinding(query, findingAppId);
+      summaries = result.summaries;
+      totalEntries = result.totalEntries;
     } else {
       const url = new URL(SEARCH_URL);
       url.searchParams.set("q", query);
@@ -371,11 +378,15 @@ async function searchUsedListings(target, accessToken, marketplaceId, findingApp
       }
       const payload = await response.json();
       summaries = Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : [];
+      totalEntries = Math.max(0, Math.round(Number(payload?.total) || summaries.length));
     }
+    let matchedListings = 0;
     for (const summary of summaries) {
       const listing = normalizeListing(summary, target, categoryFallback ? query : target.title, categoryFallback);
+      if (listing) matchedListings += 1;
       if (listing && !unique.has(listing.externalId)) unique.set(listing.externalId, listing);
     }
+    queryMetrics.push({ query, categoryFallback, totalEntries, returnedEntries: summaries.length, matchedListings });
   };
   await collect(primaryQuery);
   const initialClose = [...unique.values()].filter((listing) => listing.matchScore >= CLOSE_MATCH_SCORE);
@@ -396,6 +407,19 @@ async function searchUsedListings(target, accessToken, marketplaceId, findingApp
   const categoryAnalogCount = analogStats.listings.filter((listing) => listing.matchTier === "category-analog").length;
   const planningReservePercent = categoryAnalogCount > 0 ? 65 : 55;
   const analogChannel = findingAppId ? "eBay Finding API free active asking prices" : "eBay Browse API active asking prices";
+  const primaryMetrics = queryMetrics.find((entry) => !entry.categoryFallback) || queryMetrics[0] || null;
+  const marketPresence = {
+    status: closeStats.sampleSize > 0 ? "available" : "insufficient",
+    channel: analogChannel,
+    evidenceType: "active-listing-depth",
+    asOf,
+    query: primaryQuery,
+    searchResultCount: Math.max(0, Number(primaryMetrics?.totalEntries) || 0),
+    returnedListingCount: Math.max(0, Number(primaryMetrics?.returnedEntries) || 0),
+    matchedListingCount: closeStats.sampleSize,
+    sellerCount: closeStats.sourceCount,
+    note: "Active matched listings measure market presence and competing supply, not completed-sale demand or sell-through.",
+  };
   return {
     askingMarket: {
       status: exactAvailable ? "available" : "insufficient",
@@ -407,6 +431,7 @@ async function searchUsedListings(target, accessToken, marketplaceId, findingApp
       queriesTried,
       usedOnly: true,
       sampleSize: closeStats.sampleSize,
+      marketPresence,
       ...(exactAvailable ? {
         priceLow: closeStats.priceLow,
         priceMedian: closeStats.priceMedian,
@@ -462,6 +487,7 @@ async function searchUsedListings(target, accessToken, marketplaceId, findingApp
         ratingAverage: null,
         note: "Active asking offers do not establish demand or sell-through.",
       },
+      marketPresence,
       offers: analogStats.listings,
     } : null,
     retailHistoryEntry: analogAvailable ? {

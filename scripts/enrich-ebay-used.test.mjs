@@ -93,7 +93,11 @@ test("free eBay Finding pricing works with an App ID and no client secret", asyn
     shippingInfo: [{ shippingServiceCost: [{ __value__: "5", "@currencyId": "USD" }] }],
     sellerInfo: [{ sellerUserName: [index % 2 ? "seller-two" : "seller-one"] }],
   }));
-  const payload = { findItemsAdvancedResponse: [{ ack: ["Success"], searchResult: [{ item: items }] }] };
+  const payload = { findItemsAdvancedResponse: [{
+    ack: ["Success"],
+    paginationOutput: [{ totalEntries: ["243"] }],
+    searchResult: [{ item: items }],
+  }] };
   const preload = join(sample.root, "mock-finding-fetch.mjs");
   await writeFile(preload, `
     const payload = JSON.parse(Buffer.from(process.env.TEST_PAYLOAD, "base64").toString("utf8"));
@@ -121,6 +125,10 @@ test("free eBay Finding pricing works with an App ID and no client secret", asyn
   assert.equal(item.askingMarket.status, "available");
   assert.equal(item.askingMarket.sampleSize, 5);
   assert.equal(item.askingMarket.priceMedian, 165);
+  assert.equal(item.askingMarket.marketPresence.searchResultCount, 243);
+  assert.equal(item.askingMarket.marketPresence.matchedListingCount, 5);
+  assert.equal(item.askingMarket.marketPresence.sellerCount, 2);
+  assert.match(item.askingMarket.marketPresence.note, /not completed-sale demand/i);
   assert.match(result.stdout, /free eBay Finding API/);
 });
 
@@ -165,6 +173,8 @@ test("five matched used listings produce online used price statistics", async (t
   assert.equal(item.askingMarket.priceMedian, 165);
   assert.equal(item.askingMarket.priceAverage, 165);
   assert.equal(item.askingMarket.priceHigh, 189);
+  assert.equal(item.askingMarket.marketPresence.searchResultCount, 5);
+  assert.equal(item.askingMarket.marketPresence.matchedListingCount, 5);
   assert.equal(item.askingMarket.listings.length, 5);
   assert.equal(item.askingMarketHistory.length, 1);
 });

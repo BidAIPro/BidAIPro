@@ -1435,6 +1435,65 @@
     const onlinePopularityKnown = hasRetailDemandEvidence;
     const productReviewCountMax = retailMarketFresh ? Math.max(0, Math.round(Number(item.retailMarket?.productInterest?.reviewCountMax) || 0)) : 0;
     const productInterestKnown = productReviewCountMax > 0;
+    const productInterestScore = productInterestKnown
+      ? Math.round(clamp(Math.log10(productReviewCountMax + 1) / 4) * 100)
+      : 0;
+    const marketPresenceSource = item.askingMarket?.marketPresence && typeof item.askingMarket.marketPresence === "object"
+      ? item.askingMarket.marketPresence
+      : item.retailMarket?.marketPresence && typeof item.retailMarket.marketPresence === "object"
+        ? item.retailMarket.marketPresence : null;
+    const marketPresenceAsOf = Date.parse(marketPresenceSource?.asOf || "");
+    const marketPresenceMatchedCount = Math.max(0, Math.round(Number(marketPresenceSource?.matchedListingCount) || 0));
+    const marketPresenceSellerCount = Math.max(0, Math.round(Number(marketPresenceSource?.sellerCount) || 0));
+    const marketPresenceSearchResultCount = Math.max(0, Math.round(Number(marketPresenceSource?.searchResultCount) || 0));
+    const marketPresenceKnown = marketPresenceSource?.evidenceType === "active-listing-depth"
+      && Number.isFinite(marketPresenceAsOf)
+      && marketPresenceAsOf <= Date.now() + 300000
+      && Date.now() - marketPresenceAsOf <= 24 * 86400000
+      && marketPresenceMatchedCount > 0;
+    const marketPresenceScore = marketPresenceKnown
+      ? Math.round(100 * (
+        clamp(Math.log2(marketPresenceMatchedCount + 1) / Math.log2(51)) * 0.75
+        + clamp(marketPresenceSellerCount / 10) * 0.25
+      ))
+      : 0;
+    const auctionInterestScore = Number(item.bidCount) > 0
+      ? Math.round(clamp(Math.log2(Number(item.bidCount) + 1) / 6) * 100)
+      : 0;
+    const popularityEvidenceLevel = hasRetailDemandEvidence
+      ? "verified-demand"
+      : productInterestKnown ? "product-interest"
+        : marketPresenceKnown ? "market-presence"
+          : auctionInterestScore > 0 ? "auction-interest" : "none";
+    const popularityEvidenceRank = {
+      "verified-demand": 4,
+      "product-interest": 3,
+      "market-presence": 2,
+      "auction-interest": 1,
+      none: 0,
+    }[popularityEvidenceLevel];
+    const popularityScore = popularityEvidenceLevel === "verified-demand"
+      ? retailDemandScore
+      : popularityEvidenceLevel === "product-interest" ? productInterestScore
+        : popularityEvidenceLevel === "market-presence" ? marketPresenceScore
+          : popularityEvidenceLevel === "auction-interest" ? auctionInterestScore : 0;
+    const popularityLabel = popularityEvidenceLevel === "verified-demand"
+      ? retailDemandScore >= 80 ? "Very high resale demand"
+        : retailDemandScore >= 65 ? "High resale demand"
+          : retailDemandScore >= minimumRetailDemandScore ? "Qualified resale demand"
+            : retailDemandScore >= 35 ? "Weak resale demand" : "Low resale demand"
+      : popularityEvidenceLevel === "product-interest" ? "Product interest only"
+        : popularityEvidenceLevel === "market-presence" ? "Active market presence"
+          : popularityEvidenceLevel === "auction-interest" ? "Auction interest only" : "Popularity unknown";
+    const popularityEvidenceType = popularityEvidenceLevel === "verified-demand"
+      ? retailDemandEvidenceType
+      : popularityEvidenceLevel === "product-interest"
+        ? `${productReviewCountMax.toLocaleString()} external product reviews; interest, not resale sell-through`
+        : popularityEvidenceLevel === "market-presence"
+          ? `${marketPresenceMatchedCount} close active eBay matches from ${marketPresenceSellerCount} seller${marketPresenceSellerCount === 1 ? "" : "s"}; competing supply, not completed sales`
+          : popularityEvidenceLevel === "auction-interest"
+            ? `${Number(item.bidCount) || 0} bids on this source auction; acquisition interest, not resale demand`
+            : "No independent demand, product-interest, or market-presence signal";
     const resalePopularityScore = exitType === "pawn" ? pawnLiquidityScore : onlinePopularityScore;
     const saleLikelihood = exitType === "pawn" ? pawnSaleLikelihood : onlineSaleLikelihood;
     const roi = decisionProfitAtCurrentBid === null ? null : decisionProfitAtCurrentBid / Math.max(1, currentAcquisition);
@@ -1655,6 +1714,18 @@
       onlinePopularityScore,
       onlineSaleLikelihood,
       onlinePopularityKnown,
+      popularityScore,
+      popularityLabel,
+      popularityEvidenceLevel,
+      popularityEvidenceRank,
+      popularityEvidenceType,
+      productInterestScore,
+      marketPresenceKnown,
+      marketPresenceScore,
+      marketPresenceMatchedCount,
+      marketPresenceSellerCount,
+      marketPresenceSearchResultCount,
+      auctionInterestScore,
       retailDemandPass,
       retailDemandScore,
       minimumRetailDemandScore,
@@ -1779,6 +1850,22 @@
     const marketplace = marketplaceFor(item);
     const snapshotPlan = snapshotPlanFor(item);
     const imageUrl = safeHttpUrl(item.imageUrl);
+    const rankingName = queueMode === "resale"
+      ? "Resale value"
+      : queueMode === "popular" ? "Popularity" : "Profit likelihood";
+    const resaleValueBadge = a.hasPriceEstimate
+      ? `<span class="status-pill value-signal">RESALE ${money(a.bestPriceMedian)}</span>`
+      : '<span class="status-pill value-signal is-unknown">RESALE UNKNOWN</span>';
+    const popularityPrefix = {
+      "verified-demand": "DEMAND",
+      "product-interest": "PRODUCT INTEREST",
+      "market-presence": "MARKET PRESENCE",
+      "auction-interest": "AUCTION INTEREST",
+      none: "POPULARITY",
+    }[a.popularityEvidenceLevel] || "POPULARITY";
+    const popularityBadge = a.popularityEvidenceLevel === "none"
+      ? '<span class="status-pill popularity-signal is-unknown">POPULARITY UNKNOWN</span>'
+      : `<span class="status-pill popularity-signal is-${escapeHtml(a.popularityEvidenceLevel)}" title="${escapeHtml(a.popularityEvidenceType)}">${escapeHtml(popularityPrefix)} ${a.popularityScore}/100</span>`;
     const authenticationBadge = item.authenticationStatus === "source-stated"
       ? '<span class="status-pill authentication-source">AUTH CLAIM</span>'
       : "";
@@ -1832,12 +1919,12 @@
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open the profitability analysis${sourceUrl ? `; use the source link to visit ${escapeHtml(marketplace.name)}` : "; source listing URL unavailable"}">
         <div class="item-cell">
-          ${rank ? `<span class="profit-rank" title="Profit likelihood rank">#${rank}</span>` : ""}
+          ${rank ? `<span class="profit-rank" title="${escapeHtml(rankingName)} rank">#${rank}</span>` : ""}
           ${imageUrl ? `<img class="item-thumbnail" src="${escapeHtml(imageUrl)}" alt="" loading="lazy" decoding="async" />` : `<span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>`}
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal, a)}</span>${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal, a)}</span>${resaleValueBadge}${popularityBadge}${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
@@ -2138,12 +2225,9 @@
           { label: "Costs", value: a.shippingKnown ? "Inbound shipping recorded" : `${money(a.shipping)} conservative inbound estimate` },
         ];
     const rankLabel = rank && rankedTotal ? `#${rank.toLocaleString()} of ${rankedTotal.toLocaleString()}` : "Not ranked in current filter";
-    const popularityLabel = !a.hasRetailDemandEvidence
-      ? "Unproven"
-      : a.retailDemandScore >= 80 ? "Very high"
-        : a.retailDemandScore >= 65 ? "High"
-          : a.retailDemandScore >= a.minimumRetailDemandScore ? "Qualified"
-            : a.retailDemandScore >= 35 ? "Weak" : "Low";
+    const rankTypeLabel = queueMode === "resale"
+      ? "RESALE VALUE RANK"
+      : queueMode === "popular" ? "POPULARITY RANK" : "PROFIT RANK";
     const routeName = a.exitType === "pawn"
       ? "Pawn shop / precious-metal buyer"
       : a.exitType === "online-resale" ? a.retailChannel
@@ -2201,7 +2285,7 @@
       : `<strong class="${value >= 0 ? "positive" : "negative"}">${money(value)}</strong>`;
     container.innerHTML = `
       <div class="detail-top">
-        <div class="detail-eyebrow"><span class="section-kicker"><i></i> COMPLETE ITEM UNDERWRITING DOSSIER</span><span class="dossier-rank">PROFIT RANK ${escapeHtml(rankLabel)}</span>${item.publishedResearch ? '<span class="record-source-chip published">PUBLISHED RECORD</span>' : '<span class="record-source-chip private">PRIVATE RECORD</span>'}</div>
+        <div class="detail-eyebrow"><span class="section-kicker"><i></i> COMPLETE ITEM UNDERWRITING DOSSIER</span><span class="dossier-rank">${rankTypeLabel} ${escapeHtml(rankLabel)}</span>${item.publishedResearch ? '<span class="record-source-chip published">PUBLISHED RECORD</span>' : '<span class="record-source-chip private">PRIVATE RECORD</span>'}</div>
         <div class="detail-title-row">
           ${imageUrl ? `<img class="detail-item-image" src="${escapeHtml(imageUrl)}" alt="" decoding="async" />` : `<span class="item-avatar ${escapeHtml(item.accent || "silver")}" aria-hidden="true">${escapeHtml(initialsFor(item))}</span>`}
           <div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(marketplace.name)} · ${escapeHtml(item.externalId)} · ${escapeHtml(item.category)} · ${escapeHtml(item.resaleVertical || "Other")}</p><small>Evidence-weighted profit ranking score: ${a.rankingScore}/100 · research coverage: ${a.researchCoverageScore}/100</small></div>
@@ -2252,7 +2336,7 @@
           <article><span>Highest safe bid</span><strong>${money(a.maxBid)}</strong><small>${a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} remaining headroom` : `${money(Math.abs(a.bidHeadroom))} above the ceiling`}</small></article>
           <article><span>Likely pawn cash</span><strong>${a.hasPawnEstimate ? money(a.pawnCashEstimate) : "Unavailable"}</strong><small>${a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled range` : "verified metal inputs required"}</small></article>
           <article><span>Best online price</span><strong>${a.hasPriceEstimate ? `${money(a.bestPriceMedian)} est.` : "Not found yet"}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}` : "independent market research pending · auction bid excluded"}</small></article>
-          <article><span>Retail popularity</span><strong>${escapeHtml(popularityLabel)}</strong><small>${a.hasRetailDemandEvidence ? `${a.retailDemandScore}/100 · ${escapeHtml(a.retailDemandEvidenceType)}` : "no demand proof"}</small></article>
+          <article><span>Retail popularity</span><strong>${escapeHtml(a.popularityLabel)}</strong><small>${a.popularityEvidenceLevel !== "none" ? `${a.popularityScore}/100 · ${escapeHtml(a.popularityEvidenceType)}` : "no popularity evidence"}</small></article>
           <article><span>Estimated profit now</span><strong class="${Number.isFinite(displayedProfit) && displayedProfit >= 0 ? "positive" : "negative"}">${Number.isFinite(displayedProfit) ? `${money(displayedProfit)} est.` : "Unavailable"}</strong><small>${a.decisionProfitAtCurrentBid !== null ? (a.roi === null ? "ROI unavailable" : `${percent(a.roi)} modeled ROI on landed cost`) : a.exitType === "pawn" && a.hasPawnEstimate ? "pawn cash less landed cost and testing reserve" : a.hasPriceEstimate ? `${escapeHtml(a.bestPriceLabel.toLowerCase())} · not bid-safe` : "requires independent resale price"}</small></article>
           <article><span>Likely time to sell</span><strong>${a.medianDaysToSell === null ? "Not measured" : `${a.medianDaysToSell.toFixed(1)} days`}</strong><small>${a.hasLiquidityEvidence ? `${percent(a.sellThroughRate)} sell-through` : "completed-sale velocity required"}</small></article>
         </section>
@@ -2473,6 +2557,42 @@
       </div>`;
   }
 
+  function compareOpportunityEntries(left, right, mode = queueMode) {
+    const { item: a, assessment: assessmentA } = left;
+    const { item: b, assessment: assessmentB } = right;
+    if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+    if (mode === "resale") {
+      if (assessmentA.hasPriceEstimate !== assessmentB.hasPriceEstimate) return assessmentA.hasPriceEstimate ? -1 : 1;
+      const valueDifference = Number(assessmentB.bestPriceMedian || 0) - Number(assessmentA.bestPriceMedian || 0);
+      if (valueDifference) return valueDifference;
+      const sampleDifference = Number(assessmentB.bestPriceSampleSize || 0) - Number(assessmentA.bestPriceSampleSize || 0);
+      if (sampleDifference) return sampleDifference;
+    } else if (mode === "popular") {
+      const evidenceDifference = Number(assessmentB.popularityEvidenceRank || 0) - Number(assessmentA.popularityEvidenceRank || 0);
+      if (evidenceDifference) return evidenceDifference;
+      const popularityDifference = Number(assessmentB.popularityScore || 0) - Number(assessmentA.popularityScore || 0);
+      if (popularityDifference) return popularityDifference;
+      const resaleValueDifference = Number(assessmentB.bestPriceMedian || 0) - Number(assessmentA.bestPriceMedian || 0);
+      if (resaleValueDifference) return resaleValueDifference;
+    }
+    if (assessmentA.rankTier !== assessmentB.rankTier) return assessmentA.rankTier - assessmentB.rankTier;
+    const scoreDifference = assessmentB.rankingScore - assessmentA.rankingScore;
+    if (scoreDifference) return scoreDifference;
+    const profitDifference = Number(assessmentB.decisionProfitAtCurrentBid ?? Number.NEGATIVE_INFINITY)
+      - Number(assessmentA.decisionProfitAtCurrentBid ?? Number.NEGATIVE_INFINITY);
+    if (Number.isFinite(profitDifference) && profitDifference) return profitDifference;
+    const popularityDifference = assessmentB.resalePopularityScore - assessmentA.resalePopularityScore;
+    if (popularityDifference) return popularityDifference;
+    const coverageDifference = assessmentB.researchCoverageScore - assessmentA.researchCoverageScore;
+    if (coverageDifference) return coverageDifference;
+    const aEnds = Date.parse(a.endsAt || "");
+    const bEnds = Date.parse(b.endsAt || "");
+    if (Number.isFinite(aEnds) && Number.isFinite(bEnds)) return aEnds - bEnds;
+    if (Number.isFinite(aEnds)) return -1;
+    if (Number.isFinite(bEnds)) return 1;
+    return String(a.title || "").localeCompare(String(b.title || ""));
+  }
+
   function filteredItems() {
     const query = String($("#global-search")?.value || "").trim().toLowerCase();
     const signal = $("#signal-filter")?.value || "all";
@@ -2485,7 +2605,7 @@
       .filter(({ item, assessment }) => {
         const haystack = [item.title, item.category, item.resaleVertical, item.authenticationEvidence, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
         const closingWithinFiveMinutes = assessment.hours >= 0 && assessment.hours <= 5 / 60;
-        const matchesMode = queueMode === "all"
+        const matchesMode = ["all", "resale", "popular"].includes(queueMode)
           ? true
           : queueMode === "closing"
           ? item.status === "active" && closingWithinFiveMinutes
@@ -2501,27 +2621,7 @@
           (authentication === "all" || (item.authenticationStatus || "not-supplied") === authentication) &&
           (source === "all" || item.sourceKey === source);
       })
-      .sort((left, right) => {
-        const { item: a, assessment: assessmentA } = left;
-        const { item: b, assessment: assessmentB } = right;
-        if (a.status !== b.status) return a.status === "active" ? -1 : 1;
-        if (assessmentA.rankTier !== assessmentB.rankTier) return assessmentA.rankTier - assessmentB.rankTier;
-        const scoreDifference = assessmentB.rankingScore - assessmentA.rankingScore;
-        if (scoreDifference) return scoreDifference;
-        const profitDifference = Number(assessmentB.decisionProfitAtCurrentBid ?? Number.NEGATIVE_INFINITY)
-          - Number(assessmentA.decisionProfitAtCurrentBid ?? Number.NEGATIVE_INFINITY);
-        if (Number.isFinite(profitDifference) && profitDifference) return profitDifference;
-        const popularityDifference = assessmentB.resalePopularityScore - assessmentA.resalePopularityScore;
-        if (popularityDifference) return popularityDifference;
-        const coverageDifference = assessmentB.researchCoverageScore - assessmentA.researchCoverageScore;
-        if (coverageDifference) return coverageDifference;
-        const aEnds = Date.parse(a.endsAt || "");
-        const bEnds = Date.parse(b.endsAt || "");
-        if (Number.isFinite(aEnds) && Number.isFinite(bEnds)) return aEnds - bEnds;
-        if (Number.isFinite(aEnds)) return -1;
-        if (Number.isFinite(bEnds)) return 1;
-        return String(a.title || "").localeCompare(String(b.title || ""));
-      })
+      .sort((left, right) => compareOpportunityEntries(left, right, queueMode))
       .map(({ item }) => item);
   }
 
@@ -2706,6 +2806,10 @@ function renderMarketplaceCoverage() {
     populateSources();
     const queueTitle = queueMode === "all"
       ? "All listings, strongest evidence first"
+      : queueMode === "resale"
+        ? "Highest estimated resale value first"
+        : queueMode === "popular"
+          ? "Most popular items first"
       : queueMode === "closing"
       ? "Closing within five minutes"
       : queueMode === "pawn" ? "Pawn-first precious metals"
@@ -2752,7 +2856,7 @@ function renderMarketplaceCoverage() {
   }
 
   function setQueueMode(mode) {
-    if (!["all", "profit", "pawn", "thin", "closing", "research"].includes(mode)) return;
+    if (!["all", "profit", "resale", "popular", "pawn", "thin", "closing", "research"].includes(mode)) return;
     queueMode = mode;
     selectedId = "";
     visibleQueueLimit = QUEUE_PAGE_SIZE;
@@ -3466,6 +3570,7 @@ function renderMarketplaceCoverage() {
     window.BIDAI_TEST_API = Object.freeze({
       assess,
       categoryRootFor,
+      compareOpportunityEntries,
       isActiveOpportunity,
       normalizePublishedResearch,
       parsePublishedSnapshotScript,
