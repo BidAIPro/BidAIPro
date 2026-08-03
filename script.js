@@ -477,6 +477,17 @@
     });
   }
 
+  function isActiveOpportunity(item, now = Date.now()) {
+    if (!item || item.status !== "active") return false;
+    const endTime = Date.parse(item.endsAt || "");
+    return !Number.isFinite(endTime) || endTime > now;
+  }
+
+  function activeItems() {
+    const now = Date.now();
+    return allItems().filter((item) => isActiveOpportunity(item, now));
+  }
+
   function invalidateHistoricalIndex() {
     historicalIndexCache = null;
   }
@@ -2203,7 +2214,7 @@
     const vertical = $("#vertical-filter")?.value || "all";
     const authentication = $("#authentication-filter")?.value || "all";
     const source = $("#source-filter")?.value || "all";
-    return allItems()
+    return activeItems()
       .map((item) => ({ item, assessment: assess(item) }))
       .filter(({ item, assessment }) => {
         const haystack = [item.title, item.category, item.resaleVertical, item.authenticationEvidence, item.externalId, item.identifiedAs, item.marketplaceName, item.source].join(" ").toLowerCase();
@@ -2257,7 +2268,7 @@
     if (!select) return;
     const current = select.value;
     const counts = new Map();
-    for (const item of allItems()) {
+    for (const item of activeItems()) {
       const category = categoryRootFor(item.category);
       counts.set(category, (counts.get(category) || 0) + 1);
     }
@@ -2272,7 +2283,7 @@
     const select = $("#source-filter");
     if (!select) return;
     const current = select.value;
-    const items = allItems();
+    const items = activeItems();
     const itemCounts = new Map();
     for (const item of items) itemCounts.set(item.sourceKey, (itemCounts.get(item.sourceKey) || 0) + 1);
     const known = AUCTION_MARKETS.map((market) => ({
@@ -2296,7 +2307,7 @@
     const container = $("[data-category-coverage-grid]");
     if (!container) return;
     const counts = new Map();
-    for (const item of allItems()) {
+    for (const item of activeItems()) {
       const category = categoryRootFor(item.category);
       const current = counts.get(category) || { total: 0, active: 0 };
       current.total += 1;
@@ -2356,7 +2367,7 @@ function renderMarketplaceCoverage() {
   }
 
   function renderStats() {
-    const active = allItems().filter((item) => item.status === "active");
+    const active = activeItems();
     const assessments = active.map(assess);
     const valued = assessments.filter((item) => item.decisionProfitAtCurrentBid !== null);
     const upside = valued.length ? Math.max(0, ...valued.map((item) => item.decisionProfitAtCurrentBid)) : 0;
@@ -2377,7 +2388,8 @@ function renderMarketplaceCoverage() {
     if ($("[data-stat-confidence]")) $("[data-stat-confidence]").textContent = percent(confidence);
     if ($("[data-stat-observations]")) $("[data-stat-observations]").textContent = observations.toLocaleString("en-US");
     $$('[data-opportunity-count]').forEach((el) => { el.textContent = String(active.length); });
-    $$('[data-watch-count]').forEach((el) => { el.textContent = String(workspace.watchIds.length); });
+    const activeWatchCount = active.filter((item) => item.watched).length;
+    $$('[data-watch-count]').forEach((el) => { el.textContent = String(activeWatchCount); });
     $$('[data-research-count]').forEach((el) => { el.textContent = String(PUBLISHED_RESEARCH.items.length); });
     $$('[data-market-count]').forEach((el) => { el.textContent = String(connectedMarkets); });
     $$('[data-research-observed]').forEach((el) => {
@@ -2484,7 +2496,14 @@ function renderMarketplaceCoverage() {
   }
 
   function renderWatchlist() {
-    const watched = allItems().filter((item) => item.watched);
+    const active = activeItems();
+    const activeIds = new Set(active.map((item) => item.id));
+    const retainedWatchIds = workspace.watchIds.filter((id) => activeIds.has(id));
+    if (retainedWatchIds.length !== workspace.watchIds.length) {
+      workspace.watchIds = retainedWatchIds;
+      saveWorkspace();
+    }
+    const watched = active.filter((item) => item.watched);
     const grid = $("[data-watchlist-grid]");
     const empty = $("[data-watch-empty]");
     grid.innerHTML = watched.map((item) => {
@@ -2612,6 +2631,13 @@ function renderMarketplaceCoverage() {
   }
 
   function toggleWatch(id) {
+    if (!activeItems().some((item) => item.id === id)) {
+      workspace.watchIds = workspace.watchIds.filter((value) => value !== id);
+      saveWorkspace();
+      toast("This auction has ended and was removed from active views.");
+      renderCurrentView();
+      return;
+    }
     if (workspace.watchIds.includes(id)) {
       workspace.watchIds = workspace.watchIds.filter((value) => value !== id);
       toast("Removed from watchlist.");
@@ -2625,6 +2651,12 @@ function renderMarketplaceCoverage() {
   }
 
   function openItem(id) {
+    if (!activeItems().some((item) => item.id === id)) {
+      selectedId = "";
+      toast("This auction has ended and was removed from active views.");
+      renderOpportunities();
+      return;
+    }
     selectedId = id;
     setView("opportunities");
     window.setTimeout(() => {
@@ -2635,7 +2667,7 @@ function renderMarketplaceCoverage() {
   function syncAnalysisModal() {
     const source = $("[data-opportunity-detail]");
     const target = $("[data-item-modal-content]");
-    const item = allItems().find((candidate) => candidate.id === selectedId);
+    const item = activeItems().find((candidate) => candidate.id === selectedId);
     if (!source || !target || !item) return false;
     target.innerHTML = source.innerHTML;
     const heading = $("#analysis-modal-heading");
@@ -3168,6 +3200,7 @@ function renderMarketplaceCoverage() {
     window.BIDAI_TEST_API = Object.freeze({
       assess,
       categoryRootFor,
+      isActiveOpportunity,
       normalizePublishedResearch,
       parsePublishedSnapshotScript,
       recommendationLabel,
@@ -3283,7 +3316,7 @@ function renderMarketplaceCoverage() {
       if (window.confirm("Clear imported snapshots, observation history, and your watchlist from this browser?")) {
         workspace = { userItems: [], watchIds: [], settings: { ...workspace.settings } };
         invalidateHistoricalIndex();
-        selectedId = PUBLISHED_RESEARCH.items[0]?.id || "";
+        selectedId = activeItems()[0]?.id || "";
         saveWorkspace();
         renderStats();
         toast("Private workspace data cleared.");

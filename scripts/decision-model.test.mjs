@@ -136,6 +136,24 @@ test("snapshot cadence is configurable outside the locked final five and one min
   assert.match(plan(50_000).label, /5 sec/);
 });
 
+test("ended and time-expired auctions are excluded from active opportunity views", () => {
+  const model = loadModel();
+  const now = Date.parse("2026-08-03T02:00:00.000Z");
+
+  assert.equal(model.isActiveOpportunity({
+    status: "active",
+    endsAt: "2026-08-03T02:00:01.000Z",
+  }, now), true);
+  assert.equal(model.isActiveOpportunity({
+    status: "active",
+    endsAt: "2026-08-03T01:59:59.000Z",
+  }, now), false);
+  assert.equal(model.isActiveOpportunity({
+    status: "ended",
+    endsAt: "2026-08-03T03:00:00.000Z",
+  }, now), false);
+});
+
 test("online resale becomes the recommendation when pawn misses the target-safe ceiling", () => {
   const model = loadModel();
   const result = model.assess(baseItem({ currentBid: 350 }));
