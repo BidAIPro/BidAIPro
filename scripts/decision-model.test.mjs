@@ -476,6 +476,166 @@ test("public web research produces a provisional price and profit estimate witho
   assert.equal(result.researchProvisionalMaxBid, 0);
 });
 
+test("an exact free retail-catalog match produces a visible price but never a safe used-resale bid", () => {
+  const model = loadModel();
+  const checkedAt = new Date().toISOString();
+  const item = baseItem({
+    currentBid: 40,
+    comparableSales: [],
+    resaleMarket: null,
+    freeRetailMarket: {
+      status: "reference-only",
+      provider: "upcitemdb",
+      asOf: checkedAt,
+      evidenceType: "current-retail-offers",
+      catalog: {
+        matchTier: "exact-model",
+        matchScore: 96,
+        evidenceType: "current-retail-offers",
+        sampleSize: 1,
+        sourceCount: 1,
+        priceLow: 529,
+        priceMedian: 529,
+        priceAverage: 529,
+        priceHigh: 529,
+        planningReservePercent: 65,
+        sourceUrl: "https://www.upcitemdb.com/upc/887276353340",
+      },
+      offers: [{
+        id: "upc-offer-1",
+        title: "Brand Model 123 Watch",
+        price: 529,
+        totalPrice: 529,
+        url: "https://merchant.example/model-123",
+        condition: "new",
+        source: "Actual Retailer",
+        matchScore: 96,
+      }],
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasFreeRetailReference, true);
+  assert.equal(result.hasPriceEstimate, true);
+  assert.equal(result.bestPriceKind, "retail-catalog-reference");
+  assert.equal(result.bestPriceMedian, 529);
+  assert.equal(result.bestPricePlanningFactor, 0.35);
+  assert.equal(result.bestPriceLabel, "Matched retail catalog reference");
+  assert.equal(result.hasResaleEvidence, false);
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.maxBid, 0);
+  assert.equal(result.recommendationState, "no-evidence");
+  assert.equal(result.pricingLastCheckedAt, checkedAt);
+  assert.ok(Number.isFinite(result.bestPriceProfitAtCurrentBid));
+});
+
+test("stale catalog merchant offers never become a current retail value", () => {
+  const model = loadModel();
+  const checkedAt = new Date().toISOString();
+  const item = baseItem({
+    comparableSales: [],
+    resaleMarket: null,
+    freeRetailMarket: {
+      status: "reference-only",
+      provider: "upcitemdb",
+      asOf: checkedAt,
+      catalog: {
+        matchTier: "exact-model",
+        matchScore: 96,
+        evidenceType: "retail-catalog-identity-only",
+        sampleSize: 0,
+        sourceCount: 0,
+        priceLow: null,
+        priceMedian: null,
+        priceAverage: null,
+        priceHigh: null,
+        sourceUrl: "https://www.upcitemdb.com/upc/818279027259",
+      },
+      offers: [{
+        id: "old-offer",
+        title: "Brand Model 123 Watch",
+        totalPrice: 999,
+        url: "https://merchant.example/old",
+        source: "Old merchant",
+        matchScore: 96,
+        isCurrent: false,
+        freshness: "stale",
+      }],
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasFreeRetailReference, false);
+  assert.equal(result.hasPriceEstimate, false);
+  assert.equal(result.bestPriceKind, "unpriced");
+  assert.equal(result.bestPriceMedian, null);
+  assert.equal(result.maxBid, 0);
+});
+
+test("an authorized partner retail catalog outranks a weaker keyless reference", () => {
+  const model = loadModel();
+  const checkedAt = new Date().toISOString();
+  const item = baseItem({
+    currentBid: 50,
+    comparableSales: [],
+    resaleMarket: null,
+    partnerRetailMarket: {
+      status: "available",
+      provider: "rakuten",
+      asOf: checkedAt,
+      catalog: {
+        matchTier: "exact-model",
+        matchScore: 97,
+        evidenceType: "current-retail-merchant-offers",
+        sampleSize: 3,
+        sourceCount: 3,
+        priceLow: 480,
+        priceMedian: 500,
+        priceAverage: 500,
+        priceHigh: 520,
+        planningReservePercent: 55,
+        sourceUrl: "https://retailer.example/model-123",
+      },
+      offers: [{
+        id: "partner-offer",
+        title: "Brand Model 123 Watch",
+        totalPrice: 500,
+        url: "https://retailer.example/model-123",
+        source: "Partner retailer",
+        matchScore: 97,
+        isCurrent: true,
+        freshness: "current",
+      }],
+    },
+    freeRetailMarket: {
+      status: "reference-only",
+      provider: "upcitemdb",
+      asOf: checkedAt,
+      catalog: {
+        matchTier: "exact-model",
+        matchScore: 95,
+        evidenceType: "current-retail-merchant-offers",
+        sampleSize: 1,
+        sourceCount: 1,
+        priceLow: 300,
+        priceMedian: 300,
+        priceAverage: 300,
+        priceHigh: 300,
+        sourceUrl: "https://www.upcitemdb.com/upc/123456789012",
+      },
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasFreeRetailReference, true);
+  assert.equal(result.freeRetailProvider, "rakuten");
+  assert.equal(result.bestPriceMedian, 500);
+  assert.equal(result.bestPriceSampleSize, 3);
+  assert.equal(result.hasResaleEvidence, false);
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.maxBid, 0);
+});
+
 test("a real Google Shopping analog produces a conservative price without becoming an exact resale comp", () => {
   const model = loadModel();
   const offers = Array.from({ length: 6 }, (_, index) => ({

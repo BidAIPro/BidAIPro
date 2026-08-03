@@ -7,6 +7,10 @@ on:
   schedule:
     - cron: "9 * * * *"
     - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+    # One daily pass through the keyless retail-catalog allowance. Keeping this
+    # separate prevents the 20-search/day free quota from being exhausted by
+    # the hourly auction refresh.
+    - cron: "23 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -112,19 +116,36 @@ jobs:
           BIDAI_RESALE_BATCH_SIZE: "500"
         run: node scripts/enrich-resale.mjs
 
-      - name: Enrich with free eBay used and category asking prices
+      - name: Enrich with keyless exact-product retail references
         continue-on-error: true
-        # Run pricing after a GitHub Desktop push too, so a deployment does not
-        # skip the only built-in free retail-value connector.
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 5 * * *'
+        env:
+          BIDAI_FREE_RETAIL_BATCH_SIZE: "20"
+          BIDAI_FREE_RETAIL_DELAY_MS: "31000"
+        run: node scripts/enrich-free-retail.mjs
+
+      - name: Enrich with free-account Rakuten partner retail prices
+        continue-on-error: true
+        # Rakuten Product Search is the high-volume current-retail tier. It is
+        # a free publisher API, but it requires the publisher bearer token and
+        # returns products only from partnered advertisers.
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
+        env:
+          BIDAI_RAKUTEN_ACCESS_TOKEN: ${{ secrets.BIDAI_RAKUTEN_ACCESS_TOKEN }}
+          BIDAI_RAKUTEN_RETAIL_BATCH_SIZE: "300"
+          BIDAI_RAKUTEN_RETAIL_DELAY_MS: "650"
+        run: node scripts/enrich-rakuten-retail.mjs
+
+      - name: Enrich with authorized eBay Browse used asking prices
+        continue-on-error: true
+        # eBay retired Finding in 2025. Browse is the supported replacement and
+        # requires both production client credentials; there is no fake or
+        # scraped fallback when those credentials are absent.
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
           BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
           BIDAI_EBAY_CLIENT_SECRET: ${{ secrets.BIDAI_EBAY_CLIENT_SECRET }}
-          BIDAI_EBAY_USE_BROWSE: ${{ vars.BIDAI_EBAY_USE_BROWSE || 'false' }}
           BIDAI_EBAY_MARKETPLACE_ID: "EBAY_US"
-          # Each unique product uses at most one title query plus one category
-          # query. A 100-query-group hourly batch is bounded to 4,800 searches
-          # per day in the worst case.
           BIDAI_EBAY_USED_BATCH_SIZE: ${{ github.event_name == 'push' && '250' || '100' }}
         run: node scripts/enrich-ebay-used.mjs
 

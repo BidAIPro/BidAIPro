@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 const OUTPUT_PREFIX = "window.BIDAI_LIVE_SNAPSHOTS = ";
 const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
 const SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search";
-const FINDING_URL = "https://svcs.ebay.com/services/search/FindingService/v1";
 const OAUTH_SCOPE = "https://api.ebay.com/oauth/api_scope";
 const MAX_LISTINGS = 50;
 const MAX_HISTORY = 365;
@@ -243,70 +242,6 @@ async function obtainAccessToken(clientId, clientSecret) {
   return accessToken;
 }
 
-function first(value, fallback = null) {
-  return Array.isArray(value) ? (value[0] ?? fallback) : (value ?? fallback);
-}
-
-function findingSearchResult(payload) {
-  const response = first(payload?.findItemsAdvancedResponse, {});
-  const ack = cleanText(first(response?.ack));
-  if (ack && !/success|warning/i.test(ack)) {
-    const message = cleanText(first(first(response?.errorMessage, {})?.error, {})?.message, "eBay Finding API rejected the request.");
-    throw new Error(message);
-  }
-  const searchResult = first(response?.searchResult, {});
-  const pagination = first(response?.paginationOutput, {});
-  const items = Array.isArray(searchResult?.item) ? searchResult.item : [];
-  const totalEntries = Math.max(0, Math.round(Number(first(pagination?.totalEntries, items.length)) || 0));
-  const summaries = items.map((item) => {
-    const price = first(first(item?.sellingStatus, {})?.currentPrice, {});
-    const shipping = first(first(item?.shippingInfo, {})?.shippingServiceCost, {});
-    const condition = first(item?.condition, {});
-    const seller = first(item?.sellerInfo, {});
-    return {
-      itemId: cleanText(first(item?.itemId)),
-      title: cleanText(first(item?.title)),
-      condition: cleanText(first(condition?.conditionDisplayName), "Used"),
-      price: {
-        value: price?.__value__ ?? first(price),
-        currency: price?.["@currencyId"] || "USD",
-      },
-      shippingOptions: [{ shippingCost: {
-        value: shipping?.__value__ ?? first(shipping, 0),
-        currency: shipping?.["@currencyId"] || "USD",
-      } }],
-      itemWebUrl: cleanText(first(item?.viewItemURL)),
-      seller: { username: cleanText(first(seller?.sellerUserName), "marketplace seller") },
-    };
-  });
-  return { summaries, totalEntries };
-}
-
-async function searchFinding(query, appId) {
-  const url = new URL(FINDING_URL);
-  url.searchParams.set("OPERATION-NAME", "findItemsAdvanced");
-  url.searchParams.set("SERVICE-VERSION", "1.13.0");
-  url.searchParams.set("SECURITY-APPNAME", appId);
-  url.searchParams.set("RESPONSE-DATA-FORMAT", "JSON");
-  url.searchParams.set("REST-PAYLOAD", "true");
-  url.searchParams.set("keywords", query);
-  url.searchParams.set("paginationInput.entriesPerPage", String(MAX_LISTINGS));
-  url.searchParams.set("outputSelector(0)", "SellerInfo");
-  url.searchParams.set("itemFilter(0).name", "Condition");
-  url.searchParams.set("itemFilter(0).value", "Used");
-  url.searchParams.set("itemFilter(1).name", "ListingType");
-  url.searchParams.set("itemFilter(1).value", "FixedPrice");
-  url.searchParams.set("itemFilter(2).name", "Currency");
-  url.searchParams.set("itemFilter(2).value", "USD");
-  const response = await fetch(url);
-  if (!response.ok) {
-    const error = new Error(`eBay Finding search failed with HTTP ${response.status}.`);
-    error.status = response.status;
-    throw error;
-  }
-  return findingSearchResult(await response.json());
-}
-
 function shippingTotal(summary) {
   const options = Array.isArray(summary?.shippingOptions) ? summary.shippingOptions : [];
   const costs = options
@@ -346,40 +281,32 @@ function normalizeListing(summary, target, matchTitle = target?.title, categoryF
   };
 }
 
-async function searchUsedListings(target, accessToken, marketplaceId, findingAppId = "") {
+async function searchUsedListings(target, accessToken, marketplaceId) {
   const primaryQuery = queryFor(target);
   const unique = new Map();
   const queriesTried = [];
   const queryMetrics = [];
   const collect = async (query, categoryFallback = false) => {
     queriesTried.push(query);
-    let summaries;
-    let totalEntries = 0;
-    if (findingAppId) {
-      const result = await searchFinding(query, findingAppId);
-      summaries = result.summaries;
-      totalEntries = result.totalEntries;
-    } else {
-      const url = new URL(SEARCH_URL);
-      url.searchParams.set("q", query);
-      url.searchParams.set("filter", "conditions:{USED},buyingOptions:{FIXED_PRICE|BEST_OFFER}");
-      url.searchParams.set("limit", String(MAX_LISTINGS));
-      const response = await fetch(url, {
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "x-ebay-c-marketplace-id": marketplaceId,
-          "accept-language": "en-US",
-        },
-      });
-      if (!response.ok) {
-        const error = new Error(`eBay Browse search failed with HTTP ${response.status}.`);
-        error.status = response.status;
-        throw error;
-      }
-      const payload = await response.json();
-      summaries = Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : [];
-      totalEntries = Math.max(0, Math.round(Number(payload?.total) || summaries.length));
+    const url = new URL(SEARCH_URL);
+    url.searchParams.set("q", query);
+    url.searchParams.set("filter", "conditions:{USED},buyingOptions:{FIXED_PRICE|BEST_OFFER}");
+    url.searchParams.set("limit", String(MAX_LISTINGS));
+    const response = await fetch(url, {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "x-ebay-c-marketplace-id": marketplaceId,
+        "accept-language": "en-US",
+      },
+    });
+    if (!response.ok) {
+      const error = new Error(`eBay Browse search failed with HTTP ${response.status}.`);
+      error.status = response.status;
+      throw error;
     }
+    const payload = await response.json();
+    const summaries = Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : [];
+    const totalEntries = Math.max(0, Math.round(Number(payload?.total) || summaries.length));
     let matchedListings = 0;
     for (const summary of summaries) {
       const listing = normalizeListing(summary, target, categoryFallback ? query : target.title, categoryFallback);
@@ -406,7 +333,7 @@ async function searchUsedListings(target, accessToken, marketplaceId, findingApp
   const query = queriesTried.at(-1) || queryFor(target);
   const categoryAnalogCount = analogStats.listings.filter((listing) => listing.matchTier === "category-analog").length;
   const planningReservePercent = categoryAnalogCount > 0 ? 65 : 55;
-  const analogChannel = findingAppId ? "eBay Finding API free active asking prices" : "eBay Browse API active asking prices";
+  const analogChannel = "eBay Browse API active asking prices";
   const primaryMetrics = queryMetrics.find((entry) => !entry.categoryFallback) || queryMetrics[0] || null;
   const marketPresence = {
     status: closeStats.sampleSize > 0 ? "available" : "insufficient",
@@ -536,8 +463,8 @@ async function mapWithConcurrency(values, concurrency, worker) {
 async function main() {
   const clientId = cleanText(process.env.BIDAI_EBAY_CLIENT_ID);
   const clientSecret = cleanText(process.env.BIDAI_EBAY_CLIENT_SECRET);
-  if (!clientId) {
-    console.log("No-op: eBay developer App ID is not configured.");
+  if (!clientId || !clientSecret) {
+    console.log("No-op: eBay Browse API client ID and client secret are not both configured. The retired Finding API is not used.");
     return;
   }
   const { source, envelope } = await readEnvelope();
@@ -547,23 +474,19 @@ async function main() {
     return;
   }
   const marketplaceId = cleanText(process.env.BIDAI_EBAY_MARKETPLACE_ID, "EBAY_US").toUpperCase();
-  const browseRequested = /^(?:1|true|yes)$/i.test(cleanText(process.env.BIDAI_EBAY_USE_BROWSE));
-  let accessToken = null;
-  let findingAppId = clientId;
-  if (browseRequested && clientSecret) {
-    try {
-      accessToken = await obtainAccessToken(clientId, clientSecret);
-      findingAppId = "";
-    } catch (error) {
-      console.warn(`${error.message} Falling back to the free App-ID Finding API.`);
-    }
+  let accessToken;
+  try {
+    accessToken = await obtainAccessToken(clientId, clientSecret);
+  } catch (error) {
+    console.warn(`${error.message} eBay pricing was skipped; there is no retired-API fallback.`);
+    return;
   }
   let blockedStatus = null;
   const results = await mapWithConcurrency(targetGroups, 4, async (group) => {
     if (blockedStatus) return null;
     const target = group.representative;
     try {
-      return await searchUsedListings(target, accessToken, marketplaceId, findingAppId);
+      return await searchUsedListings(target, accessToken, marketplaceId);
     } catch (error) {
       if ([401, 403, 429].includes(error.status)) {
         if (!blockedStatus) console.warn(`${error.message} Remaining used-price lookups were skipped.`);
@@ -608,8 +531,7 @@ async function main() {
   await writeEnvelope(envelope);
   const available = results.filter((result) => result?.askingMarket?.status === "available").length;
   const analogs = results.filter((result) => result?.retailMarket?.status === "available").length;
-  const transport = findingAppId ? "free eBay Finding API" : "approved eBay Browse API";
-  console.log(`Reviewed ${changed} listing${changed === 1 ? "" : "s"} across ${targetGroups.length} unique product quer${targetGroups.length === 1 ? "y" : "ies"} through the ${transport}; ${available} groups received close-match used pricing and ${analogs} received conservative asking-price analogs.`);
+  console.log(`Reviewed ${changed} listing${changed === 1 ? "" : "s"} across ${targetGroups.length} unique product quer${targetGroups.length === 1 ? "y" : "ies"} through the eBay Browse API; ${available} groups received close-match used pricing and ${analogs} received conservative asking-price analogs.`);
 }
 
 await main();

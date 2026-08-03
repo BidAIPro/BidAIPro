@@ -25,8 +25,12 @@ test("generated snapshots are isolated from main and still deployed", async () =
   assert.match(refresh, /Verify a snapshot is available for deployment/);
   assert.match(refresh, /continue-on-error:\s*true/);
   assert.match(refresh, /name: Refresh due auction sources[\s\S]*?if: github\.event_name != 'push'[\s\S]*?refresh-all-sources\.mjs/);
-  assert.match(refresh, /name: Enrich with free eBay used and category asking prices[\s\S]*?if: github\.event_name == 'push'[\s\S]*?enrich-ebay-used\.mjs/);
+  assert.match(refresh, /cron: "23 5 \* \* \*"/);
+  assert.match(refresh, /name: Enrich with keyless exact-product retail references[\s\S]*?BIDAI_FREE_RETAIL_BATCH_SIZE: "20"[\s\S]*?enrich-free-retail\.mjs/);
+  assert.match(refresh, /name: Enrich with free-account Rakuten partner retail prices[\s\S]*?BIDAI_RAKUTEN_ACCESS_TOKEN:[\s\S]*?BIDAI_RAKUTEN_RETAIL_BATCH_SIZE: "300"[\s\S]*?enrich-rakuten-retail\.mjs/);
+  assert.match(refresh, /name: Enrich with authorized eBay Browse used asking prices[\s\S]*?if: github\.event_name == 'push'[\s\S]*?enrich-ebay-used\.mjs/);
   assert.match(refresh, /BIDAI_EBAY_USED_BATCH_SIZE:.*'250'.*'100'/);
+  assert.doesNotMatch(refresh, /BIDAI_EBAY_USE_BROWSE/);
   assert.doesNotMatch(index, /<script[^>]+src=["']data\/live-snapshots\.js/i);
   assert.match(script, /raw\.githubusercontent\.com\/BidAIPro\/BidAIPro\/auction-data\/data\/live-snapshots\.js/);
   assert.match(script, /async function fetchPublishedSnapshot/);

@@ -81,55 +81,22 @@ test("missing eBay credentials is a byte-stable no-op", async (t) => {
   assert.equal(await readFile(sample.path, "utf8"), before);
 });
 
-test("free eBay Finding pricing works with an App ID and no client secret", async (t) => {
+test("an App ID without a client secret cannot use the retired Finding API", async (t) => {
   const sample = await fixture();
   t.after(() => rm(sample.root, { recursive: true, force: true }));
-  const items = [120, 140, 160, 180, 200].map((price, index) => ({
-    itemId: [`finding-${index}`],
-    title: [`Sony PlayStation 5 Disc Edition Console ${index}`],
-    viewItemURL: [`https://www.ebay.com/itm/finding-${index}`],
-    condition: [{ conditionDisplayName: ["Used"] }],
-    sellingStatus: [{ currentPrice: [{ __value__: String(price), "@currencyId": "USD" }] }],
-    shippingInfo: [{ shippingServiceCost: [{ __value__: "5", "@currencyId": "USD" }] }],
-    sellerInfo: [{ sellerUserName: [index % 2 ? "seller-two" : "seller-one"] }],
-  }));
-  const payload = { findItemsAdvancedResponse: [{
-    ack: ["Success"],
-    paginationOutput: [{ totalEntries: ["243"] }],
-    searchResult: [{ item: items }],
-  }] };
-  const preload = join(sample.root, "mock-finding-fetch.mjs");
-  await writeFile(preload, `
-    const payload = JSON.parse(Buffer.from(process.env.TEST_PAYLOAD, "base64").toString("utf8"));
-    globalThis.fetch = async (url) => {
-      const parsed = new URL(String(url));
-      if (!parsed.hostname.includes("svcs.ebay.com")) throw new Error("Finding API was not used");
-      if (parsed.searchParams.get("SECURITY-APPNAME") !== "free-app-id") throw new Error("Missing App ID");
-      if (parsed.searchParams.get("itemFilter(0).value") !== "Used") throw new Error("Missing used filter");
-      return new Response(JSON.stringify(payload), { status: 200 });
-    };
-  `, "utf8");
-  const result = await runNode(["--import", pathToFileURL(preload).href, join(sample.root, "scripts", "enrich-ebay-used.mjs")], {
+  const before = await readFile(sample.path, "utf8");
+  const result = await runNode([join(sample.root, "scripts", "enrich-ebay-used.mjs")], {
     cwd: sample.root,
     env: {
       ...process.env,
       BIDAI_EBAY_CLIENT_ID: "free-app-id",
       BIDAI_EBAY_CLIENT_SECRET: "",
-      BIDAI_EBAY_USE_BROWSE: "",
-      TEST_PAYLOAD: Buffer.from(JSON.stringify(payload)).toString("base64"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
   assert.equal(result.code, 0, result.stderr);
-  const item = (await readEnvelope(sample.path)).items[0];
-  assert.equal(item.askingMarket.status, "available");
-  assert.equal(item.askingMarket.sampleSize, 5);
-  assert.equal(item.askingMarket.priceMedian, 165);
-  assert.equal(item.askingMarket.marketPresence.searchResultCount, 243);
-  assert.equal(item.askingMarket.marketPresence.matchedListingCount, 5);
-  assert.equal(item.askingMarket.marketPresence.sellerCount, 2);
-  assert.match(item.askingMarket.marketPresence.note, /not completed-sale demand/i);
-  assert.match(result.stdout, /free eBay Finding API/);
+  assert.match(result.stdout, /retired Finding API is not used/i);
+  assert.equal(await readFile(sample.path, "utf8"), before);
 });
 
 test("five matched used listings produce online used price statistics", async (t) => {
@@ -159,7 +126,6 @@ test("five matched used listings produce online used price statistics", async (t
       ...process.env,
       BIDAI_EBAY_CLIENT_ID: "client-id",
       BIDAI_EBAY_CLIENT_SECRET: "client-secret",
-      BIDAI_EBAY_USE_BROWSE: "true",
       TEST_PAYLOAD: Buffer.from(JSON.stringify(payload)).toString("base64"),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -205,7 +171,6 @@ test("new or weakly matched listings cannot create used-price evidence", async (
       ...process.env,
       BIDAI_EBAY_CLIENT_ID: "client-id",
       BIDAI_EBAY_CLIENT_SECRET: "client-secret",
-      BIDAI_EBAY_USE_BROWSE: "true",
       TEST_PAYLOAD: Buffer.from(JSON.stringify(payload)).toString("base64"),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -219,7 +184,7 @@ test("new or weakly matched listings cannot create used-price evidence", async (
   assert.equal(item.askingMarketHistory, undefined);
 });
 
-test("duplicate auctions share free eBay queries and receive a conservative category analog", async (t) => {
+test("duplicate auctions share eBay Browse queries and receive a conservative category analog", async (t) => {
   const sample = await fixture();
   t.after(() => rm(sample.root, { recursive: true, force: true }));
   const envelope = await readEnvelope(sample.path);
@@ -255,7 +220,6 @@ test("duplicate auctions share free eBay queries and receive a conservative cate
       ...process.env,
       BIDAI_EBAY_CLIENT_ID: "client-id",
       BIDAI_EBAY_CLIENT_SECRET: "client-secret",
-      BIDAI_EBAY_USE_BROWSE: "true",
       TEST_PAYLOAD: Buffer.from(JSON.stringify({ itemSummaries: analogs })).toString("base64"),
       TEST_CALL_FILE: callFile,
     },

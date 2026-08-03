@@ -922,6 +922,82 @@
       && marketAnalogLow > 0
       && marketAnalogMedian >= marketAnalogLow
       && marketAnalogHigh >= marketAnalogMedian;
+    const catalogRetailMarkets = [item.partnerRetailMarket, item.freeRetailMarket]
+      .filter((market) => market && typeof market === "object")
+      .sort((left, right) => {
+        const score = (market) => {
+          const catalog = market.catalog && typeof market.catalog === "object" ? market.catalog : {};
+          const asOf = Date.parse(market.asOf || market.checkedAt || "");
+          const fresh = Number.isFinite(asOf) && asOf <= Date.now() + 300000 && Date.now() - asOf <= 45 * 86400000;
+          const priced = Number(catalog.priceMedian) > 0;
+          const sources = Math.max(0, Number(catalog.sourceCount) || 0);
+          const samples = Math.max(0, Number(catalog.sampleSize) || 0);
+          return (fresh ? 1_000_000 : 0) + (priced ? 100_000 : 0) + sources * 1_000 + samples * 10
+            + (Number.isFinite(asOf) ? asOf / 1e12 : 0);
+        };
+        return score(right) - score(left);
+      });
+    const freeRetailMarket = catalogRetailMarkets[0] || {};
+    const freeRetailCatalog = freeRetailMarket.catalog && typeof freeRetailMarket.catalog === "object"
+      ? freeRetailMarket.catalog
+      : freeRetailMarket.reference && typeof freeRetailMarket.reference === "object"
+        ? freeRetailMarket.reference : {};
+    const freeRetailMarketAsOf = Date.parse(freeRetailMarket.asOf || freeRetailMarket.checkedAt || "");
+    const freeRetailFresh = ["available", "reference-only"].includes(String(freeRetailMarket.status || "").toLowerCase())
+      && Number.isFinite(freeRetailMarketAsOf)
+      && freeRetailMarketAsOf <= Date.now() + 300000
+      && Date.now() - freeRetailMarketAsOf <= 45 * 86400000;
+    const qualifyingFreeRetailOffers = (Array.isArray(freeRetailMarket.offers) ? freeRetailMarket.offers : [])
+      .filter((entry) => Number(entry?.totalPrice ?? entry?.price) > 0)
+      .filter((entry) => Boolean(entry?.id || safeHttpUrl(entry?.url)))
+      .filter((entry) => entry?.isCurrent !== false && String(entry?.freshness || "current").toLowerCase() !== "stale")
+      .filter((entry) => {
+        const score = Number(entry?.matchScore ?? freeRetailCatalog.matchScore ?? freeRetailMarket.matchScore);
+        return Number.isFinite(score) && score >= 75;
+      });
+    const uniqueFreeRetailOffers = [...new Map(qualifyingFreeRetailOffers
+      .map((entry) => [comparableKey(entry), entry])).values()];
+    const freeRetailPrices = uniqueFreeRetailOffers
+      .map((entry) => Number(entry.totalPrice ?? entry.price))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const freeRetailValue = (key, fallback = null) => {
+      const value = Number(freeRetailCatalog[key]);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    };
+    const freeRetailLow = freeRetailValue("priceLow", freeRetailPrices.length ? Math.min(...freeRetailPrices) : null);
+    const freeRetailMedian = freeRetailValue("priceMedian", freeRetailPrices.length ? quantile(freeRetailPrices, 0.5) : null);
+    const freeRetailAverage = freeRetailValue(
+      "priceAverage",
+      freeRetailPrices.length ? freeRetailPrices.reduce((sum, value) => sum + value, 0) / freeRetailPrices.length : freeRetailMedian,
+    );
+    const freeRetailHigh = freeRetailValue("priceHigh", freeRetailPrices.length ? Math.max(...freeRetailPrices) : freeRetailMedian);
+    const freeRetailMatchScore = Number(freeRetailCatalog.matchScore ?? freeRetailMarket.matchScore);
+    const freeRetailMatchTier = String(freeRetailCatalog.matchTier || freeRetailMarket.matchTier || "").toLowerCase();
+    const freeRetailExactIdentity = /exact|gtin|upc|ean|isbn|model/.test(freeRetailMatchTier)
+      || (Number.isFinite(freeRetailMatchScore) && freeRetailMatchScore >= 80);
+    const freeRetailSampleSize = Math.max(
+      uniqueFreeRetailOffers.length,
+      Math.round(Number(freeRetailCatalog.sampleSize) || 0),
+      freeRetailMedian > 0 ? 1 : 0,
+    );
+    const freeRetailSourceCount = Math.max(
+      new Set(uniqueFreeRetailOffers.map((entry) => String(entry.source || "").toLowerCase()).filter(Boolean)).size,
+      Math.round(Number(freeRetailCatalog.sourceCount) || 0),
+      safeHttpUrl(freeRetailCatalog.sourceUrl || freeRetailMarket.sourceUrl) ? 1 : 0,
+    );
+    const freeRetailEvidenceType = String(freeRetailCatalog.evidenceType || freeRetailMarket.evidenceType || "retail-catalog-reference");
+    const freeRetailPlanningFactor = clamp(
+      1 - (Number(freeRetailCatalog.planningReservePercent) || (uniqueFreeRetailOffers.length >= 2 ? 55 : 65)) / 100,
+      0.25,
+      0.5,
+    );
+    const hasFreeRetailReference = freeRetailFresh
+      && freeRetailExactIdentity
+      && freeRetailSampleSize >= 1
+      && freeRetailSourceCount >= 1
+      && Number(freeRetailLow) > 0
+      && Number(freeRetailMedian) >= Number(freeRetailLow)
+      && Number(freeRetailHigh) >= Number(freeRetailMedian);
     const uniqueUsedListings = [...new Map([
       ...(hasEbayUsedEvidence ? uniqueEbayUsedListings : []),
       ...(hasRetailUsedEvidence ? retailUsedOffers : []),
@@ -1124,23 +1200,28 @@
     const bestPriceKind = hasResaleEvidence
       ? resaleEvidenceKind
       : hasResearchEstimate ? "web-research"
-        : hasMarketAnalogEstimate ? "market-analog" : "unpriced";
+        : hasFreeRetailReference ? "retail-catalog-reference"
+          : hasMarketAnalogEstimate ? "market-analog" : "unpriced";
     const bestPriceLow = hasResaleEvidence
       ? Number(rawMarketLow)
       : hasResearchEstimate ? Number(researchRawLow)
-        : hasMarketAnalogEstimate ? marketAnalogLow : null;
+        : hasFreeRetailReference ? Number(freeRetailLow)
+          : hasMarketAnalogEstimate ? marketAnalogLow : null;
     const bestPriceMedian = hasResaleEvidence
       ? Number(rawMarketMedian)
       : hasResearchEstimate ? Number(researchRawMedian)
-        : hasMarketAnalogEstimate ? marketAnalogMedian : null;
+        : hasFreeRetailReference ? Number(freeRetailMedian)
+          : hasMarketAnalogEstimate ? marketAnalogMedian : null;
     const bestPriceAverage = hasResaleEvidence
       ? Number(rawMarketAverage ?? rawMarketMedian)
       : hasResearchEstimate ? Number(researchRawAverage ?? researchRawMedian)
-        : hasMarketAnalogEstimate ? (marketAnalogAverage > 0 ? marketAnalogAverage : marketAnalogMedian) : null;
+        : hasFreeRetailReference ? Number(freeRetailAverage ?? freeRetailMedian)
+          : hasMarketAnalogEstimate ? (marketAnalogAverage > 0 ? marketAnalogAverage : marketAnalogMedian) : null;
     const bestPriceHigh = hasResaleEvidence
       ? Number(rawMarketHigh)
       : hasResearchEstimate ? Number(researchRawHigh)
-        : hasMarketAnalogEstimate ? marketAnalogHigh : null;
+        : hasFreeRetailReference ? Number(freeRetailHigh)
+          : hasMarketAnalogEstimate ? marketAnalogHigh : null;
     const hasPriceEstimate = Number(bestPriceMedian) > 0;
     const bestPriceSampleSize = hasResaleEvidence
       ? (resaleEvidenceKind === "completed" ? resaleEvidenceCount
@@ -1148,11 +1229,13 @@
           : resaleEvidenceKind === "specialty-guide" ? 1
             : resaleEvidenceKind === "used-market" ? uniqueUsedListings.length : retailNewOffers.length)
       : hasResearchEstimate ? researchSampleSize
-        : hasMarketAnalogEstimate ? marketAnalogSampleSize : 0;
+        : hasFreeRetailReference ? freeRetailSampleSize
+          : hasMarketAnalogEstimate ? marketAnalogSampleSize : 0;
     const bestPricePlanningFactor = hasResaleEvidence
       ? evidencePlanningFactor
       : hasResearchEstimate ? researchPlanningFactor
-        : hasMarketAnalogEstimate ? marketAnalogPlanningFactor : 0;
+        : hasFreeRetailReference ? freeRetailPlanningFactor
+          : hasMarketAnalogEstimate ? marketAnalogPlanningFactor : 0;
     const bestPricePlanningValue = hasPriceEstimate ? bestPriceMedian * bestPricePlanningFactor : 0;
     const bestPriceLowNet = hasPriceEstimate ? netResale(bestPriceLow) : null;
     const bestPriceEstimatedNet = hasPriceEstimate ? netResale(bestPriceMedian) : null;
@@ -1185,15 +1268,18 @@
     const bestPriceLabel = hasResaleEvidence
       ? "Evidence-qualified resale price"
       : hasResearchEstimate ? "Public-web resale estimate"
-        : hasMarketAnalogEstimate ? "Broad-market analog estimate" : "No independent market price";
+        : hasFreeRetailReference ? "Matched retail catalog reference"
+          : hasMarketAnalogEstimate ? "Broad-market analog estimate" : "No independent market price";
     const bestPriceBasis = hasResaleEvidence
       ? `${resaleEvidenceKind} market evidence`
       : hasResearchEstimate
         ? `${researchSoldCount} sold and ${researchAskingCount} asking/retail public-web observations`
+        : hasFreeRetailReference
+          ? `${freeRetailSampleSize} matched ${/historical/i.test(freeRetailEvidenceType) ? "historical catalog range" : "retail offer"}${freeRetailSampleSize === 1 ? "" : "s"} from ${freeRetailSourceCount} source${freeRetailSourceCount === 1 ? "" : "s"}; exact ${freeRetailMatchTier || "product"} identity with a ${Math.round((1 - freeRetailPlanningFactor) * 100)}% used-condition and uncertainty reserve`
         : hasMarketAnalogEstimate
           ? `${marketAnalogSampleSize} real offers from ${analogSourceCount} sellers through ${marketAnalogChannel}, using ${marketAnalogCategoryCount > 0 ? "a broader category benchmark" : "broader title similarity"} and a ${Math.round((1 - marketAnalogPlanningFactor) * 100)}% planning reserve`
           : "awaiting a matched external sale, offer, specialty guide, or verified metal value; the auction bid is excluded";
-    const pricingChecks = [item.resaleMarket, item.askingMarket, item.retailMarket, item.specialtyMarket, item.researchMarket]
+    const pricingChecks = [item.resaleMarket, item.askingMarket, item.retailMarket, item.partnerRetailMarket, item.freeRetailMarket, item.specialtyMarket, item.researchMarket]
       .filter((value) => value && typeof value === "object");
     const pricingCheckTimes = pricingChecks
       .map((value) => Date.parse(value.asOf || value.researchedAt || value.checkedAt || ""))
@@ -1651,6 +1737,20 @@
       pricingStatus,
       pricingAttempted,
       pricingLastCheckedAt,
+      hasFreeRetailReference,
+      freeRetailLow,
+      freeRetailMedian,
+      freeRetailAverage,
+      freeRetailHigh,
+      freeRetailSampleSize,
+      freeRetailSourceCount,
+      freeRetailPlanningFactor,
+      freeRetailMatchScore,
+      freeRetailMatchTier,
+      freeRetailEvidenceType,
+      freeRetailProvider: String(freeRetailMarket.provider || "retail catalog"),
+      freeRetailSourceUrl: safeHttpUrl(freeRetailCatalog.sourceUrl || freeRetailMarket.sourceUrl),
+      freeRetailMarketAsOf: Number.isFinite(freeRetailMarketAsOf) ? new Date(freeRetailMarketAsOf).toISOString() : null,
       hasMarketAnalogEstimate,
       marketAnalogLow,
       marketAnalogMedian,
@@ -1918,7 +2018,7 @@
       ? "Resale value"
       : queueMode === "popular" ? "Popularity" : "Profit likelihood";
     const resaleValueBadge = a.hasPriceEstimate
-      ? `<span class="status-pill value-signal">RESALE ${money(a.bestPriceMedian)}</span>`
+      ? `<span class="status-pill value-signal">${a.bestPriceKind === "retail-catalog-reference" ? "RETAIL REF" : "RESALE"} ${money(a.bestPriceMedian)}</span>`
       : '<span class="status-pill value-signal is-unknown">RESALE UNKNOWN</span>';
     const popularityPrefix = {
       "verified-demand": "DEMAND",
@@ -2224,10 +2324,17 @@
       "retail-replacement": { title: "New-retail replacement market", unit: "new retail offers", price: "retail", basis: "matched new-retail offers; not used-condition sales" },
       none: { title: "Resale market evidence", unit: "market observations", price: "market", basis: "no usable evidence" },
     }[a.resaleEvidenceKind];
-    const marketOfferLinks = (Array.isArray(item.retailMarket?.offers) ? item.retailMarket.offers : [])
+    const marketOfferLinks = [...new Map([
+      ...(Array.isArray(item.retailMarket?.offers) ? item.retailMarket.offers : []),
+      ...(Array.isArray(item.partnerRetailMarket?.offers) ? item.partnerRetailMarket.offers : [])
+        .filter((entry) => entry?.isCurrent !== false && String(entry?.freshness || "current").toLowerCase() !== "stale"),
+      ...(Array.isArray(item.freeRetailMarket?.offers) ? item.freeRetailMarket.offers : [])
+        .filter((entry) => entry?.isCurrent !== false && String(entry?.freshness || "current").toLowerCase() !== "stale"),
+    ]
       .filter((entry) => safeHttpUrl(entry?.url) && Number(entry?.matchScore) >= (a.hasMarketAnalogEstimate ? 35 : 65))
-      .slice(0, 8);
-    const pricingSearchQuery = encodeURIComponent(String(item.modelKey || item.title || "").trim());
+      .map((entry) => [safeHttpUrl(entry.url), entry])).values()].slice(0, 8);
+    const freeRetailSourceUrl = safeHttpUrl(a.freeRetailSourceUrl);
+    const pricingSearchQuery = encodeURIComponent(String(item.title || "").trim());
     const pricingSearchLinks = [
       { label: "eBay completed listings", url: `https://www.ebay.com/sch/i.html?_nkw=${pricingSearchQuery}&LH_Complete=1&LH_Sold=1` },
       { label: "eBay used listings", url: `https://www.ebay.com/sch/i.html?_nkw=${pricingSearchQuery}&LH_ItemCondition=3000` },
@@ -2242,7 +2349,8 @@
         : "FAIL · Pawn profit does not clear target";
     const onlineRouteLabel = !a.hasResaleEvidence
       ? a.hasResearchEstimate ? `${a.retailValueDecisionLabel} · WEB REFERENCE`
-        : a.hasMarketAnalogEstimate ? `${a.retailValueDecisionLabel} · ${a.marketAnalogChannel}` : "PENDING · Independent market price"
+        : a.hasFreeRetailReference ? `${a.retailValueDecisionLabel} · RETAIL CATALOG REFERENCE`
+          : a.hasMarketAnalogEstimate ? `${a.retailValueDecisionLabel} · ${a.marketAnalogChannel}` : "PENDING · Independent market price"
       : !a.retailDemandPass
         ? `${a.retailValueDecisionLabel} · DEMAND UNPROVEN`
         : a.retailSafeNow ? "PASS · Retail profit clears target"
@@ -2260,6 +2368,8 @@
             ? `NO. At the observed bid, every evidence-qualified route misses the configured profit target. The most you should have paid is ${money(a.maxBid)}.`
             : a.hasResearchEstimate
               ? `NO safe bid yet. Internet research suggests a ${money(a.researchRawMedian)} resale midpoint (${money(a.researchRawLow)}–${money(a.researchRawHigh)} observed), with an estimated ${money(a.researchProfitAtCurrentBid)} profit after the configured costs at the current bid. This is a best guess, not a safe ceiling, because exact-item price and demand evidence remain incomplete.`
+              : a.hasFreeRetailReference
+                ? `NO safe bid yet. BidAI Pro matched this item to an exact retail catalog identity and found a ${money(a.freeRetailMedian)} current retail midpoint (${money(a.freeRetailLow)}–${money(a.freeRetailHigh)}). It applies a ${Math.round((1 - a.freeRetailPlanningFactor) * 100)}% reserve because new retail pricing is not the same as a used resale sale. The price is useful for planning, but a safe bid still requires independent demand or completed-sale evidence.`
               : a.hasMarketAnalogEstimate
                 ? `NO safe bid yet. ${a.marketAnalogSampleSize} real offers from ${a.marketAnalogChannel} produce a broad-market midpoint of ${money(a.marketAnalogMedian)} (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}). BidAI Pro applies a ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve because these are analogous asking offers, not exact completed sales.`
                 : `NO safe bid yet. No independent resale price has been found. The observed auction bid is an acquisition cost and is deliberately excluded from resale valuation. ${a.pricingStatus === "no-match" ? "The latest external search did not produce a defensible match." : "This item is queued for external market-price research."}`;
@@ -2304,6 +2414,8 @@
     else if (!a.hasPawnEstimate) missingIntelligence.push("Pawn value is withheld because fresh precious-metal spot, purity, and weight evidence is incomplete or inapplicable.");
     if (!a.hasResaleEvidence) missingIntelligence.push(publicResearch
       ? `Internet research reviewed ${publicResearch.results.length} result${publicResearch.results.length === 1 ? "" : "s"} and produced a provisional ${money(a.bestPriceMedian)} market estimate, but it is not strong enough to become a safe ceiling without better identity, condition, and demand evidence.`
+      : a.hasFreeRetailReference
+        ? `A recent exact retail catalog reference of ${money(a.bestPriceMedian)} is available, but new retail value is not a used sold price. Completed-sale or verified demand evidence is still required before it can become a safe ceiling.`
       : a.hasMarketAnalogEstimate
         ? `A real broad-market analog of ${money(a.bestPriceMedian)} from ${a.marketAnalogChannel} is available, but an exact item match and completed-sale demand evidence are still required before it can become a safe ceiling.`
         : `No independent market price has been found; the live auction bid is excluded from resale valuation. A closely matched external sale, offer set, guide, or verified metal value is still required.`);
@@ -2433,7 +2545,7 @@
           ${!a.hasForecast ? `<p class="no-history-copy">${escapeHtml(a.forecast.method)}. Category-wide outcomes are shown only as reference and are not used to estimate this item.</p>` : ""}
         </section>
         <section class="detail-section resale-liquidity-panel">
-          <div class="detail-section-heading"><h4>${escapeHtml(marketDescriptor.title)}</h4><span>${a.hasResaleEvidence ? `${marketSampleSize} observation${marketSampleSize === 1 ? "" : "s"} · ${a.marketSourceCount} source${a.marketSourceCount === 1 ? "" : "s"} · ${Math.round(a.marketPlanningHaircut * 100)}% planning reserve` : "real matched evidence required"}</span></div>
+          <div class="detail-section-heading"><h4>${escapeHtml(a.hasFreeRetailReference && !a.hasResaleEvidence ? "Exact product retail reference" : marketDescriptor.title)}</h4><span>${a.hasResaleEvidence ? `${marketSampleSize} observation${marketSampleSize === 1 ? "" : "s"} · ${a.marketSourceCount} source${a.marketSourceCount === 1 ? "" : "s"} · ${Math.round(a.marketPlanningHaircut * 100)}% planning reserve` : a.hasFreeRetailReference ? `${a.freeRetailSampleSize} actual catalog price observation${a.freeRetailSampleSize === 1 ? "" : "s"} · not a used sold comp` : "real matched evidence required"}</span></div>
           ${a.hasResaleEvidence ? `
             <div class="profit-scenarios">
               <div class="downside"><span>Observed low / P20</span><strong>${money(marketLow)}</strong><small>${escapeHtml(marketDescriptor.basis)}</small></div>
@@ -2456,7 +2568,7 @@
             <div class="base"><span>Retail value midpoint</span><strong>${money(a.bestPriceMedian)}</strong><small>${a.bestPriceSampleSize} available price observation${a.bestPriceSampleSize === 1 ? "" : "s"} · average ${money(a.bestPriceAverage)}</small></div>
             <div><span>Conservative planning value</span><strong>${money(a.bestPricePlanningValue)}</strong><small>${Math.round((1 - a.bestPricePlanningFactor) * 100)}% uncertainty reserve applied</small></div>
             <div class="upside"><span>Best available high</span><strong>${money(a.bestPriceHigh)}</strong><small>price-based max ${money(a.bestPriceProvisionalMaxBid)} · not bid-safe</small></div>
-          </div><div class="no-history-state"><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><p>The independent retail-value midpoint implies ${money(a.bestPriceProfitAtCurrentBid)} after costs at the observed bid; the conservative reserved case is ${money(a.bestPriceConservativeProfitAtCurrentBid)}. This remains a price-based planning result until demand is verified.</p></div>` : `<div class="no-history-state"><strong>No independent market price yet</strong><p>${escapeHtml(a.bestPriceBasis)} ${a.pricingLastCheckedAt ? `Last external check: ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "The item is queued for the next configured market-price collection pass."}</p></div><div class="market-source-links"><span>VERIFY THE MARKET NOW</span>${pricingSearchLinks.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.label)} ↗</a>`).join("")}</div>`}
+          </div><div class="no-history-state"><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><p>The independent retail-value midpoint implies ${money(a.bestPriceProfitAtCurrentBid)} after costs at the observed bid; the conservative reserved case is ${money(a.bestPriceConservativeProfitAtCurrentBid)}. This remains a price-based planning result until demand is verified.</p></div>${(marketOfferLinks.length || freeRetailSourceUrl) ? `<div class="market-source-links"><span>CHECK THE PRICE SOURCE</span>${freeRetailSourceUrl ? `<a href="${escapeHtml(freeRetailSourceUrl)}" target="_blank" rel="noreferrer noopener">Open matched product record ↗</a>` : ""}${marketOfferLinks.map((entry) => `<a href="${escapeHtml(safeHttpUrl(entry.url))}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.source || "Retail offer")} · ${money(entry.totalPrice ?? entry.price)} ↗</a>`).join("")}</div>` : ""}` : `<div class="no-history-state"><strong>No independent market price yet</strong><p>${escapeHtml(a.bestPriceBasis)} ${a.pricingLastCheckedAt ? `Last external check: ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "The item is queued for the next configured market-price collection pass."}</p></div><div class="market-source-links"><span>VERIFY THE MARKET NOW</span>${pricingSearchLinks.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.label)} ↗</a>`).join("")}</div>`}
         </section>
         <section class="detail-section channel-playbook">
           <div class="detail-section-heading"><h4>Where and how this item could be sold</h4><span>channel-by-channel exit plan</span></div>
@@ -2473,7 +2585,7 @@
               <p>${a.hasPawnEstimate ? "Evidence supports a precious-metal liquidation estimate, not a guaranteed offer. Test purity and weight, then quote multiple buyers." : "No dollar value is shown because this record lacks the verified precious-metal inputs required for a defensible pawn estimate."}</p>
             </article>
             <article class="channel-plan-card ${a.hasPriceEstimate ? "has-evidence" : "is-unavailable"}">
-              <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : marketplace.name)}</strong></div>
+              <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasFreeRetailReference ? "Matched product retail catalog" : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : marketplace.name)}</strong></div>
               <dl>
                 <div><dt>Best price estimate</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
                 <div><dt>Conservative planning value</dt><dd>${a.hasPriceEstimate ? money(a.bestPricePlanningValue) : "Unavailable"}</dd></div>
