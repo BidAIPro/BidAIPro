@@ -691,6 +691,286 @@
           "note": "Current low-cost retail analog; not proof of used resale demand"
         }
       ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272092045",
+      "query": "Olympia green gray portable manual typewriter West Germany case completed sales",
+      "summary": "Five dated eBay Olympia portable manual typewriter sales span $81 to $299.99, with a $229.99 reference median. The closest visible green SM4 with case sold for $266.50, while a tested Olympia Werke portable with case sold for $229.99.",
+      "limitation": "The ShopGoodwill record does not expose the exact Olympia model or a typing test. Model, service status, typeface, platen condition, case condition, and shipping materially affect value, so this remains a provisional resale estimate rather than a safe ceiling.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 5,
+        "soldSampleSize": 5,
+        "askingSampleSize": 0,
+        "low": 81,
+        "median": 229.99,
+        "average": 215.49,
+        "high": 299.99,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Vintage Olympia SM4 portable green typewriter with case",
+          "url": "https://www.ebay.com/itm/127879805794",
+          "source": "eBay",
+          "price": 266.5,
+          "listingState": "sold",
+          "matchType": "close color and case completed sale",
+          "dateLabel": "Sold Jun 17, 2026",
+          "note": "Used green West German SM4 with case; displayed sold price $266.50"
+        },
+        {
+          "title": "Olympia Werke AG portable manual typewriter with carrying case",
+          "url": "https://www.ebay.com/itm/187965820935",
+          "source": "eBay",
+          "price": 229.99,
+          "listingState": "sold",
+          "matchType": "close maker and case completed sale",
+          "dateLabel": "Sold Jan 21, 2026",
+          "note": "Tested Olympia Werke portable with carrying case"
+        },
+        {
+          "title": "Vintage original 1959 Olympia SM4 manual portable with case",
+          "url": "https://www.ebay.com/itm/167747724383",
+          "source": "eBay",
+          "price": 199.95,
+          "listingState": "sold",
+          "matchType": "close model and case completed sale",
+          "dateLabel": "Sold Dec 22, 2025",
+          "note": "Used 1959 SM4 with case; $63.70 shipping was separate"
+        },
+        {
+          "title": "Olympia De Lux green SM3 with fitted case",
+          "url": "https://www.ebay.com/itm/267609431952",
+          "source": "eBay",
+          "price": 81,
+          "listingState": "sold",
+          "matchType": "close green model auction sale",
+          "dateLabel": "Observed sold Aug 2, 2026",
+          "note": "Tested-working 1956 SM3; auction result with 12 bids"
+        },
+        {
+          "title": "Vintage Olympia SM5 green portable manual typewriter untested",
+          "url": "https://www.ebay.com/itm/236543898522",
+          "source": "eBay",
+          "price": 299.99,
+          "listingState": "sold",
+          "matchType": "close untested green model completed sale",
+          "dateLabel": "Sold status observed Aug 2, 2026",
+          "note": "Untested SM5 analog; exact model differs from the source listing"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272101270",
+      "query": "Celestron EdgeHD 11 279mm optical tube used market price",
+      "summary": "The source photos identify the telescope as the 11-inch (279 mm), 2800 mm focal-length EdgeHD optical tube and show an aftermarket Feather Touch focuser. Celestron listed a used EdgeHD 11 OTA at $3,999.97, an eBay used EdgeHD 11 OTA ended at a displayed $3,750 ask, and an owner reported paying $2,800 used for a broader fork-and-tripod setup. The three-reference midpoint is $3,750.",
+      "limitation": "Only the $2,800 record describes a completed private purchase, and it is older and includes a different configuration. The $3,750 eBay record ended because it was no longer available, and Celestron's $3,999.97 figure is an out-of-stock dealer price. The ShopGoodwill optics were untested and pickup-only, so condition risk is substantial.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 3,
+        "soldSampleSize": 1,
+        "askingSampleSize": 2,
+        "low": 2800,
+        "median": 3750,
+        "average": 3516.66,
+        "high": 3999.97,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Used EdgeHD 11 optical tube assembly",
+          "url": "https://www.celestron.com/products/used-edgehd-11-optical-tube-assembly-cge-dovetail",
+          "source": "Celestron",
+          "price": 3999.97,
+          "listingState": "dealer-out-of-stock",
+          "matchType": "exact model used dealer reference",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "Official used-product page; out of stock, so this is not a completed consumer sale"
+        },
+        {
+          "title": "Celestron EdgeHD 11-inch Schmidt-Cassegrain OTA only",
+          "url": "https://www.ebay.com/itm/327116203633",
+          "source": "eBay",
+          "price": 3750,
+          "listingState": "ended-by-seller",
+          "matchType": "exact model ended listing",
+          "dateLabel": "Ended May 31, 2026",
+          "note": "Used OTA; ended because no longer available, not proof of a $3,750 sale"
+        },
+        {
+          "title": "C11 EdgeHD owner-reported used purchase",
+          "url": "https://www.cloudynights.com/forums/topic/820726-went-to-buy-a-new-c11hd-ota-and-saw-the-price-nope/",
+          "source": "Cloudy Nights",
+          "price": 2800,
+          "listingState": "completed-private-purchase",
+          "matchType": "exact optical model broader setup",
+          "dateLabel": "Reported Apr 20, 2022",
+          "note": "Owner reports paying $2,800 used for OTA, forks, tripod, and accessories; old and not independently verified"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "271863522",
+      "query": "Wonders of Learning Discover Electricity and Magnetism kit sold and active price",
+      "summary": "An eBay like-new set shows sold status with a $9.99 displayed price, while a new sealed set is currently offered at $29.95 plus $20 shipping. The two-price midpoint is $19.97 before selling costs.",
+      "limitation": "The sold listing accepted a best offer, so the actual transaction amount may be below the displayed $9.99 price. The $29.95 listing is active rather than sold, and shipping is unusually high relative to item value. Demand and completeness remain unverified.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 2,
+        "soldSampleSize": 1,
+        "askingSampleSize": 1,
+        "low": 9.99,
+        "median": 19.97,
+        "average": 19.97,
+        "high": 29.95,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Wonders of Learning Discover Electricity and Magnetism educational box set",
+          "url": "https://www.ebay.com/itm/266914492306",
+          "source": "eBay",
+          "price": 9.99,
+          "listingState": "sold",
+          "matchType": "exact product sold-status record",
+          "dateLabel": "Sold Mar 12, 2026",
+          "note": "Displayed at $9.99, but the accepted best-offer amount is not exposed"
+        },
+        {
+          "title": "Wonders of Learning Discover Electricity and Magnetism box set new",
+          "url": "https://www.ebay.com/itm/136657371246",
+          "source": "eBay",
+          "price": 29.95,
+          "listingState": "asking",
+          "matchType": "exact product active listing",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$29.95 ask plus $20 shipping; asking price is not sale proof"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272231861",
+      "query": "mixed denim jean scrap upcycle lot 8 pounds resale price",
+      "summary": "Four public denim-scrap references span $13.50 to $39.90 delivered, with a $28.28 midpoint. The closest 7.8-pound eBay lot ended at a $21.74 ask without a sale, while active 5- and 10-pound lots total about $34.81 and $39.90 with shipping. An 18-pound lot shows 26 sold at $13.50 delivered, indicating demand but also a low market floor.",
+      "limitation": "Only the 18-pound record exposes unit sales, and it is a larger, aggressively priced lot. The closest 7.8-pound record ended unsold. Scrap size, cleanliness, pocket/leg content, fiber blend, usable yield, and shipping weight vary materially, so the range is provisional.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 4,
+        "soldSampleSize": 1,
+        "askingSampleSize": 3,
+        "low": 13.5,
+        "median": 28.28,
+        "average": 27.49,
+        "high": 39.9,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Mixed denim jeans fabric scrap lot 7.8 lb",
+          "url": "https://www.ebay.com/itm/257235656231",
+          "source": "eBay",
+          "price": 21.74,
+          "listingState": "ended-unsold",
+          "matchType": "closest weight ended listing",
+          "dateLabel": "Ended Dec 29, 2025",
+          "note": "7.8-pound mixed denim lot; ended because no longer available"
+        },
+        {
+          "title": "Craft denim 18-pound upcycle lot",
+          "url": "https://www.ebay.com/b/Denim-Crafts-Craft-Fabric-Lots/28162/bn_68775388",
+          "source": "eBay",
+          "price": 13.5,
+          "listingState": "sold",
+          "matchType": "larger-weight sold market",
+          "dateLabel": "26 sold visible Aug 2, 2026",
+          "note": "$13.50 delivered for 18 pounds; materially larger and cheaper per pound"
+        },
+        {
+          "title": "Denim jeans leg scraps 10-pound upcycle lot",
+          "url": "https://www.ebay.com/b/Denim-Crafts-Craft-Fabric-Lots/28162/bn_68775388",
+          "source": "eBay",
+          "price": 39.9,
+          "listingState": "asking",
+          "matchType": "close weight active listing",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$24.95 ask plus $14.95 shipping"
+        },
+        {
+          "title": "Three-piece denim jeans upcycling lot about 5 pounds",
+          "url": "https://www.ebay.com/b/Denim-Crafts-Craft-Fabric-Lots/28162/bn_68775388",
+          "source": "eBay",
+          "price": 34.81,
+          "listingState": "asking",
+          "matchType": "smaller-weight active listing",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$21.99 ask plus $12.82 shipping"
+        }
+      ]
+    },
+    {
+      "sourceKey": "shopgoodwill",
+      "externalId": "272231989",
+      "query": "mixed denim jean scrap upcycle lot 8 pounds resale price",
+      "summary": "Four public denim-scrap references span $13.50 to $39.90 delivered, with a $28.28 midpoint. The closest 7.8-pound eBay lot ended at a $21.74 ask without a sale, while active 5- and 10-pound lots total about $34.81 and $39.90 with shipping. An 18-pound lot shows 26 sold at $13.50 delivered, indicating demand but also a low market floor.",
+      "limitation": "Only the 18-pound record exposes unit sales, and it is a larger, aggressively priced lot. The closest 7.8-pound record ended unsold. Scrap size, cleanliness, pocket/leg content, fiber blend, usable yield, and shipping weight vary materially, so the range is provisional.",
+      "priceSummary": {
+        "currency": "USD",
+        "sampleSize": 4,
+        "soldSampleSize": 1,
+        "askingSampleSize": 3,
+        "low": 13.5,
+        "median": 28.28,
+        "average": 27.49,
+        "high": 39.9,
+        "decisionEligible": false
+      },
+      "results": [
+        {
+          "title": "Mixed denim jeans fabric scrap lot 7.8 lb",
+          "url": "https://www.ebay.com/itm/257235656231",
+          "source": "eBay",
+          "price": 21.74,
+          "listingState": "ended-unsold",
+          "matchType": "closest weight ended listing",
+          "dateLabel": "Ended Dec 29, 2025",
+          "note": "7.8-pound mixed denim lot; ended because no longer available"
+        },
+        {
+          "title": "Craft denim 18-pound upcycle lot",
+          "url": "https://www.ebay.com/b/Denim-Crafts-Craft-Fabric-Lots/28162/bn_68775388",
+          "source": "eBay",
+          "price": 13.5,
+          "listingState": "sold",
+          "matchType": "larger-weight sold market",
+          "dateLabel": "26 sold visible Aug 2, 2026",
+          "note": "$13.50 delivered for 18 pounds; materially larger and cheaper per pound"
+        },
+        {
+          "title": "Denim jeans leg scraps 10-pound upcycle lot",
+          "url": "https://www.ebay.com/b/Denim-Crafts-Craft-Fabric-Lots/28162/bn_68775388",
+          "source": "eBay",
+          "price": 39.9,
+          "listingState": "asking",
+          "matchType": "close weight active listing",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$24.95 ask plus $14.95 shipping"
+        },
+        {
+          "title": "Three-piece denim jeans upcycling lot about 5 pounds",
+          "url": "https://www.ebay.com/b/Denim-Crafts-Craft-Fabric-Lots/28162/bn_68775388",
+          "source": "eBay",
+          "price": 34.81,
+          "listingState": "asking",
+          "matchType": "smaller-weight active listing",
+          "dateLabel": "Observed Aug 2, 2026",
+          "note": "$21.99 ask plus $12.82 shipping"
+        }
+      ]
     }
   ]
 }

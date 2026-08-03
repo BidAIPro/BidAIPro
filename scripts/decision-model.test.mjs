@@ -381,6 +381,12 @@ test("an unsupported item receives zero ceilings instead of an invented exit", (
   assert.equal(result.decisionProfitAtCurrentBid, null);
   assert.equal(result.rankingScore, 0);
   assert.equal(result.bidHeadroom, -result.currentBid);
+  assert.equal(result.hasPriceEstimate, true);
+  assert.equal(result.bestPriceKind, "source-auction-floor");
+  assert.equal(result.bestPriceMedian, result.currentBid);
+  assert.ok(Number.isFinite(result.bestPriceProfitAtCurrentBid));
+  assert.ok(Number.isFinite(result.bestPriceBreakEvenBid));
+  assert.equal(result.bestPriceLabel, "Live online-auction price floor");
 });
 
 test("public web research produces a provisional price and profit estimate without becoming a safe ceiling", () => {
@@ -422,6 +428,9 @@ test("public web research produces a provisional price and profit estimate witho
   assert.equal(result.researchAskingCount, 3);
   assert.equal(result.researchPlanningFactor, 0.55);
   assert.equal(result.hasResaleEvidence, false);
+  assert.equal(result.hasPriceEstimate, true);
+  assert.equal(result.bestPriceKind, "web-research");
+  assert.equal(result.bestPriceMedian, 44);
   assert.equal(result.decisionApproved, false);
   assert.equal(result.maxBid, 0);
   assert.ok(Number.isFinite(result.researchProfitAtCurrentBid));
