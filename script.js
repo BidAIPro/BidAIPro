@@ -914,6 +914,7 @@
     const marketAnalogSampleSize = Math.max(0, Math.round(Number(analogMarket.sampleSize) || 0));
     const marketAnalogCategoryCount = Math.max(0, Math.round(Number(analogMarket.categoryAnalogCount) || 0));
     const marketAnalogPlanningFactor = clamp(1 - (Number(analogMarket.planningReservePercent) || 55) / 100, 0.25, 0.55);
+    const marketAnalogChannel = String(item.retailMarket?.channel || "Broad-market active offers");
     const hasMarketAnalogEstimate = retailMarketFresh
       && marketAnalogSampleSize >= 5
       && uniqueAnalogOffers.length >= marketAnalogSampleSize
@@ -1179,7 +1180,7 @@
       : hasResearchEstimate
         ? `${researchSoldCount} sold and ${researchAskingCount} asking/retail public-web observations`
         : hasMarketAnalogEstimate
-          ? `${marketAnalogSampleSize} real Google Shopping offers from ${analogSourceCount} merchants using ${marketAnalogCategoryCount > 0 ? "a broader category benchmark" : "broader title similarity"} and a ${Math.round((1 - marketAnalogPlanningFactor) * 100)}% planning reserve`
+          ? `${marketAnalogSampleSize} real offers from ${analogSourceCount} sellers through ${marketAnalogChannel}, using ${marketAnalogCategoryCount > 0 ? "a broader category benchmark" : "broader title similarity"} and a ${Math.round((1 - marketAnalogPlanningFactor) * 100)}% planning reserve`
           : "awaiting a matched external sale, offer, specialty guide, or verified metal value; the auction bid is excluded";
     const pricingChecks = [item.resaleMarket, item.askingMarket, item.retailMarket, item.specialtyMarket, item.researchMarket]
       .filter((value) => value && typeof value === "object");
@@ -1552,6 +1553,7 @@
       marketAnalogPlanningFactor,
       analogSourceCount,
       analogConditionBasis,
+      marketAnalogChannel,
       hasResearchEstimate,
       researchRawLow,
       researchRawMedian,
@@ -1793,8 +1795,8 @@
               : a.hasResearchEstimate
                 ? '<span class="status-pill asking-exit">WEB PRICE ESTIMATE</span>'
                 : a.hasMarketAnalogEstimate
-                  ? '<span class="status-pill asking-exit">GOOGLE MARKET ANALOG</span>'
-                : '<span class="status-pill asking-exit">MARKET PRICE QUEUED</span>';
+                  ? '<span class="status-pill asking-exit">FREE MARKET ANALOG</span>'
+                  : '<span class="status-pill asking-exit">MARKET PRICE QUEUED</span>';
     const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(recommendationLabel(a.recommendationState))}</span>`;
     const researchRead = publicResearch ? publicResearchMarketRead(publicResearch, a.currentAcquisition) : null;
     const rowProfit = a.decisionProfitAtCurrentBid;
@@ -1825,8 +1827,8 @@
               : a.hasResearchEstimate
                 ? `${money(a.researchRawMedian)} researched median (${money(a.researchRawLow)}–${money(a.researchRawHigh)}) · ${a.researchSoldCount} sold + ${a.researchAskingCount} asking/retail · provisional, not bid-safe`
                 : a.hasMarketAnalogEstimate
-                  ? `${money(a.marketAnalogMedian)} Google Shopping analog median (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}) · ${a.marketAnalogSampleSize} real offers / ${a.analogSourceCount} merchants · ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve · not bid-safe`
-                : `No independent resale price yet · ${a.pricingStatus === "no-match" ? `last search found no defensible match${a.pricingLastCheckedAt ? ` ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}` : ""}` : "queued for external market research"} · auction bid excluded`;
+                  ? `${money(a.marketAnalogMedian)} ${escapeHtml(a.marketAnalogChannel)} analog median (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}) · ${a.marketAnalogSampleSize} real offers / ${a.analogSourceCount} sellers · ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve · not bid-safe`
+                  : `No independent resale price yet · ${a.pricingStatus === "no-match" ? `last search found no defensible match${a.pricingLastCheckedAt ? ` ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}` : ""}` : "queued for external market research"} · auction bid excluded`;
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open the profitability analysis${sourceUrl ? `; use the source link to visit ${escapeHtml(marketplace.name)}` : "; source listing URL unavailable"}">
         <div class="item-cell">
@@ -2105,7 +2107,7 @@
         : "FAIL · Pawn profit does not clear target";
     const onlineRouteLabel = !a.hasResaleEvidence
       ? a.hasResearchEstimate ? "REFERENCE · Web price estimate only"
-        : a.hasMarketAnalogEstimate ? "REFERENCE · Google Shopping analog" : "PENDING · Independent market price"
+        : a.hasMarketAnalogEstimate ? `REFERENCE · ${a.marketAnalogChannel}` : "PENDING · Independent market price"
       : !a.retailDemandPass
         ? "FAIL · Price found, but demand is unproven"
         : a.retailSafeNow ? "PASS · Retail profit clears target"
@@ -2124,7 +2126,7 @@
             : a.hasResearchEstimate
               ? `NO safe bid yet. Internet research suggests a ${money(a.researchRawMedian)} resale midpoint (${money(a.researchRawLow)}–${money(a.researchRawHigh)} observed), with an estimated ${money(a.researchProfitAtCurrentBid)} profit after the configured costs at the current bid. This is a best guess, not a safe ceiling, because exact-item price and demand evidence remain incomplete.`
               : a.hasMarketAnalogEstimate
-                ? `NO safe bid yet. ${a.marketAnalogSampleSize} real Google Shopping offers produce a broad-market midpoint of ${money(a.marketAnalogMedian)} (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}). BidAI Pro applies a ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve because these are analogous offers, not exact completed sales.`
+                ? `NO safe bid yet. ${a.marketAnalogSampleSize} real offers from ${a.marketAnalogChannel} produce a broad-market midpoint of ${money(a.marketAnalogMedian)} (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}). BidAI Pro applies a ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve because these are analogous asking offers, not exact completed sales.`
                 : `NO safe bid yet. No independent resale price has been found. The observed auction bid is an acquisition cost and is deliberately excluded from resale valuation. ${a.pricingStatus === "no-match" ? "The latest external search did not produce a defensible match." : "This item is queued for external market-price research."}`;
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
@@ -2146,7 +2148,7 @@
       ? "Pawn shop / precious-metal buyer"
       : a.exitType === "online-resale" ? a.retailChannel
         : a.hasResearchEstimate ? "Online resale · web estimate"
-          : a.hasMarketAnalogEstimate ? "Online resale · Google Shopping analog" : "Online resale · price research pending";
+          : a.hasMarketAnalogEstimate ? `Online resale · ${a.marketAnalogChannel}` : "Online resale · price research pending";
     const coverageChecks = [
       { label: "Source listing", pass: Boolean(sourceUrl), detail: sourceUrl ? `${marketplace.name} link available` : "Canonical listing link missing" },
       { label: "Identity", pass: Boolean(item.modelKey || item.identifiedAs), detail: item.identifiedAs || item.modelKey || "Exact identity not supplied" },
@@ -2171,7 +2173,7 @@
     if (!a.hasResaleEvidence) missingIntelligence.push(publicResearch
       ? `Internet research reviewed ${publicResearch.results.length} result${publicResearch.results.length === 1 ? "" : "s"} and produced a provisional ${money(a.bestPriceMedian)} market estimate, but it is not strong enough to become a safe ceiling without better identity, condition, and demand evidence.`
       : a.hasMarketAnalogEstimate
-        ? `A real broad-market analog of ${money(a.bestPriceMedian)} is available, but an exact item match and completed-sale demand evidence are still required before it can become a safe ceiling.`
+        ? `A real broad-market analog of ${money(a.bestPriceMedian)} from ${a.marketAnalogChannel} is available, but an exact item match and completed-sale demand evidence are still required before it can become a safe ceiling.`
         : `No independent market price has been found; the live auction bid is excluded from resale valuation. A closely matched external sale, offer set, guide, or verified metal value is still required.`);
     if (a.hasResaleEvidence && !a.retailDemandPass) missingIntelligence.push(`Retail demand does not clear the required ${a.minimumRetailDemandScore.toFixed(0)}/100 threshold.`);
     if (["is-stale", "is-invalid", "is-unknown"].includes(freshness.className)) missingIntelligence.push(`The auction was last checked ${freshness.short}; refresh it before relying on the observed bid.`);
@@ -2181,7 +2183,7 @@
       item.authenticationStatus === "source-stated" ? "Treat the seller's authentication wording as a claim only; verify the named authenticator and certificate independently." : "Do not pay an authenticity premium without independent authentication evidence.",
       a.hasMetalEstimate ? "Have purity and recoverable weight tested on calibrated equipment; stones, movement, band, and non-metal parts can reduce payable metal." : "Do not assume a pawn shop will buy this item or assign it a cash value without a category-specific quote.",
       a.hasPawnEstimate ? "Call at least two local precious-metal buyers or pawn shops for their current payout percentage before the auction closes." : "If pursuing a local cash exit, obtain a written or same-day buyer indication before bidding.",
-      a.hasResaleEvidence ? `Recheck the newest matched evidence on ${a.retailChannel}; compare the same condition, completeness, and model variant.` : a.hasResearchEstimate ? `Open every cited result in the internet research ledger and verify that its brand, condition, size, and sold/asking state are truly comparable before relying on the ${money(a.researchRawMedian)} estimate.` : a.hasMarketAnalogEstimate ? `Open the cited Google Shopping offers and confirm which examples actually match the maker, model, size, condition, and included components before relying on the ${money(a.marketAnalogMedian)} analog midpoint.` : "Do not infer resale value from the auction bid; wait for the external pricing collector to attach a closely matched sold record, offer set, or specialty guide.",
+      a.hasResaleEvidence ? `Recheck the newest matched evidence on ${a.retailChannel}; compare the same condition, completeness, and model variant.` : a.hasResearchEstimate ? `Open every cited result in the internet research ledger and verify that its brand, condition, size, and sold/asking state are truly comparable before relying on the ${money(a.researchRawMedian)} estimate.` : a.hasMarketAnalogEstimate ? `Open the cited offers from ${a.marketAnalogChannel} and confirm which examples actually match the maker, model, size, condition, and included components before relying on the ${money(a.marketAnalogMedian)} analog midpoint.` : "Do not infer resale value from the auction bid; wait for the external pricing collector to attach a closely matched sold record, offer set, or specialty guide.",
       a.retailDemandPass ? `Plan for the measured demand case: ${a.retailDemandEvidenceType}.` : "Do not treat active listings, reviews, watchers, or auction bids as proof that a used unit will sell.",
       "Recalculate taxes, buyer premium, selling fee, outbound shipping, repair/testing, and return/loss reserve for your actual accounts.",
     ];
@@ -2232,7 +2234,7 @@
               <dl>
                 <div><dt>${a.hasResaleEvidence ? "Likely sale price" : "Best price estimate"}</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
                 <div><dt>Estimated profit now</dt><dd>${Number.isFinite(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) ? money(a.decisionProfitAtCurrentBid ?? a.bestPriceProfitAtCurrentBid) : "Unavailable"}</dd></div>
-                <div><dt>Price source</dt><dd>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? (item.retailMarket?.channel || "Google Shopping") : "External research pending")}</dd></div>
+                <div><dt>Price source</dt><dd>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : "External research pending")}</dd></div>
                 <div><dt>Demand gate</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `FAIL · ${a.retailDemandScore}/100`}</dd></div>
                 <div><dt>Target-safe bid</dt><dd>${money(a.resaleMaxBid)}</dd></div>
                 ${!a.hasResaleEvidence ? `<div><dt>Price-based max</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceProvisionalMaxBid) : "Not established"}</dd></div>` : ""}
@@ -2335,7 +2337,7 @@
               <p>${a.hasPawnEstimate ? "Evidence supports a precious-metal liquidation estimate, not a guaranteed offer. Test purity and weight, then quote multiple buyers." : "No dollar value is shown because this record lacks the verified precious-metal inputs required for a defensible pawn estimate."}</p>
             </article>
             <article class="channel-plan-card ${a.hasResaleEvidence && a.retailDemandPass ? "has-evidence" : "is-unavailable"}">
-              <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? (item.retailMarket?.channel || "Google Shopping") : marketplace.name)}</strong></div>
+              <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : marketplace.name)}</strong></div>
               <dl>
                 <div><dt>Best price estimate</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
                 <div><dt>Estimated net proceeds</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceEstimatedNet) : "Unavailable"}</dd></div>

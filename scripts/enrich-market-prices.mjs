@@ -498,7 +498,7 @@ async function main() {
     const update = updates.get(item.id);
     if (!update) return item;
     const next = { ...item };
-    if (update.shopping) {
+    if (update.shopping && (update.shopping.retailMarket?.status === "available" || item.retailMarket?.status !== "available")) {
       next.retailMarket = update.shopping.retailMarket;
       if (update.shopping.historyEntry) next.retailMarketHistory = appendHistory(item, "retailMarketHistory", update.shopping.historyEntry);
     }

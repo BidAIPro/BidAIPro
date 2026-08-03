@@ -109,20 +109,21 @@ jobs:
           BIDAI_RESALE_BATCH_SIZE: "500"
         run: node scripts/enrich-resale.mjs
 
-      - name: Enrich with matched eBay used asking prices
+      - name: Enrich with free eBay used and category asking prices
         continue-on-error: true
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:
           BIDAI_EBAY_CLIENT_ID: ${{ secrets.BIDAI_EBAY_CLIENT_ID }}
           BIDAI_EBAY_CLIENT_SECRET: ${{ secrets.BIDAI_EBAY_CLIENT_SECRET }}
+          BIDAI_EBAY_USE_BROWSE: ${{ vars.BIDAI_EBAY_USE_BROWSE || 'false' }}
           BIDAI_EBAY_MARKETPLACE_ID: "EBAY_US"
-          # Each target may use one concise query plus one fallback query. A
-          # 100-target hourly batch stays within eBay's default 5,000-call
-          # daily allowance even during the initial catalog backfill.
+          # Each unique product uses at most one title query plus one category
+          # query. A 100-query-group hourly batch is bounded to 4,800 searches
+          # per day in the worst case.
           BIDAI_EBAY_USED_BATCH_SIZE: "100"
         run: node scripts/enrich-ebay-used.mjs
 
-      - name: Enrich with broad and specialty market prices
+      - name: Enrich with optional paid broad-market and specialty prices
         continue-on-error: true
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '9 * * * *'
         env:

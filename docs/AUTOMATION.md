@@ -9,7 +9,7 @@ The supported source modes are:
 3. **Persistent Apify Dataset:** BidAI Pro imports structured items already written by a separately scheduled collector.
 4. **Generic JSON feed:** BidAI Pro imports an authorized HTTPS endpoint.
 5. **Completed-sales enrichment:** after auction refreshes, BidAI Pro can send stale active listing identities to one explicitly authorized HTTPS resale provider and merge back exact-model completed sales and market counts.
-6. **eBay active-used enrichment:** an optional official eBay Browse API step searches active fixed-price/best-offer listings with `conditions:{USED}`, accepts only closely title-matched USD results, and stores asking-price statistics separately from sold evidence.
+6. **eBay active-used enrichment:** a free eBay Finding API step searches active used fixed-price listings with the developer App ID, accepts only validated USD results, and stores close-match or conservative category asking-price statistics separately from sold evidence. Approved partners can opt into Browse instead.
 
 BidAI Pro does not invent listing records. Every visible automated listing must arrive from the built-in ShopGoodwill public catalog or one of the configured sources and must retain its canonical source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
 
@@ -133,24 +133,27 @@ For unique merchandise, a provider may label a completed sale with `"matchType":
 
 These collectors ingest listing identity, direct URL, observed price, bid count, image, category, and end time only when the source exposes them. Missing price or close metadata remains missing. Public auction listings do not become resale comparables merely because they were discovered.
 
-### eBay active-used asking-price fallback
+### Free eBay active-used and analog pricing
 
-The included `scripts/enrich-ebay-used.mjs` step uses the official eBay Browse API when completed-sale evidence is absent. It answers “what are comparable used items listed for online?” and is never described as a sold-price feed.
+The included `scripts/enrich-ebay-used.mjs` step uses eBay's Finding API by default when completed-sale evidence is absent. It answers “what are comparable used items listed for online?” and is never described as a sold-price feed. Finding authentication uses only a free developer App ID, with no OAuth token or paid provider.
 
-Create an eBay production application, complete eBay's required Buy API production-access process, then add these GitHub Actions secrets:
+Create an eBay production application, then add this GitHub Actions secret:
 
 | Secret | Requirement |
 | --- | --- |
 | `BIDAI_EBAY_CLIENT_ID` | Production eBay application client ID. |
-| `BIDAI_EBAY_CLIENT_SECRET` | Matching production client secret. |
 
-The hourly/manual workflow requests a client-credentials OAuth token only at runtime, processes at most 150 stale targets per run to stay within eBay's default Browse API call limit, and searches the US marketplace by default. It requires at least five unique results that are USD-priced, explicitly returned as used/pre-owned, have stable eBay IDs and URLs, and share at least 65% of the significant target-title tokens with at least three tokens in common. Price totals include the lowest stated USD shipping charge. The browser revalidates the records, requires an observation no more than 24 hours old, displays P20/median/average/P80, and applies a default 30% haircut before any planning value or safe ceiling is calculated.
+The hourly/manual workflow processes at most 100 unique stale product groups per run. Duplicate product queries share one result. A group uses one concise title query and, only when close or broad results are sparse, one category query. This bounds the worst case to 4,800 searches per day.
 
-Active asking prices do not prove what an item will sell for and do not create a sell-through rate. Exact-model completed sales remain the preferred evidence tier. If credentials are missing, OAuth fails, fewer than five matches qualify, or eBay returns no usable result, the connector does not publish a value for that item. No credentials or access tokens are written to `data/live-snapshots.js`.
+Approved eBay partners may optionally add `BIDAI_EBAY_CLIENT_SECRET` and set the repository variable `BIDAI_EBAY_USE_BROWSE=true`. The script then uses client-credentials OAuth and the newer Browse API; if OAuth fails, it automatically falls back to Finding. The client secret is also used independently by the eBay auction-source collector.
 
-### Broad retail and specialty price research
+Close used matches require at least five unique USD results with stable IDs and URLs and a 65%+ title-match score. Price totals include the lowest stated USD shipping charge. If close matching fails, at least five broader matches from two sellers may create a reference-only analog. A broader-title analog receives a 55% reserve; a category analog receives a 65% reserve. The browser revalidates all records and requires an observation no more than 24 hours old.
 
-The included `scripts/enrich-market-prices.mjs` step adds two independent optional providers on the hourly/manual workflow pass:
+Active asking prices do not prove what an item will sell for and do not create a sell-through rate. Exact-model completed sales remain the preferred evidence tier. If the App ID is missing or eBay returns no usable close or category result, the connector records only the unsuccessful check. No credentials or access tokens are written to `data/live-snapshots.js`.
+
+### Optional paid broad retail and specialty price research
+
+The included `scripts/enrich-market-prices.mjs` step adds optional paid providers on the hourly/manual workflow pass. The free eBay step does not depend on them:
 
 | Secret | Provider and purpose |
 | --- | --- |
@@ -163,7 +166,7 @@ SerpApi results must be USD-priced, have a stable public offer or product link, 
 
 PriceCharting is queried only for eligible games, consoles, cards, comics, Funko, LEGO, coins, currency, and similar titles. Its best product result must clear the same 65% title-coverage gate. Penny-denominated values are converted to USD. The app keeps current guide value, retailer buy, retailer sell, condition basis, raw annual unit volume, match score, observation time, and a public provider-search link separate. A default 15% reserve applies to the guide value used for an online ceiling. Retailer buy/sell values are dealer references and never create a pawn estimate; reported annual sales volume can independently support the retail demand gate.
 
-The default batch limits are 40 broad-market targets and 20 specialty targets. Broad results refresh after 23 hours; specialty values refresh after 47 hours. Missing credentials are a byte-stable no-op. Weak and empty results store only an `insufficient` state, never a guessed price. Provider tokens are used only by GitHub Actions and are never added to the published snapshot file.
+The default batch limits are 200 unique broad-market queries and 20 specialty targets. Broad results refresh after 23 hours; specialty values refresh after 47 hours. Missing credentials are a byte-stable no-op. Weak and empty results store only an `insufficient` state, never a guessed price. Provider tokens are used only by GitHub Actions and are never added to the published snapshot file.
 
 ### Pawn-first exit decision
 
@@ -223,7 +226,7 @@ For Apify mode, `title` and a valid `observedAt` are required on every row. Gene
 | `resaleMarketHistory` | array | Up to 365 timestamped validated market summaries retained for price and velocity learning. |
 | `askingMarket` | object | Current active-used asking-price evidence, kept separate from completed sales and validated again in the browser. |
 | `askingMarketHistory` | array | Up to 365 timestamped summaries of active-used asking prices for longitudinal learning. |
-| `retailMarket` | object | Multi-merchant Google Shopping evidence with used, new, and broader analog groups, raw offer links, statistics, provider provenance, and product-interest fields. |
+| `retailMarket` | object | Broad-market evidence from free eBay asking-price analogs or optional Google Shopping providers, including raw offer links, statistics, match tier, and provenance. |
 | `retailMarketHistory` | array | Up to 365 timestamped broad-market summaries for longitudinal price learning. |
 | `specialtyMarket` | object | Strictly matched specialty guide values, direct retailer buy/sell references, raw annual unit volume, and provider link. |
 | `metalEstimate` | object | Source-described purity/weight plus a fresh live spot quote and gross melt ceiling; informational until independently tested. |
