@@ -31,6 +31,10 @@ const NORMAL_REFRESH_MINUTES = boundedMinutes(process.env.BIDAI_NORMAL_REFRESH_M
 const NEAR_CLOSE_REFRESH_MINUTES = boundedMinutes(process.env.BIDAI_NEAR_CLOSE_REFRESH_MINUTES, 5, 5, 15);
 const NORMAL_REFRESH_INTERVAL_MS = NORMAL_REFRESH_MINUTES * 60_000;
 const NEAR_CLOSE_REFRESH_INTERVAL_MS = NEAR_CLOSE_REFRESH_MINUTES * 60_000;
+const requestedRefreshScope = text(process.env.BIDAI_REFRESH_SCOPE, "auto").toLowerCase();
+const REFRESH_SCOPE = ["auto", "catalog", "near-close"].includes(requestedRefreshScope)
+  ? requestedRefreshScope
+  : "auto";
 
 function text(value, fallback = "") {
   const normalized = String(value ?? "").normalize("NFKC").trim();
@@ -216,7 +220,12 @@ function shopGoodwillOutcomeIds(config, items, now = Date.now()) {
 }
 
 function shopGoodwillRefreshMode(existingItems) {
-  if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch") return "catalog";
+  if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" || REFRESH_SCOPE === "catalog") return "catalog";
+  // The five-minute workflow exists only to revisit already-known auctions
+  // near close. Letting ordinary one-hour staleness select a full catalog here
+  // caused these short runs to launch hundreds of discovery requests, time out,
+  // and publish partial catalog coverage instead of close checks.
+  if (REFRESH_SCOPE === "near-close") return "items";
   const now = Date.now();
   const catalogItems = itemsForSource({ key: "shopgoodwill" }, existingItems);
   const catalogDue = !catalogItems.length || catalogItems.some((item) => {

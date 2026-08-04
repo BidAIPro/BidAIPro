@@ -11,6 +11,7 @@ The supported source modes are:
 5. **Completed-sales enrichment:** after auction refreshes, BidAI Pro can send stale active listing identities to one explicitly authorized HTTPS resale provider and merge back exact-model completed sales and market counts.
 6. **Keyless retail-catalog enrichment:** a daily UPCitemdb pass matches strict brand/model identities, retains real merchant links and timestamps, and stores current or historical retail references separately from used resale evidence.
 7. **eBay active-used enrichment:** the supported eBay Browse API searches active used fixed-price listings when both production client credentials and the required eBay approval exist. It stores close-match or conservative asking-price statistics separately from sold evidence.
+8. **Persistent Serper retail enrichment:** an hourly cloud worker maintains an active-only Google Shopping research queue, saves evidence and attempt history on each listing, and removes ended items from future queue work without erasing prior research.
 
 BidAI Pro does not invent listing records. Every visible automated listing must arrive from the built-in ShopGoodwill public catalog or one of the configured sources and must retain its canonical source URL. Apify Actor and Task definitions are created and maintained in Apify; this repository only starts configured Tasks and consumes their structured output.
 
@@ -67,6 +68,8 @@ Example configuration value showing shape only (replace every placeholder with a
 ### In-app cloud controls
 
 The ordinary **Refresh published data** action only fetches the newest completed snapshot with cache bypass and does not use a token. The Sources view can separately dispatch `refresh-auction-data.yml` and update repository variables through GitHub's REST API; those write operations require a fine-grained token with **Actions: write** and **Variables: write** permissions. BidAI Pro stores that token only in `sessionStorage`, so it is cleared when the browser tab/session ends; it is never written to `localStorage`, the generated data file, or the repository. The **Run collection on GitHub** link is the preferred manual trigger because it uses GitHub's normal signed-in workflow UI.
+
+For ordinary background synchronization, the browser polls `data/snapshot-manifest.json` once per minute while the page is visible, and again when the tab becomes visible or the browser comes online. It fetches the full `data/live-snapshots.js` file only when the manifest revision or published check time changes. Reading the manifest, downloading the snapshot, and using **Refresh published data** require no GitHub personal-access token.
 
 The schedule form writes:
 
@@ -163,6 +166,18 @@ Close used matches require at least five unique USD results with stable IDs and 
 
 Active asking prices do not prove what an item will sell for and do not create a sell-through rate. The connector stores eBay's returned active-result count plus the number of close matches and distinct sellers as a separately labeled market-presence signal. That signal can rank otherwise unmeasured items for research, but it cannot pass the retail demand gate. Exact-model completed sales remain the preferred evidence tier. If credentials are missing or eBay returns no usable close or category result, no invented evidence is published. No credentials or access tokens are written to `data/live-snapshots.js`.
 
+### Persistent Google Shopping research queue: Serper
+
+The included `scripts/enrich-serper-retail.mjs` step runs on the hourly/manual workflow pass when `BIDAI_SERPER_API_KEY` is present. GitHub Actions runs it in the cloud, so the queue continues while the user's computer is off.
+
+The reconciled queue contains only usable product listings whose status is `active` and whose known end time has not passed. Duplicate normalized product queries share a request. New active queries are appended automatically; never-attempted entries run first, ordered by the nearest auction close and then identity quality, followed by due refreshes. When an auction ends or otherwise leaves the active catalog, its query is removed from future queue work, but the listing's already saved retail result and history are not erased. The default run processes 25 unique queries and the optional `BIDAI_SERPER_MAX_QUERIES_PER_RUN` repository variable can change that limit up to the script's hard cap of 500.
+
+For each completed lookup, the listing stores `serperRetailMarket.checkedAt` and `researchedAt`, the exact query, match tier, qualifying merchant offers, source links, price summary, and rejection reasons. `serperRetailHistory` retains up to 365 dated attempts, including empty or insufficient outcomes, while the envelope-level `serperRetailEnrichment.queue` preserves future work and attempt state across runs. A transient provider failure retains existing usable evidence and records the failed attempt rather than replacing a known price with nothing.
+
+Results are guarded by identity and price validation. Exact or strong identity matches need at least two positive single-price USD offers from two independent merchants to become `available`; one such merchant is only `reference-only`. Approximate matches are audit/research references only: they are not merged into `freeRetailMarket`, cannot create a planning ceiling, and cannot create a YES. Exact/strong Google Shopping evidence is still new-retail asking-price evidence, not a completed sale, pawn quote, or demand proof, so the decision engine applies a substantial condition/resale reserve.
+
+Create `BIDAI_SERPER_API_KEY` as a GitHub Actions repository secret. Optionally create `BIDAI_SERPER_MAX_QUERIES_PER_RUN` as a repository variable; its default is `25`, and increasing it consumes the provider allowance faster. New Serper accounts currently start with 2,500 free queries, but this is an introductory allowance rather than a permanently free tier. No GitHub personal-access token is required for this scheduled enrichment or for browser refreshes. `BIDAI_SERPAPI_KEY` belongs to the separate SerpApi integration and cannot substitute for `BIDAI_SERPER_API_KEY`.
+
 ### Optional paid broad retail and specialty price research
 
 The included `scripts/enrich-market-prices.mjs` step adds optional paid providers on the hourly/manual workflow pass. The keyless UPCitemdb pass and authorized eBay Browse pass do not depend on them:
@@ -212,7 +227,7 @@ If neither a non-empty `BIDAI_SOURCE_CONFIG_JSON` repository variable nor a lowe
 
 ## Flat item schema
 
-An Apify Dataset item must be a flat JSON object, and a generic feed must expose the same kind of objects. Do not place listing fields inside `data`, `item`, `auction`, or other nested objects; map the collector output before BidAI Pro reads it. Arrays are used only for optional observation history, comparable-sale evidence, and prior-auction evidence. `forecast`, `valuationBasis`, `resaleMarket`, `askingMarket`, `retailMarket`, `specialtyMarket`, and `metalEstimate` are the supported nested analysis objects.
+An Apify Dataset item must be a flat JSON object, and a generic feed must expose the same kind of objects. Do not place listing fields inside `data`, `item`, `auction`, or other nested objects; map the collector output before BidAI Pro reads it. Arrays are used only for optional observation history, comparable-sale evidence, and prior-auction evidence. `forecast`, `valuationBasis`, `resaleMarket`, `askingMarket`, `retailMarket`, `freeRetailMarket`, `serperRetailMarket`, `serperRetailHistory`, `specialtyMarket`, and `metalEstimate` are the supported nested analysis objects. Envelope-level `serperRetailEnrichment` stores the persistent provider queue and run summary.
 
 For Apify mode, `title` and a valid `observedAt` are required on every row. Generic feeds require `title` and may omit `observedAt`, though supplying it is strongly recommended. For stable, useful automated analysis, every collector result should provide these canonical fields:
 
@@ -407,11 +422,15 @@ window.BIDAI_LIVE_SNAPSHOTS = {
 
 The actual value is an object envelope with `observedAt`, `lastCheckedAt`, `sourceMode`, `sourceNotes`, and `items`. `observedAt` is the newest retained higher-bid observation; `lastCheckedAt` is the newest successful source check. Every feed item is marked as published research, and listing links are exposed under both `url` and `sourceUrl` for front-end compatibility. Comparable links are normalized to HTTP(S), URL fragments are removed, non-web schemes are discarded, and comparable text fields and arrays are bounded before publication.
 
+The Serper worker writes its persistent queue summary under envelope-level `serperRetailEnrichment` and item-specific evidence under `serperRetailMarket` and `serperRetailHistory`. The per-item `checkedAt`/`researchedAt` fields identify the latest completed price check independently from auction-bid `lastCheckedAt`. A successful insufficient lookup therefore still has a visible check time, while a transient failure can retain the earlier usable price and record the failed attempt.
+
 Before writing, it merges prior observations for matching stable IDs, sorts the history chronologically, removes duplicate timestamps and non-increasing bids, and keeps the most recent 250 strictly increasing bid observations per item. When a source supplies a forecast on a qualifying higher-bid record, the importer stores the same normalized forecast inside that current observation as an auditable point-in-time prediction. When the empirical model is eligible, its generated forecast is stored in the same way. Earlier observations are never rewritten.
 
 Listings that disappear from a later feed response are retained instead of being deleted, including ended auctions and manually published research. Apify Datasets are read in 5,000-record pages and normalized storage is capped at 50,000 items; the 20 MB response limit applies to each page or generic-feed response. Records are ordered by active state and newest qualifying higher-bid observation, with stable ID as the deterministic tie-breaker. An unchanged bid preserves the price curve but advances `lastCheckedAt`, intentionally creating a small data update that proves the source was checked.
 
-The workflow commits the file to `main` only when its content changes. That commit triggers the repository's normal GitHub Pages deployment flow. GitHub secrets are injected only into the refresh step and are never written to the generated file or logs. The generated browser data contains normalized listing fields, not the Apify token or feed credentials.
+After enrichment, `scripts/write-snapshot-manifest.mjs` atomically writes `data/snapshot-manifest.json` with a SHA-256 revision of the full snapshot, `observedAt`, `lastCheckedAt`, total item count, and active item count. The workflow publishes the manifest alongside `data/live-snapshots.js`. The browser checks this small manifest every minute and downloads the full snapshot only when its revision or check time shows new data. Because the revision covers the full file, saved retail research also triggers synchronization even when the auction-source `lastCheckedAt` itself did not change.
+
+The workflow publishes changed data to the isolated `auction-data` branch. Catalog/research and close-watch runs use separate concurrency groups, re-fetch and merge the latest branch head before publishing, and retry a lease-guarded branch replacement if another run wins the race, so a close-watch update cannot overwrite hourly price research. The generated branch intentionally keeps one compact root snapshot instead of hundreds of large data revisions; it never rewrites `main`, so GitHub Desktop does not have to merge generated data. Five-minute close-watch runs update that branch without redeploying the entire static site; the browser reads the branch manifest and snapshot directly. Push, manual, and hourly catalog runs also deploy GitHub Pages. GitHub secrets are injected only into refresh/enrichment steps and are never written to the generated files or logs. The generated browser data contains normalized listing fields, not provider credentials. No GitHub personal-access token is required for the scheduled job, manifest reads, snapshot reads, or ordinary refresh.
 
 ## Operational checks
 

@@ -7,6 +7,7 @@
   const SETTINGS_REVISION = 2;
   const MAX_IMPORT_ROWS = 5000;
   const QUEUE_PAGE_SIZE = 250;
+  const SNAPSHOT_AUTO_CHECK_MS = 60_000;
   const VIEW_TITLES = {
     opportunities: "Opportunities",
     watchlist: "Watchlist",
@@ -81,11 +82,47 @@
 
   const IS_TEST_MODE = window.BIDAI_TEST_MODE === true;
   const SNAPSHOT_BRANCH_URL = "https://raw.githubusercontent.com/BidAIPro/BidAIPro/auction-data/data/live-snapshots.js";
+  const SNAPSHOT_MANIFEST_BRANCH_URL = "https://raw.githubusercontent.com/BidAIPro/BidAIPro/auction-data/data/snapshot-manifest.json";
+  let publishedSnapshotRevision = null;
+  let publishedSnapshotPollInFlight = false;
+
+  function normalizeSnapshotManifest(value) {
+    if (!value || typeof value !== "object") return null;
+    const revision = String(value.revision || "").trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(revision)) return null;
+    return {
+      revision,
+      observedAt: value.observedAt || null,
+      lastCheckedAt: value.lastCheckedAt || value.observedAt || null,
+      itemCount: Math.max(0, Math.round(Number(value.itemCount) || 0)),
+      activeItemCount: Math.max(0, Math.round(Number(value.activeItemCount) || 0)),
+    };
+  }
+
+  async function fetchPublishedManifest() {
+    const candidates = [
+      new URL(SNAPSHOT_MANIFEST_BRANCH_URL),
+      new URL("data/snapshot-manifest.json", document.baseURI),
+    ];
+    for (const candidate of candidates) {
+      candidate.searchParams.set("refresh", String(Date.now()));
+      try {
+        const response = await fetch(candidate, { cache: "no-store" });
+        if (!response.ok) continue;
+        const manifest = normalizeSnapshotManifest(await response.json());
+        if (manifest) return manifest;
+      } catch (_error) {
+        // Older deployments do not have a manifest yet. The full snapshot
+        // remains available through the existing manual refresh fallback.
+      }
+    }
+    return null;
+  }
 
   async function fetchPublishedSnapshot() {
     const candidates = [
-      new URL("data/live-snapshots.js", document.baseURI),
       new URL(SNAPSHOT_BRANCH_URL),
+      new URL("data/live-snapshots.js", document.baseURI),
     ];
     const failures = [];
     for (const candidate of candidates) {
@@ -119,6 +156,10 @@
       PUBLISHED_RESEARCH = { ...normalizePublishedResearch(null), sourceMode: "delivery-error" };
       console.error(publishedSnapshotLoadError);
     }
+  }
+  if (!IS_TEST_MODE) {
+    const initialManifest = await fetchPublishedManifest();
+    publishedSnapshotRevision = initialManifest?.revision || null;
   }
 
 
@@ -998,6 +1039,37 @@
       && Number(freeRetailLow) > 0
       && Number(freeRetailMedian) >= Number(freeRetailLow)
       && Number(freeRetailHigh) >= Number(freeRetailMedian);
+    const serperRetailMarket = item.serperRetailMarket && typeof item.serperRetailMarket === "object"
+      ? item.serperRetailMarket : {};
+    const serperReferenceCatalog = serperRetailMarket.catalog && typeof serperRetailMarket.catalog === "object"
+      ? serperRetailMarket.catalog : {};
+    const serperReferenceAsOf = Date.parse(serperRetailMarket.asOf || serperRetailMarket.checkedAt || "");
+    const serperReferenceFresh = ["available", "reference-only"].includes(String(serperRetailMarket.status || "").toLowerCase())
+      && Number.isFinite(serperReferenceAsOf)
+      && serperReferenceAsOf <= Date.now() + 300000
+      && Date.now() - serperReferenceAsOf <= 45 * 86400000;
+    const serperReferenceOffers = (Array.isArray(serperRetailMarket.offers) ? serperRetailMarket.offers : [])
+      .filter((entry) => Number(entry?.totalPrice ?? entry?.price) > 0)
+      .filter((entry) => safeHttpUrl(entry?.url || entry?.link));
+    const serperReferencePrices = serperReferenceOffers
+      .map((entry) => Number(entry.totalPrice ?? entry.price))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const serperReferenceMedian = Number(serperReferenceCatalog.priceMedian)
+      || Number(serperRetailMarket.priceSummary?.priceMedian)
+      || (serperReferencePrices.length ? quantile(serperReferencePrices, 0.5) : 0);
+    const serperReferenceLow = Number(serperReferenceCatalog.priceLow)
+      || Number(serperRetailMarket.priceSummary?.priceLow)
+      || (serperReferencePrices.length ? Math.min(...serperReferencePrices) : 0);
+    const serperReferenceHigh = Number(serperReferenceCatalog.priceHigh)
+      || Number(serperRetailMarket.priceSummary?.priceHigh)
+      || (serperReferencePrices.length ? Math.max(...serperReferencePrices) : 0);
+    const serperReferenceMatchType = String(serperReferenceCatalog.matchType || serperReferenceCatalog.matchTier || "approximate").toLowerCase();
+    const serperReferenceSourceUrl = safeHttpUrl(serperReferenceCatalog.sourceUrl || serperReferenceOffers[0]?.url || serperReferenceOffers[0]?.link);
+    const hasSerperSearchReference = serperReferenceFresh
+      && serperReferenceMedian > 0
+      && serperReferenceLow > 0
+      && serperReferenceHigh >= serperReferenceMedian
+      && Boolean(serperReferenceSourceUrl);
     const uniqueUsedListings = [...new Map([
       ...(hasEbayUsedEvidence ? uniqueEbayUsedListings : []),
       ...(hasRetailUsedEvidence ? retailUsedOffers : []),
@@ -1279,7 +1351,7 @@
         : hasMarketAnalogEstimate
           ? `${marketAnalogSampleSize} real offers from ${analogSourceCount} sellers through ${marketAnalogChannel}, using ${marketAnalogCategoryCount > 0 ? "a broader category benchmark" : "broader title similarity"} and a ${Math.round((1 - marketAnalogPlanningFactor) * 100)}% planning reserve`
           : "awaiting a matched external sale, offer, specialty guide, or verified metal value; the auction bid is excluded";
-    const pricingChecks = [item.resaleMarket, item.askingMarket, item.retailMarket, item.partnerRetailMarket, item.freeRetailMarket, item.specialtyMarket, item.researchMarket]
+    const pricingChecks = [item.resaleMarket, item.askingMarket, item.retailMarket, item.partnerRetailMarket, item.freeRetailMarket, item.serperRetailMarket, item.specialtyMarket, item.researchMarket]
       .filter((value) => value && typeof value === "object");
     const pricingCheckTimes = pricingChecks
       .map((value) => Date.parse(value.asOf || value.researchedAt || value.checkedAt || ""))
@@ -1288,7 +1360,7 @@
       ? new Date(Math.max(...pricingCheckTimes)).toISOString()
       : null;
     const pricingAttempted = pricingChecks.some((value) => ["available", "insufficient", "unavailable", "error", "reference-only"].includes(String(value.status || "").toLowerCase()));
-    const pricingStatus = hasPriceEstimate ? "priced" : pricingAttempted ? "no-match" : "queued";
+    const pricingStatus = hasPriceEstimate ? "priced" : hasSerperSearchReference ? "reference" : pricingAttempted ? "no-match" : "queued";
     const demandLookbackDays = 90;
     const demandAsOf = Math.min(Date.now(), evidenceCutoff);
     const selectedCompletedEvidence = resaleEvidenceKind === "analog-completed" ? uniqueAnalogEvidence : uniqueResaleEvidence;
@@ -1558,7 +1630,14 @@
       ? clamp(0.35 + sellThroughRate * 0.65)
       : hasRetailDemandEvidence ? clamp(0.25 + retailDemandScore / 100 * 0.65) : 0;
     const onlinePopularityKnown = hasRetailDemandEvidence;
-    const productReviewCountMax = retailMarketFresh ? Math.max(0, Math.round(Number(item.retailMarket?.productInterest?.reviewCountMax) || 0)) : 0;
+    const productInterestMarkets = [
+      retailMarketFresh ? item.retailMarket : null,
+      freeRetailFresh && freeRetailExactIdentity ? freeRetailMarket : null,
+    ].filter(Boolean);
+    const productReviewCountMax = Math.max(
+      0,
+      ...productInterestMarkets.map((market) => Math.max(0, Math.round(Number(market?.productInterest?.reviewCountMax) || 0))),
+    );
     const productInterestKnown = productReviewCountMax > 0;
     const productInterestScore = productInterestKnown
       ? Math.round(clamp(Math.log10(productReviewCountMax + 1) / 4) * 100)
@@ -1737,6 +1816,13 @@
       pricingStatus,
       pricingAttempted,
       pricingLastCheckedAt,
+      hasSerperSearchReference,
+      serperReferenceLow,
+      serperReferenceMedian,
+      serperReferenceHigh,
+      serperReferenceMatchType,
+      serperReferenceSourceUrl,
+      serperReferenceAsOf: Number.isFinite(serperReferenceAsOf) ? new Date(serperReferenceAsOf).toISOString() : null,
       hasFreeRetailReference,
       freeRetailLow,
       freeRetailMedian,
@@ -2010,6 +2096,12 @@
     const watched = item.watched ? " is-watched" : "";
     const statusText = item.status === "ended" ? "Ended" : timeLabel(item);
     const freshness = freshnessFor(item);
+    const pricingFreshness = a.pricingLastCheckedAt
+      ? freshnessFor({ lastCheckedAt: a.pricingLastCheckedAt, observedAt: a.pricingLastCheckedAt })
+      : null;
+    const pricingCheckedBadge = pricingFreshness
+      ? `<span class="status-pill price-check-time" title="External price research last checked ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}">PRICE CHECK ${escapeHtml(pricingFreshness.short)}</span>`
+      : '<span class="status-pill price-check-time is-queued" title="No external price lookup has completed for this item yet">PRICE QUEUED</span>';
     const sourceUrl = safeHttpUrl(item.url || item.sourceUrl);
     const marketplace = marketplaceFor(item);
     const snapshotPlan = snapshotPlanFor(item);
@@ -2019,7 +2111,9 @@
       : queueMode === "popular" ? "Popularity" : "Profit likelihood";
     const resaleValueBadge = a.hasPriceEstimate
       ? `<span class="status-pill value-signal">${a.bestPriceKind === "retail-catalog-reference" ? "RETAIL REF" : "RESALE"} ${money(a.bestPriceMedian)}</span>`
-      : '<span class="status-pill value-signal is-unknown">RESALE UNKNOWN</span>';
+      : a.hasSerperSearchReference
+        ? `<span class="status-pill value-signal is-reference">SEARCH REF ${money(a.serperReferenceMedian)}</span>`
+        : '<span class="status-pill value-signal is-unknown">RESALE UNKNOWN</span>';
     const popularityPrefix = {
       "verified-demand": "DEMAND",
       "product-interest": "PRODUCT INTEREST",
@@ -2047,7 +2141,9 @@
                 ? '<span class="status-pill asking-exit">WEB PRICE ESTIMATE</span>'
                 : a.hasMarketAnalogEstimate
                   ? '<span class="status-pill asking-exit">FREE MARKET ANALOG</span>'
-                  : '<span class="status-pill asking-exit">MARKET PRICE QUEUED</span>';
+                  : a.hasSerperSearchReference
+                    ? '<span class="status-pill asking-exit">GOOGLE SHOPPING REFERENCE</span>'
+                    : '<span class="status-pill asking-exit">MARKET PRICE QUEUED</span>';
     const verdictBadge = `<span class="exit-verdict ${recommendationClass(a.recommendationState)}">${escapeHtml(decisionDisplayLabel(a))}</span>`;
     const rowProfit = a.decisionProfitAtCurrentBid;
     const rowAvailableProfit = a.decisionProfitAtCurrentBid
@@ -2055,13 +2151,15 @@
     const rowProfitLabel = a.decisionApproved
       ? (a.exitType === "pawn" ? "Likely pawn profit" : "Likely retail profit")
       : a.exitType === "pawn" && a.hasPawnEstimate ? "Pawn profit outlook"
-        : a.hasPriceEstimate ? "Retail value outlook" : "Retail research status";
+        : a.hasPriceEstimate ? "Retail value outlook"
+          : a.hasSerperSearchReference ? "Closest price reference" : "Retail research status";
     const rowDecisionValue = !a.currentBidKnown
       ? "BID UNKNOWN"
       : a.decisionApproved
         ? money(rowProfit)
         : a.recommendationState === "no-margin" && a.maxBid > 0 ? `OVER BY ${money(Math.max(0, -a.bidHeadroom))}`
-          : Number.isFinite(rowAvailableProfit) ? `EST. ${money(rowAvailableProfit)}` : "PRICE PENDING";
+          : Number.isFinite(rowAvailableProfit) ? `EST. ${money(rowAvailableProfit)}`
+            : a.hasSerperSearchReference ? `REF. ${money(a.serperReferenceMedian)}` : "PRICE PENDING";
     const rowDecisionClass = a.decisionApproved
       ? "positive"
       : ["below-cost", "rejected"].includes(a.retailValueDecisionState) ? "negative" : "research";
@@ -2082,7 +2180,9 @@
                 ? `${money(a.researchRawMedian)} researched median (${money(a.researchRawLow)}–${money(a.researchRawHigh)}) · ${a.researchSoldCount} sold + ${a.researchAskingCount} asking/retail · provisional, not bid-safe`
                 : a.hasMarketAnalogEstimate
                   ? `${money(a.marketAnalogMedian)} ${escapeHtml(a.marketAnalogChannel)} analog median (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}) · ${a.marketAnalogSampleSize} real offers / ${a.analogSourceCount} sellers · ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve · not bid-safe`
-                  : `No independent resale price yet · ${a.pricingStatus === "no-match" ? `last search found no defensible match${a.pricingLastCheckedAt ? ` ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}` : ""}` : "queued for external market research"} · auction bid excluded`;
+                  : a.hasSerperSearchReference
+                    ? `${money(a.serperReferenceMedian)} closest Google Shopping reference (${money(a.serperReferenceLow)}–${money(a.serperReferenceHigh)}) · ${escapeHtml(a.serperReferenceMatchType)} identity match · reference only, not a safe ceiling`
+                    : `No independent resale price yet · ${a.pricingStatus === "no-match" ? `last search found no defensible match${a.pricingLastCheckedAt ? ` ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}` : ""}` : "queued for external market research"} · auction bid excluded`;
     return `
       <article class="opportunity-row${selected}${sourceUrl ? " has-source-link" : ""}" data-select-id="${escapeHtml(item.id)}"${sourceUrl ? ` data-source-url="${escapeHtml(sourceUrl)}"` : ""} role="group" tabindex="0" aria-label="${escapeHtml(item.title)}; press Enter to open the profitability analysis${sourceUrl ? `; use the source link to visit ${escapeHtml(marketplace.name)}` : "; source listing URL unavailable"}">
         <div class="item-cell">
@@ -2091,7 +2191,7 @@
           <span class="item-copy">
             ${sourceUrl ? `<a class="row-title-link" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noreferrer noopener" data-direct-listing>${escapeHtml(item.title)}</a>` : `<strong>${escapeHtml(item.title)}</strong>`}
             <small>${escapeHtml(marketplace.name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.externalId)}</small>
-            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal, a)}</span>${resaleValueBadge}${popularityBadge}${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span><span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
+            <span class="signal-line">${verdictBadge}<span class="signal-pill ${a.signal}">${signalLabel(a.signal, a)}</span>${resaleValueBadge}${popularityBadge}${exitBadge}<span class="status-pill">${statusText}</span><span class="snapshot-freshness ${freshness.className}" title="Auction last checked ${escapeHtml(formatDateTime(freshness.checkedAt))}">${escapeHtml(freshness.short)}</span>${pricingCheckedBadge}<span class="snapshot-cadence ${escapeHtml(snapshotPlan.urgency)}">${escapeHtml(snapshotPlan.label)}</span>${authenticationBadge}${item.publishedResearch ? '<span class="status-pill research-source">PUBLISHED</span>' : ""}</span>
           </span>
           <span class="score-mini" style="--score:${a.rankingScore};--score-color:${scoreColor(a.signal)}" data-score="${a.rankingScore}" aria-label="Evidence-weighted profit ranking score ${a.rankingScore} out of 100"></span>
         </div>
@@ -2330,6 +2430,8 @@
         .filter((entry) => entry?.isCurrent !== false && String(entry?.freshness || "current").toLowerCase() !== "stale"),
       ...(Array.isArray(item.freeRetailMarket?.offers) ? item.freeRetailMarket.offers : [])
         .filter((entry) => entry?.isCurrent !== false && String(entry?.freshness || "current").toLowerCase() !== "stale"),
+      ...(Array.isArray(item.serperRetailMarket?.offers) ? item.serperRetailMarket.offers : [])
+        .filter((entry) => entry?.isCurrent !== false && String(entry?.freshness || "current").toLowerCase() !== "stale"),
     ]
       .filter((entry) => safeHttpUrl(entry?.url) && Number(entry?.matchScore) >= (a.hasMarketAnalogEstimate ? 35 : 65))
       .map((entry) => [safeHttpUrl(entry.url), entry])).values()].slice(0, 8);
@@ -2350,7 +2452,8 @@
     const onlineRouteLabel = !a.hasResaleEvidence
       ? a.hasResearchEstimate ? `${a.retailValueDecisionLabel} · WEB REFERENCE`
         : a.hasFreeRetailReference ? `${a.retailValueDecisionLabel} · RETAIL CATALOG REFERENCE`
-          : a.hasMarketAnalogEstimate ? `${a.retailValueDecisionLabel} · ${a.marketAnalogChannel}` : "PENDING · Independent market price"
+          : a.hasMarketAnalogEstimate ? `${a.retailValueDecisionLabel} · ${a.marketAnalogChannel}`
+            : a.hasSerperSearchReference ? "REFERENCE · Product identity unverified" : "PENDING · Independent market price"
       : !a.retailDemandPass
         ? `${a.retailValueDecisionLabel} · DEMAND UNPROVEN`
         : a.retailSafeNow ? "PASS · Retail profit clears target"
@@ -2372,7 +2475,9 @@
                 ? `NO safe bid yet. BidAI Pro matched this item to an exact retail catalog identity and found a ${money(a.freeRetailMedian)} current retail midpoint (${money(a.freeRetailLow)}–${money(a.freeRetailHigh)}). It applies a ${Math.round((1 - a.freeRetailPlanningFactor) * 100)}% reserve because new retail pricing is not the same as a used resale sale. The price is useful for planning, but a safe bid still requires independent demand or completed-sale evidence.`
               : a.hasMarketAnalogEstimate
                 ? `NO safe bid yet. ${a.marketAnalogSampleSize} real offers from ${a.marketAnalogChannel} produce a broad-market midpoint of ${money(a.marketAnalogMedian)} (${money(a.marketAnalogLow)}–${money(a.marketAnalogHigh)}). BidAI Pro applies a ${Math.round((1 - a.marketAnalogPlanningFactor) * 100)}% reserve because these are analogous asking offers, not exact completed sales.`
-                : `NO safe bid yet. No independent resale price has been found. The observed auction bid is an acquisition cost and is deliberately excluded from resale valuation. ${a.pricingStatus === "no-match" ? "The latest external search did not produce a defensible match." : "This item is queued for external market-price research."}`;
+                : a.hasSerperSearchReference
+                  ? `NO safe bid yet. The background search found a closest Google Shopping reference of ${money(a.serperReferenceMedian)} (${money(a.serperReferenceLow)}–${money(a.serperReferenceHigh)}), but the product match is only ${a.serperReferenceMatchType}. It is saved for research and linked for review, but it cannot create a bid ceiling or profit claim until the exact item identity is verified.`
+                  : `NO safe bid yet. No independent resale price has been found. The observed auction bid is an acquisition cost and is deliberately excluded from resale valuation. ${a.pricingStatus === "no-match" ? "The latest external search did not produce a defensible match." : "This item is queued for external market-price research."}`;
     const width = (value) => `${Math.max(3, Math.min(100, Math.abs(value) / maxWaterfall * 100)).toFixed(1)}%`;
     const evidence = Array.isArray(item.evidence) && item.evidence.length
       ? item.evidence
@@ -2390,7 +2495,8 @@
       ? "Pawn shop / precious-metal buyer"
       : a.exitType === "online-resale" ? a.retailChannel
         : a.hasResearchEstimate ? "Online resale · web estimate"
-          : a.hasMarketAnalogEstimate ? `Online resale · ${a.marketAnalogChannel}` : "Online resale · price research pending";
+          : a.hasMarketAnalogEstimate ? `Online resale · ${a.marketAnalogChannel}`
+            : a.hasSerperSearchReference ? "Online resale · closest search reference" : "Online resale · price research pending";
     const coverageChecks = [
       { label: "Source listing", pass: Boolean(sourceUrl), detail: sourceUrl ? `${marketplace.name} link available` : "Canonical listing link missing" },
       { label: "Identity", pass: Boolean(item.modelKey || item.identifiedAs), detail: item.identifiedAs || item.modelKey || "Exact identity not supplied" },
@@ -2398,9 +2504,9 @@
       { label: "Inbound shipping", pass: a.shippingKnown, detail: a.shippingKnown ? `${money(a.shipping)} recorded` : `${money(a.shipping)} assumption only` },
       { label: "Close forecast", pass: a.hasForecast, detail: a.hasForecast ? `${a.forecast.exactModelCount} exact-model outcomes` : `${a.forecast.exactModelCount}/5 required outcomes` },
       { label: "Pawn valuation", pass: a.hasPawnEstimate, detail: a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled cash` : a.metalEvidenceTitleConflict ? "Rejected: plated or non-solid metal wording" : "No verified metal valuation" },
-      { label: "Retail pricing", pass: a.hasPriceEstimate, detail: a.hasPriceEstimate ? `${money(a.bestPriceMedian)} · ${a.bestPriceLabel}; ${a.hasResaleEvidence ? a.resaleEvidenceType : "not bid-safe"}` : `${a.bestPriceLabel}; auction bid excluded` },
+      { label: "Retail pricing", pass: a.hasPriceEstimate, detail: a.hasPriceEstimate ? `${money(a.bestPriceMedian)} · ${a.bestPriceLabel}; ${a.hasResaleEvidence ? a.resaleEvidenceType : "not bid-safe"}` : a.hasSerperSearchReference ? `${money(a.serperReferenceMedian)} closest search reference; ${a.serperReferenceMatchType} identity is not bid-safe` : `${a.bestPriceLabel}; auction bid excluded` },
       { label: "Retail demand", pass: a.retailDemandPass, detail: a.hasRetailDemandEvidence ? `${a.retailDemandScore}/100 · ${a.retailDemandEvidenceType}` : "No sell-through or sales-volume proof" },
-      { label: "Internet research", pass: Boolean(publicResearch), detail: publicResearch ? `${publicResearch.results.length} public results reviewed; reference-only until evidence gates pass` : "No public web research stored yet" },
+      { label: "Internet research", pass: Boolean(publicResearch) || a.hasSerperSearchReference, detail: publicResearch ? `${publicResearch.results.length} public results reviewed; reference-only until evidence gates pass` : a.hasSerperSearchReference ? `${money(a.serperReferenceMedian)} closest Google Shopping reference retained with a direct source link` : "No public web research stored yet" },
     ];
     const missingIntelligence = [];
     if (!sourceUrl) missingIntelligence.push("The canonical auction URL is missing, so source photos and description cannot be audited from this record.");
@@ -2418,7 +2524,9 @@
         ? `A recent exact retail catalog reference of ${money(a.bestPriceMedian)} is available, but new retail value is not a used sold price. Completed-sale or verified demand evidence is still required before it can become a safe ceiling.`
       : a.hasMarketAnalogEstimate
         ? `A real broad-market analog of ${money(a.bestPriceMedian)} from ${a.marketAnalogChannel} is available, but an exact item match and completed-sale demand evidence are still required before it can become a safe ceiling.`
-        : `No independent market price has been found; the live auction bid is excluded from resale valuation. A closely matched external sale, offer set, guide, or verified metal value is still required.`);
+        : a.hasSerperSearchReference
+          ? `The closest automated Google Shopping result is ${money(a.serperReferenceMedian)}, but its ${a.serperReferenceMatchType} identity match is not exact enough to value this auction item. Confirm maker, model, variant, and condition before using it.`
+          : `No independent market price has been found; the live auction bid is excluded from resale valuation. A closely matched external sale, offer set, guide, or verified metal value is still required.`);
     if (a.hasResaleEvidence && !a.retailDemandPass) missingIntelligence.push(`Retail demand does not clear the required ${a.minimumRetailDemandScore.toFixed(0)}/100 threshold.`);
     if (["is-stale", "is-invalid", "is-unknown"].includes(freshness.className)) missingIntelligence.push(`The auction was last checked ${freshness.short}; refresh it before relying on the observed bid.`);
     const dueDiligence = [
@@ -2498,8 +2606,8 @@
           <article class="${a.decisionApproved ? "is-positive" : "is-negative"}"><span>Bid-safe answer</span><strong>${escapeHtml(a.decisionVerdict)}</strong><small>${escapeHtml(decisionDisplayLabel(a))}</small></article>
           <article><span>Highest safe bid</span><strong>${a.maxBid > 0 ? money(a.maxBid) : "Not established"}</strong><small>${a.maxBid > 0 ? (a.bidHeadroom >= 0 ? `${money(a.bidHeadroom)} remaining headroom` : `${money(Math.abs(a.bidHeadroom))} above the ceiling`) : "price alone cannot create a safe bid"}</small></article>
           <article><span>Likely pawn cash</span><strong>${a.hasPawnEstimate ? money(a.pawnCashEstimate) : "Unavailable"}</strong><small>${a.hasPawnEstimate ? `${money(a.pawnCashLow)}–${money(a.pawnCashHigh)} modeled range` : "verified metal inputs required"}</small></article>
-          <article><span>Retail value estimate</span><strong>${a.hasPriceEstimate ? `${money(a.bestPriceMedian)} midpoint` : "Not found yet"}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}` : "independent market research pending · auction bid excluded"}</small></article>
-          <article class="${retailValueDecisionClass(a.retailValueDecisionState)}"><span>Retail value decision</span><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceConservativeProfitAtCurrentBid)} conservative · ${money(a.bestPriceProfitAtCurrentBid)} midpoint profit at observed bid` : "external price research has not returned a defensible match"}</small></article>
+          <article><span>Retail value estimate</span><strong>${a.hasPriceEstimate ? `${money(a.bestPriceMedian)} midpoint` : a.hasSerperSearchReference ? `${money(a.serperReferenceMedian)} closest reference` : "Not found yet"}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceLow)}–${money(a.bestPriceHigh)} · ${escapeHtml(a.bestPriceLabel.toLowerCase())}` : a.hasSerperSearchReference ? `${money(a.serperReferenceLow)}–${money(a.serperReferenceHigh)} · ${escapeHtml(a.serperReferenceMatchType)} search match · not bid-safe` : "independent market research pending · auction bid excluded"}</small></article>
+          <article class="${retailValueDecisionClass(a.retailValueDecisionState)}"><span>Retail value decision</span><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><small>${a.hasPriceEstimate ? `${money(a.bestPriceConservativeProfitAtCurrentBid)} conservative · ${money(a.bestPriceProfitAtCurrentBid)} midpoint profit at observed bid` : a.hasSerperSearchReference ? "closest result saved for review · no profit calculated from an unverified match" : "external price research has not returned a defensible match"}</small></article>
           <article><span>Retail popularity</span><strong>${escapeHtml(a.popularityLabel)}</strong><small>${a.popularityEvidenceLevel !== "none" ? `${a.popularityScore}/100 · ${escapeHtml(a.popularityEvidenceType)}` : "no popularity evidence"}</small></article>
           <article><span>Profit outlook now</span><strong class="${Number.isFinite(displayedProfit) && displayedProfit >= 0 ? "positive" : "negative"}">${Number.isFinite(displayedProfit) ? `${money(displayedProfit)} est.` : "Unavailable"}</strong><small>${a.decisionProfitAtCurrentBid !== null ? (a.roi === null ? "ROI unavailable" : `${percent(a.roi)} modeled ROI on landed cost`) : a.exitType === "pawn" && a.hasPawnEstimate ? "pawn cash less landed cost and testing reserve" : a.hasPriceEstimate ? `${money(a.bestPriceConservativeProfitAtCurrentBid)} after uncertainty reserve · not bid-safe` : "requires independent resale price"}</small></article>
           <article><span>Likely time to sell</span><strong>${a.medianDaysToSell === null ? "Not measured" : `${a.medianDaysToSell.toFixed(1)} days`}</strong><small>${a.hasLiquidityEvidence ? `${percent(a.sellThroughRate)} sell-through` : "completed-sale velocity required"}</small></article>
@@ -2569,6 +2677,11 @@
             <div><span>Conservative planning value</span><strong>${money(a.bestPricePlanningValue)}</strong><small>${Math.round((1 - a.bestPricePlanningFactor) * 100)}% uncertainty reserve applied</small></div>
             <div class="upside"><span>Best available high</span><strong>${money(a.bestPriceHigh)}</strong><small>price-based max ${money(a.bestPriceProvisionalMaxBid)} · not bid-safe</small></div>
           </div><div class="no-history-state"><strong>${escapeHtml(a.retailValueDecisionLabel)}</strong><p>The independent retail-value midpoint implies ${money(a.bestPriceProfitAtCurrentBid)} after costs at the observed bid; the conservative reserved case is ${money(a.bestPriceConservativeProfitAtCurrentBid)}. This remains a price-based planning result until demand is verified.</p></div>${(marketOfferLinks.length || freeRetailSourceUrl) ? `<div class="market-source-links"><span>CHECK THE PRICE SOURCE</span>${freeRetailSourceUrl ? `<a href="${escapeHtml(freeRetailSourceUrl)}" target="_blank" rel="noreferrer noopener">Open matched product record ↗</a>` : ""}${marketOfferLinks.map((entry) => `<a href="${escapeHtml(safeHttpUrl(entry.url))}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.source || "Retail offer")} · ${money(entry.totalPrice ?? entry.price)} ↗</a>`).join("")}</div>` : ""}` : `<div class="no-history-state"><strong>No independent market price yet</strong><p>${escapeHtml(a.bestPriceBasis)} ${a.pricingLastCheckedAt ? `Last external check: ${escapeHtml(formatDateTime(a.pricingLastCheckedAt))}.` : "The item is queued for the next configured market-price collection pass."}</p></div><div class="market-source-links"><span>VERIFY THE MARKET NOW</span>${pricingSearchLinks.map((entry) => `<a href="${escapeHtml(entry.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(entry.label)} ↗</a>`).join("")}</div>`}
+          ${!a.hasPriceEstimate && a.hasSerperSearchReference ? `<div class="profit-scenarios price-proxy-scenarios search-reference-scenarios">
+            <div class="downside"><span>Closest search low</span><strong>${money(a.serperReferenceLow)}</strong><small>Google Shopping merchant reference</small></div>
+            <div class="base"><span>Closest search midpoint</span><strong>${money(a.serperReferenceMedian)}</strong><small>${escapeHtml(a.serperReferenceMatchType)} product-identity match</small></div>
+            <div class="upside"><span>Closest search high</span><strong>${money(a.serperReferenceHigh)}</strong><small>reference only · no safe ceiling</small></div>
+          </div><div class="no-history-state"><strong>Automated search found a price reference—not a verified item price</strong><p>This result is saved so it loads immediately. BidAI Pro will not calculate profit from it until the exact product identity is confirmed and resale demand is supported.</p></div><div class="market-source-links"><span>INSPECT THE SAVED RESULT</span><a href="${escapeHtml(a.serperReferenceSourceUrl)}" target="_blank" rel="noreferrer noopener">Open closest Google Shopping result ↗</a></div>` : ""}
         </section>
         <section class="detail-section channel-playbook">
           <div class="detail-section-heading"><h4>Where and how this item could be sold</h4><span>channel-by-channel exit plan</span></div>
@@ -2585,9 +2698,9 @@
               <p>${a.hasPawnEstimate ? "Evidence supports a precious-metal liquidation estimate, not a guaranteed offer. Test purity and weight, then quote multiple buyers." : "No dollar value is shown because this record lacks the verified precious-metal inputs required for a defensible pawn estimate."}</p>
             </article>
             <article class="channel-plan-card ${a.hasPriceEstimate ? "has-evidence" : "is-unavailable"}">
-              <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasFreeRetailReference ? "Matched product retail catalog" : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : marketplace.name)}</strong></div>
+              <div><span>RETAIL RESALE EXIT</span><strong>${escapeHtml(a.hasResaleEvidence ? a.retailChannel : a.hasResearchEstimate ? researchChannel : a.hasFreeRetailReference ? "Matched product retail catalog" : a.hasMarketAnalogEstimate ? a.marketAnalogChannel : a.hasSerperSearchReference ? "Closest Google Shopping reference" : marketplace.name)}</strong></div>
               <dl>
-                <div><dt>Best price estimate</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : "Not found yet"}</dd></div>
+                <div><dt>Best price estimate</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceMedian) : a.hasSerperSearchReference ? `${money(a.serperReferenceMedian)} reference only` : "Not found yet"}</dd></div>
                 <div><dt>Conservative planning value</dt><dd>${a.hasPriceEstimate ? money(a.bestPricePlanningValue) : "Unavailable"}</dd></div>
                 <div><dt>Estimated net proceeds</dt><dd>${a.hasPriceEstimate ? money(a.bestPriceEstimatedNet) : "Unavailable"}</dd></div>
                 <div><dt>Demand</dt><dd>${a.retailDemandPass ? `PASS · ${a.retailDemandScore}/100` : `NOT PROVEN · ${a.retailDemandScore}/100`}</dd></div>
@@ -2706,6 +2819,7 @@
             <div><span>Listing ID</span><strong>${escapeHtml(item.externalId || item.id)}</strong></div>
             <div><span>Bid last changed</span><strong>${escapeHtml(formatDateTime(freshness.observedAt))}</strong><small>retained only when the bid increases</small></div>
             <div><span>Last checked</span><strong>${escapeHtml(formatDateTime(freshness.checkedAt))}</strong><small>${escapeHtml(freshness.short)} · ${escapeHtml(freshness.label)}</small></div>
+            <div><span>Price research</span><strong>${a.pricingLastCheckedAt ? escapeHtml(formatDateTime(a.pricingLastCheckedAt)) : "Queued"}</strong><small>${a.pricingLastCheckedAt ? `${escapeHtml(a.pricingStatus)} · retained while this auction remains active` : "waiting for its first background market search"}</small></div>
             <div><span>Scheduled end</span><strong>${escapeHtml(formatDateTime(item.endsAt))}</strong><small>${escapeHtml(timeLabel(item))}</small></div>
             <div><span>Snapshot policy</span><strong>${escapeHtml(snapshotPlan.label)}</strong><small>${snapshotPlan.nextDueAt ? `${snapshotPlan.due ? "Due now" : `Next ${escapeHtml(formatDateTime(snapshotPlan.nextDueAt))}`}` : "Outcome capture complete"}</small></div>
             <div><span>Bid count</span><strong>${Number(item.bidCount) || 0}</strong></div>
@@ -2966,8 +3080,8 @@ function renderMarketplaceCoverage() {
     $$('[data-cloud-closing-cadence]').forEach((el) => { el.textContent = `Every ${cloudControl.nearCloseMinutes} minutes`; });
     $$('[data-cloud-dispatch-state]').forEach((el) => {
       el.textContent = cloudControl.lastPublishedRefreshAt
-        ? `Published data refreshed ${formatDateTime(cloudControl.lastPublishedRefreshAt)}`
-        : "Ready to check for newly published data";
+        ? `Automatic page sync active · latest load ${formatDateTime(cloudControl.lastPublishedRefreshAt)}`
+        : "Automatic page sync is active";
     });
     $$('[data-source-status]').forEach((el) => {
       const mode = String(PUBLISHED_RESEARCH.sourceMode || "").toLowerCase();
@@ -3309,26 +3423,52 @@ function renderMarketplaceCoverage() {
     }
   }
 
-  async function refreshNow(button = null) {
+  async function refreshNow(button = null, { quiet = false, expectedManifest = null } = {}) {
     const refreshButtons = $$('[data-refresh-now]');
     refreshButtons.forEach((candidate) => { candidate.disabled = true; });
     if (button) button.setAttribute("aria-busy", "true");
     try {
       const refreshed = await fetchPublishedSnapshot();
+      const expectedCheck = Date.parse(expectedManifest?.lastCheckedAt || "");
+      const deliveredCheck = Date.parse(refreshed.lastCheckedAt || refreshed.observedAt || "");
+      if (Number.isFinite(expectedCheck) && (!Number.isFinite(deliveredCheck) || deliveredCheck < expectedCheck)) {
+        throw new Error("The new snapshot is still propagating; automatic sync will retry shortly.");
+      }
       PUBLISHED_RESEARCH = refreshed;
       publishedSnapshotLoadError = "";
       cloudControl.lastPublishedRefreshAt = new Date().toISOString();
       saveCloudControl();
+      const manifest = expectedManifest || await fetchPublishedManifest();
+      if (manifest?.revision) publishedSnapshotRevision = manifest.revision;
       invalidateHistoricalIndex();
       visibleQueueLimit = QUEUE_PAGE_SIZE;
       renderStats();
       renderCurrentView();
-      toast(`${refreshed.items.length.toLocaleString("en-US")} published listings refreshed. No GitHub token needed.`);
+      if (!quiet) toast(`${refreshed.items.length.toLocaleString("en-US")} published listings refreshed. No GitHub token needed.`);
     } catch (error) {
-      toast(error.message || "Published data could not be refreshed.", "error");
+      if (quiet) console.warn(error.message || "Automatic published-data sync failed.");
+      else toast(error.message || "Published data could not be refreshed.", "error");
     } finally {
       refreshButtons.forEach((candidate) => { candidate.disabled = false; });
       if (button) button.removeAttribute("aria-busy");
+    }
+  }
+
+  async function checkForPublishedUpdate() {
+    if (IS_TEST_MODE || publishedSnapshotPollInFlight || document.visibilityState === "hidden") return;
+    publishedSnapshotPollInFlight = true;
+    try {
+      const manifest = await fetchPublishedManifest();
+      if (!manifest) return;
+      const publishedCheck = Date.parse(PUBLISHED_RESEARCH.lastCheckedAt || PUBLISHED_RESEARCH.observedAt || "");
+      const manifestCheck = Date.parse(manifest.lastCheckedAt || manifest.observedAt || "");
+      const newerRevision = publishedSnapshotRevision && manifest.revision !== publishedSnapshotRevision;
+      const newerCheck = Number.isFinite(manifestCheck)
+        && (!Number.isFinite(publishedCheck) || manifestCheck > publishedCheck);
+      if (!publishedSnapshotRevision) publishedSnapshotRevision = manifest.revision;
+      if (newerRevision || newerCheck) await refreshNow(null, { quiet: true, expectedManifest: manifest });
+    } finally {
+      publishedSnapshotPollInFlight = false;
     }
   }
 
@@ -3938,6 +4078,13 @@ function renderMarketplaceCoverage() {
   });
 
   window.addEventListener("hashchange", () => setView(location.hash.slice(1) || "opportunities", false));
+  if (!IS_TEST_MODE) {
+    window.setInterval(checkForPublishedUpdate, SNAPSHOT_AUTO_CHECK_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkForPublishedUpdate();
+    });
+    window.addEventListener("online", checkForPublishedUpdate);
+  }
   $$('[data-current-year]').forEach((element) => { element.textContent = String(new Date().getFullYear()); });
   setView(location.hash.slice(1) || "opportunities", false);
 })();

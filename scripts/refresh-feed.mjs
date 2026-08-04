@@ -1878,6 +1878,20 @@ function extractRecords(payload) {
   return [];
 }
 
+const PRESERVED_ENVELOPE_FIELDS = [
+  "sourceHealth",
+  "freeRetailEnrichment",
+  "partnerRetailEnrichment",
+  "serperRetailEnrichment",
+];
+
+function preservedEnvelopeMetadata(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(PRESERVED_ENVELOPE_FIELDS
+    .filter((field) => value[field] && typeof value[field] === "object" && !Array.isArray(value[field]))
+    .map((field) => [field, value[field]]));
+}
+
 function normalizeEnvelope(value) {
   if (Array.isArray(value)) {
     return { observedAt: null, lastCheckedAt: null, sourceMode: "legacy-array", sourceNotes: [], items: value };
@@ -1888,6 +1902,7 @@ function normalizeEnvelope(value) {
       lastCheckedAt: timestamp(value.lastCheckedAt, value.observedAt),
       sourceMode: text(value.sourceMode, "published-research"),
       sourceNotes: Array.isArray(value.sourceNotes) ? value.sourceNotes.map((note) => text(note)).filter(Boolean) : [],
+      ...preservedEnvelopeMetadata(value),
       items: value.items,
     };
   }
@@ -1921,6 +1936,8 @@ async function writeAtomically(envelope) {
     `  \"lastCheckedAt\": ${JSON.stringify(envelope.lastCheckedAt)},`,
     `  \"sourceMode\": ${JSON.stringify(envelope.sourceMode)},`,
     `  \"sourceNotes\": ${JSON.stringify(envelope.sourceNotes)},`,
+    ...Object.entries(preservedEnvelopeMetadata(envelope))
+      .map(([field, value]) => `  ${JSON.stringify(field)}: ${JSON.stringify(value)},`),
     "  \"items\": [",
     envelope.items.map((item) => `    ${JSON.stringify(item)}`).join(",\n"),
     "  ]",
@@ -2125,6 +2142,7 @@ async function run() {
     return !latest || Date.parse(checkedAt) > Date.parse(latest) ? checkedAt : latest;
   }, previousEnvelope.lastCheckedAt || previousEnvelope.observedAt || null);
   const envelope = {
+    ...preservedEnvelopeMetadata(previousEnvelope),
     observedAt: publishedObservedAt,
     lastCheckedAt: publishedLastCheckedAt,
     sourceMode: text(pick(payload, "sourceMode", "source_mode"), requestConfiguration.sourceMode),

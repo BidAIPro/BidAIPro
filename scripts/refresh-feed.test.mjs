@@ -45,6 +45,8 @@ test("Apify mode authenticates, keeps stable history, and lets the newest row wi
     observedAt: "2026-08-01T10:00:00.000Z",
     sourceMode: "published-manual-research-snapshot",
     sourceNotes: [],
+    sourceHealth: { hibid: { status: "connected", checkedAt: "2026-08-01T09:55:00.000Z" } },
+    serperRetailEnrichment: { strategyVersion: "serper-shopping-v1", queue: ["manual-retained"] },
     items: [{
       id: "manual-retained",
       externalId: "manual-retained",
@@ -244,6 +246,8 @@ test("Apify mode authenticates, keeps stable history, and lets the newest row wi
   assert.deepEqual(imported.observations[3].forecast, imported.forecast);
   assert.ok(envelope.items.some((item) => item.id === "manual-retained"));
   assert.equal(envelope.items.some((item) => item.id === "legacy-shopgoodwill-prototype"), false);
+  assert.deepEqual(envelope.sourceHealth, priorEnvelope.sourceHealth, "Auction refreshes must preserve marketplace health state");
+  assert.deepEqual(envelope.serperRetailEnrichment, priorEnvelope.serperRetailEnrichment, "Auction refreshes must preserve the pricing queue");
 
   const firstOutput = await readFile(outputPath, "utf8");
   const repeatedResult = await runNode(childArgs, childOptions);

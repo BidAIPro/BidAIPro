@@ -193,6 +193,53 @@ test("the five-minute wake skips sources whose auctions are more than 30 minutes
   assert.equal(await readFile(fixture.outputPath, "utf8"), original);
 });
 
+test("the five-minute built-in wake cannot turn an overdue distant item into a full catalog pass", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  const now = Date.now();
+  const checkedAt = new Date(now - 2 * 60 * 60_000).toISOString();
+  const original = `${OUTPUT_PREFIX}${JSON.stringify({
+    observedAt: checkedAt,
+    lastCheckedAt: checkedAt,
+    sourceMode: "shopgoodwill-public-catalog",
+    sourceNotes: [],
+    items: [{
+      id: "overdue-distant-listing",
+      externalId: "81230001",
+      sourceKey: "shopgoodwill",
+      source: "ShopGoodwill",
+      sourceUrl: "https://shopgoodwill.com/item/81230001",
+      title: "Overdue but distant listing",
+      currentBid: 25,
+      status: "active",
+      endsAt: new Date(now + 2 * 60 * 60_000).toISOString(),
+      observedAt: checkedAt,
+      lastCheckedAt: checkedAt,
+      observations: [],
+    }],
+  })};\n`;
+  await writeFile(fixture.outputPath, original, "utf8");
+  const preloadPath = join(fixture.root, "reject-accidental-catalog-fetch.mjs");
+  await writeFile(preloadPath, "globalThis.fetch = async () => { throw new Error('near-close wake must not launch catalog discovery'); };\n", "utf8");
+
+  const result = await runNode([join(fixture.scripts, "refresh-all-sources.mjs")], {
+    cwd: fixture.root,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --import=${pathToFileURL(preloadPath).href}`.trim(),
+      BIDAI_SOURCE_AUTHORIZED: "false",
+      BIDAI_SHOPGOODWILL_ENABLED: "true",
+      BIDAI_REFRESH_SCOPE: "near-close",
+      GITHUB_EVENT_NAME: "schedule",
+      BIDAI_WORKFLOW_SCHEDULE: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(await readFile(fixture.outputPath, "utf8"), original);
+});
+
 test("a configurable normal cadence refreshes a distant listing after its last successful check", async (t) => {
   const fixture = await createFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));

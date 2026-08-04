@@ -1,6 +1,6 @@
 # Retail and resale price setup
 
-BidAI Pro now has one built-in, no-credential retail-catalog path and one authorized broad used-market path. They answer different questions and are deliberately kept separate:
+BidAI Pro has several deliberately separate price paths. The keyless catalog lookup, persistent Google Shopping queue, retailer feeds, active-used markets, and completed-sales feeds answer different questions:
 
 - **Retail catalog reference:** what a correctly identified product has been offered for new at a retailer.
 - **Used asking market:** what matched used items are currently listed for online.
@@ -30,6 +30,29 @@ Official documentation:
 - <https://www.upcitemdb.com/api/>
 - <https://www.upcitemdb.com/wp/docs/main/development/plan/>
 - <https://www.upcitemdb.com/wp/docs/main/development/responses/>
+
+## Persistent Google Shopping queue: Serper
+
+`scripts/enrich-serper-retail.mjs` researches active merchandise through Google Shopping results returned by Serper. It is a persistent, bounded background queue rather than a one-time batch:
+
+1. only listings that are active, not ended, and have a usable product title enter the queue;
+2. duplicate normalized products share one query and one result;
+3. never-attempted products run first, prioritizing the nearest auction close and stronger identifiers, followed by due refreshes;
+4. ended or removed listings leave future queue work, while their already saved result and history remain attached to the listing;
+5. every completed attempt stores a per-item `checkedAt`/`researchedAt` time, even when it finds no defensible price; and
+6. successful evidence retains the query, merchant offers, source links, summary, rejection reasons, and up to 365 history entries.
+
+Identity-specific searches prioritize UPC, EAN, GTIN, ISBN, brand, and model identifiers before falling back to a concise title. Exact and strong matches require at least two qualifying offers from two independent merchants before they become an `available`, corroborated current-retail reference. A single exact/strong merchant is displayed as reference-only with a larger reserve. Approximate matches are retained and displayed as the closest search reference for inspection, but never promoted into planning evidence, never create a safe ceiling, and never create a YES. Even an available exact/strong result is a new-retail asking-price reference, not completed-sale evidence or proof of demand, and it receives a substantial resale/condition reserve.
+
+### Set up the cloud worker
+
+1. Create a Serper account and copy its API key from <https://serper.dev/>.
+2. In the BidAIPro repository, open **Settings > Secrets and variables > Actions**.
+3. Under **Secrets**, create `BIDAI_SERPER_API_KEY` with the Serper API key.
+4. Optional: under **Variables**, create `BIDAI_SERPER_MAX_QUERIES_PER_RUN`. The default is `25`; the script caps it at `500`. A larger value consumes the allowance faster.
+5. Run **Actions > Refresh authorized auction data > Run workflow**, or wait for the hourly scheduled run.
+
+New Serper accounts currently start with 2,500 free queries. This is an introductory allowance, not a permanently free tier; continued use after it is exhausted depends on Serper's current paid plans. The Serper key is used only by GitHub Actions and is not published in the snapshot. No GitHub personal-access token is needed for the cloud run, dashboard reading, automatic synchronization, or **Refresh published data**.
 
 ## High-volume current retail: Rakuten Advertising
 
@@ -76,6 +99,7 @@ There is no legitimate, production-grade API that is simultaneously keyless, unl
 
 | Source | Best use | Access reality |
 | --- | --- | --- |
+| Serper Google Shopping | **Included persistent queue:** broad current-retail offer research with saved evidence and history | 2,500 introductory free queries, then current Serper billing; `BIDAI_SERPER_API_KEY` required |
 | Rakuten Advertising Product Search | **Included adapter:** broad new-retail price, sale price, UPC, SKU, merchant and product URL | Free publisher account and advertiser relationships; `BIDAI_RAKUTEN_ACCESS_TOKEN` required |
 | CJ Affiliate product feeds | Broad merchant catalogs with price, sale price, brand, GTIN/MPN, condition and availability | Free publisher account; token and advertiser relationships required |
 | StockX API | Sneakers, streetwear, handbags, electronics, cards and collectibles; live bid/ask plus retail price | Developer approval and OAuth required |
@@ -86,6 +110,8 @@ These are preferable to pretending Amazon, Walmart, or Target expose an unrestri
 
 ## Optional providers already supported
 
+The older broad Shopping path uses SearchAPI or SerpApi. SerpApi (`BIDAI_SERPAPI_KEY`) and Serper (`BIDAI_SERPER_API_KEY`) are different services and their keys are not interchangeable.
+
 - `BIDAI_SEARCHAPI_KEY` or `BIDAI_SERPAPI_KEY` adds Google Shopping offer research.
 - `BIDAI_PRICECHARTING_TOKEN` adds specialty guide, retailer buy/sell, and yearly-volume evidence for supported collectibles.
 - `BIDAI_RESALE_FEED_URL` plus optional `BIDAI_RESALE_FEED_TOKEN` connects an authorized completed-sales provider.
@@ -94,7 +120,7 @@ These are preferable to pretending Amazon, Walmart, or Target expose an unrestri
 
 1. Push the local changes with GitHub Desktop.
 2. Open **Actions → Refresh authorized auction data → Run workflow** if an immediate cloud run is needed; otherwise wait for the schedule.
-3. After the workflow publishes a snapshot, press **Refresh published data** in BidAI Pro.
+3. After the workflow publishes a snapshot and `data/snapshot-manifest.json`, leave BidAI Pro open for its one-minute automatic manifest check or press **Refresh published data** immediately.
 4. Open an item and inspect **Check the price source**. The dossier must show source links, match tier, observation count, range, reserve, and whether the evidence is current retail, historical retail, active used asking, or completed sale.
 
 Ordinary dashboard refreshes require no GitHub personal-access token.

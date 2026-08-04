@@ -529,6 +529,55 @@ test("an exact free retail-catalog match produces a visible price but never a sa
   assert.ok(Number.isFinite(result.bestPriceProfitAtCurrentBid));
 });
 
+test("an approximate Serper result is visible as a saved search reference without inventing profit", () => {
+  const model = loadModel();
+  const checkedAt = new Date().toISOString();
+  const item = baseItem({
+    comparableSales: [],
+    resaleMarket: null,
+    serperRetailMarket: {
+      status: "reference-only",
+      provider: "serper",
+      asOf: checkedAt,
+      checkedAt,
+      catalog: {
+        matchTier: "approximate",
+        matchType: "approximate",
+        matchScore: 68,
+        sampleSize: 2,
+        sourceCount: 2,
+        priceLow: 80,
+        priceMedian: 90,
+        priceAverage: 90,
+        priceHigh: 100,
+        sourceUrl: "https://merchant.example/closest-watch",
+      },
+      offers: [{
+        id: "serper-approx-1",
+        title: "Similar Brand Watch",
+        totalPrice: 90,
+        price: 90,
+        url: "https://merchant.example/closest-watch",
+        source: "Example merchant",
+        matchScore: 68,
+        matchType: "approximate",
+      }],
+    },
+  });
+  delete item.metalEstimate;
+  const result = model.assess(item);
+  assert.equal(result.hasSerperSearchReference, true);
+  assert.equal(result.serperReferenceMedian, 90);
+  assert.equal(result.serperReferenceMatchType, "approximate");
+  assert.equal(result.pricingLastCheckedAt, checkedAt);
+  assert.equal(result.pricingStatus, "reference");
+  assert.equal(result.hasPriceEstimate, false);
+  assert.equal(result.bestPriceMedian, null);
+  assert.equal(result.decisionApproved, false);
+  assert.equal(result.maxBid, 0);
+  assert.equal(result.bestPriceProfitAtCurrentBid, null);
+});
+
 test("stale catalog merchant offers never become a current retail value", () => {
   const model = loadModel();
   const checkedAt = new Date().toISOString();

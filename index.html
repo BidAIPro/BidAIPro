@@ -385,7 +385,7 @@
             <section class="cloud-refresh-card" aria-labelledby="cloud-refresh-heading">
               <div class="cloud-refresh-lead">
                 <span class="refresh-orbit" aria-hidden="true">↻</span>
-                <div><span class="section-kicker"><i></i> CLOUD REFRESH CONTROL</span><h3 id="cloud-refresh-heading">Cloud collection stays automatic. Dashboard refresh is instant.</h3><p>GitHub runs the collector while your computer is off. Refresh published data checks the latest completed cloud snapshot immediately and never asks for a GitHub token.</p></div>
+                <div><span class="section-kicker"><i></i> CLOUD REFRESH CONTROL</span><h3 id="cloud-refresh-heading">Cloud collection and dashboard syncing stay automatic.</h3><p>GitHub runs the collector while your computer is off. An open dashboard checks a lightweight publication marker every minute and downloads the full snapshot only when new data exists.</p></div>
               </div>
               <dl>
                 <div><dt>Last successful check</dt><dd data-cloud-last-checked>No successful cloud check yet</dd></div>
@@ -394,7 +394,7 @@
                 <div class="locked"><dt>Inside 5 minutes</dt><dd>Every 30 seconds · locked</dd></div>
                 <div class="locked"><dt>Inside 1 minute</dt><dd>Every 5 seconds · locked</dd></div>
               </dl>
-              <div class="cloud-refresh-actions"><div><strong data-cloud-dispatch-state>Ready to check for newly published data</strong><small>This reloads the latest completed cloud snapshot with cache bypass. No GitHub token is requested or stored.</small></div><button class="button button-primary" type="button" data-refresh-now>Refresh published data</button><a class="button button-dark" href="https://github.com/BidAIPro/BidAIPro/actions/workflows/refresh-auction-data.yml" target="_blank" rel="noreferrer noopener">Run collection on GitHub ↗</a><button class="button button-quiet" type="button" data-open-refresh-control>Advanced schedule</button></div>
+              <div class="cloud-refresh-actions"><div><strong data-cloud-dispatch-state>Automatic page sync is active</strong><small>The page checks for newly published data every minute. This button checks immediately; neither path needs a GitHub token.</small></div><button class="button button-primary" type="button" data-refresh-now>Refresh published data</button><a class="button button-dark" href="https://github.com/BidAIPro/BidAIPro/actions/workflows/refresh-auction-data.yml" target="_blank" rel="noreferrer noopener">Run collection on GitHub ↗</a><button class="button button-quiet" type="button" data-open-refresh-control>Advanced schedule</button></div>
             </section>
 
             <section class="apify-connector-card" aria-labelledby="apify-connector-heading">

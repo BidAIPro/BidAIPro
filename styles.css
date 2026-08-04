@@ -4539,6 +4539,12 @@ body:has(dialog[open]) {
   background: #eaf6d7;
 }
 
+.status-pill.value-signal.is-reference {
+  color: #634700;
+  border-color: #dfc36e;
+  background: #fff6d8;
+}
+
 .status-pill.popularity-signal {
   color: #24456c;
   border-color: #b7cce5;
@@ -5216,6 +5222,19 @@ select {
   color: #38580c;
   background: #e2f3c0;
   border: 1px solid #c6e38d;
+}
+
+.status-pill.price-check-time {
+  color: #31506f;
+  background: #eef5fb;
+  border: 1px solid #c8d9ea;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.status-pill.price-check-time.is-queued {
+  color: #68716b;
+  background: #f1f2ef;
+  border-color: #d3d7d2;
 }
 
 .score-mini {
