@@ -1,0 +1,2 @@
+CREATE INDEX `idx_comparable_sales_vehicle_mileage_ended` ON `comparable_sales` (`normalized_vehicle_key`,`mileage`,`ended_at`);--> statement-breakpoint
+CREATE INDEX `idx_comparable_sales_outcome_ended` ON `comparable_sales` (`outcome_status`,`ended_at`);

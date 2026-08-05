@@ -15,6 +15,13 @@
       "when": 1785947302031,
       "tag": "0001_left_slapstick",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785949451560,
+      "tag": "0002_black_silver_sable",
+      "breakpoints": true
     }
   ]
 }

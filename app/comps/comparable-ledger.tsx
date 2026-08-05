@@ -28,6 +28,7 @@ const money = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const LEDGER_REQUEST_TIMEOUT_MS = 8_000;
 
 export function ComparableLedger() {
   const [rows, setRows] = useState<ComparableRow[]>([]);
@@ -35,7 +36,12 @@ export function ComparableLedger() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(publicApiUrl("/api/comps"), { cache: "no-store", signal: controller.signal })
+    let mounted = true;
+    const requestTimeout = window.setTimeout(
+      () => controller.abort(),
+      LEDGER_REQUEST_TIMEOUT_MS,
+    );
+    void fetch(publicApiUrl("/api/comps"), { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Comparable ledger request failed");
         return response.json() as Promise<{ data?: ComparableRow[]; meta?: { status?: string } }>;
@@ -44,11 +50,17 @@ export function ComparableLedger() {
         setRows(Array.isArray(payload.data) ? payload.data : []);
         setStatus(payload.meta?.status === "available" ? "available" : "unavailable");
       })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setStatus("unavailable");
+      .catch(() => {
+        if (mounted) setStatus("unavailable");
+      })
+      .finally(() => {
+        window.clearTimeout(requestTimeout);
       });
-    return () => controller.abort();
+    return () => {
+      mounted = false;
+      window.clearTimeout(requestTimeout);
+      controller.abort();
+    };
   }, []);
 
   return (
@@ -88,7 +100,7 @@ export function ComparableLedger() {
               </table>
             </div>
           ) : (
-            <div className="ledger-empty"><Database size={30} /><h2>{status === "loading" ? "Loading outcome evidence" : "No observed outcomes yet"}</h2><p>The ledger begins populating after this installation tracks a lot through two confirmed post-close catalog misses. Historical bulk backfill is not active.</p></div>
+            <div className="ledger-empty"><Database size={30} /><h2>{status === "loading" ? "Loading outcome evidence" : "No observed outcomes yet"}</h2><p>The hourly official closed-catalog sync adds terminal high bids as they become available. Award prices remain unconfirmed unless a separate authoritative source verifies them.</p></div>
           )}
         </section>
       </div>

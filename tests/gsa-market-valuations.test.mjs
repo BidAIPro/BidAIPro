@@ -92,6 +92,25 @@ test("produces weighted ranges from family/year/mileage comps without using the 
   assert.doesNotMatch(JSON.stringify(lowBid), /currentBid|subjectBid/i);
 });
 
+test("excludes the subject auction and publishes the closest available mileage first", () => {
+  const valuation = buildGsaMarketValuation(subject(), [
+    comp(9001, { closedHighBidCents: 99_000_000, mileage: 100_000 }),
+    ...Array.from({ length: 31 }, (_, index) =>
+      comp(2_000 + index, { mileage: 150_000 + index * 1_000 })),
+    // Its older year and poor condition would place it outside the top 30 by
+    // overall score, but it is still the nearest available odometer match.
+    comp(1002, { year: 2013, mileage: 104_000, condition: "scrap" }),
+  ], asOf);
+
+  assert.equal(valuation.status, "available");
+  assert.equal(valuation.sampleSize, 30);
+  assert.equal(valuation.comparables[0].auctionId, "1002");
+  assert.equal(valuation.comparables[0].mileageDifference, 4_000);
+  assert.ok(valuation.comparables[0].mileageCloseness > valuation.comparables[1].mileageCloseness);
+  assert.equal(valuation.sampleIds.includes("gsa-closed:9001"), false);
+  assert.ok(valuation.highCents < 99_000_000);
+});
+
 test("uses a visibly low-confidence same-class fallback rather than calling it an exact value", () => {
   const valuation = buildGsaMarketValuation(
     subject({

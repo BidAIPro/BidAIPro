@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildCarMaxValuation,
+  buildD1GsaComparableValuation,
   carMaxValueUrls,
   listingConditionAdjustment,
+  normalizeMarketCondition,
   parseCarMaxNextData,
   parseCarMaxReaderText,
   parseNhtsaVinResponse,
@@ -174,6 +176,13 @@ test("caps listing deductions and explains exactly which disclosed facts affecte
   assert.match(adjustment.basis, /4 disclosed damage flags/i);
 });
 
+test("maps stored GSA condition vocabulary into the market adjustment model", () => {
+  assert.equal(normalizeMarketCondition("usable"), "good");
+  assert.equal(normalizeMarketCondition("new"), "good");
+  assert.equal(normalizeMarketCondition("scrap"), "salvage");
+  assert.equal(normalizeMarketCondition("repairable"), "repairable");
+});
+
 test("uses a valid NHTSA VIN decode and normalizes CarMax model URLs", () => {
   const fallback = {
     year: 2016,
@@ -215,6 +224,82 @@ test("applying a numeric valuation recomputes the opportunity ceiling", () => {
   assert.equal(updated.valuation.provider, "Observed GSA auction comps");
   assert.notEqual(updated.assessment.safeMaxBidCents, null);
   assert.equal(updated.assessment.conservativeValueCents, 1_800_000);
+});
+
+test("D1 closed comps use terminal evidence and prefer the nearest reported mileage", () => {
+  const row = vehicleRow("subject-500");
+  const vehicle = {
+    auctionId: row.auction_id,
+    vehicleId: row.vehicle_id,
+    externalId: row.external_id,
+    normalizedVehicleKey: row.normalized_vehicle_key,
+    year: row.year,
+    make: row.make,
+    model: row.model,
+    trim: row.trim,
+    series: row.series,
+    vin: row.vin,
+    mileage: row.mileage,
+    condition: row.condition,
+    operability: row.operability,
+    damageFlags: ["body damage"],
+    issueFlags: [],
+    postalCode: row.postal_code,
+  };
+  const identity = {
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    trim: vehicle.trim,
+    series: vehicle.series,
+    bodyClass: null,
+    matchBasis: "gsa-year-make-model",
+  };
+  const rows = [
+    {
+      external_id: "far-new",
+      canonical_url: "https://gsaauctions.gov/auctions/preview/far-new",
+      mileage: 220_000,
+      closed_high_bid_cents: 900_000,
+      ended_at: "2026-08-05T11:00:00.000Z",
+    },
+    {
+      external_id: "nearest",
+      canonical_url: "https://gsaauctions.gov/auctions/preview/nearest",
+      mileage: 103_000,
+      closed_high_bid_cents: 1_200_000,
+      ended_at: "2026-08-04T11:00:00.000Z",
+    },
+    {
+      external_id: "middle",
+      canonical_url: "https://gsaauctions.gov/auctions/preview/middle",
+      mileage: 140_000,
+      closed_high_bid_cents: 1_050_000,
+      ended_at: "2026-08-03T11:00:00.000Z",
+    },
+  ];
+
+  const lowBid = buildD1GsaComparableValuation(
+    { ...vehicle, currentBidCents: 1 },
+    identity,
+    rows,
+    "2026-08-05T12:00:00.000Z",
+  );
+  const highBid = buildD1GsaComparableValuation(
+    { ...vehicle, currentBidCents: 99_000_000 },
+    identity,
+    rows,
+    "2026-08-05T12:00:00.000Z",
+  );
+
+  assert.deepEqual(lowBid, highBid);
+  assert.equal(lowBid.sourceUrl, rows[1].canonical_url);
+  assert.notEqual(lowBid.evidence.mileageAdjustmentCents, null);
+  assert.ok(lowBid.evidence.conditionAdjustmentCents < 0);
+  assert.equal(lowBid.evidence.conditionAdjustmentPct, -0.025);
+  assert.match(lowBid.evidence.matchBasis, /official terminal closed-high-bid only/i);
+  assert.match(lowBid.provenanceNote, /closest available mileage is shown first/i);
+  assert.doesNotMatch(JSON.stringify(lowBid), /currentBid/i);
 });
 
 test("serves bundled values per ID when D1 is unavailable without calling external providers", async () => {

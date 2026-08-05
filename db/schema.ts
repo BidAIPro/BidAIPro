@@ -243,6 +243,15 @@ export const comparableSales = sqliteTable(
       table.normalizedVehicleKey,
       table.endedAt,
     ),
+    index("idx_comparable_sales_vehicle_mileage_ended").on(
+      table.normalizedVehicleKey,
+      table.mileage,
+      table.endedAt,
+    ),
+    index("idx_comparable_sales_outcome_ended").on(
+      table.outcomeStatus,
+      table.endedAt,
+    ),
   ],
 );
 

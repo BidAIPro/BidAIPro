@@ -34,10 +34,16 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuctionOpportunity, ValuationReference } from "../../lib/auction-types";
+import { fetchGsaRunnerSnapshot } from "../../lib/gsa-runner-snapshot";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
-import { applyValuationToOpportunity } from "../../lib/opportunity-adapter";
+import { applyValuationToOpportunity, discoveryToOpportunity } from "../../lib/opportunity-adapter";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
+import {
+  auctionMatchesState,
+  buildStateFilterOptions,
+  countAdvancedBoardFilters,
+} from "./deal-board-filters";
 import { MarketValueEvidence } from "./market-reference-links";
 import { VehicleGallery } from "./vehicle-gallery";
 
@@ -61,6 +67,10 @@ type MarketValueResponse = {
 
 const MARKET_VALUE_BATCH_SIZE = 12;
 const MARKET_VALUE_REFRESH_MS = 55 * 60_000;
+const MARKET_VALUE_REQUEST_TIMEOUT_MS = 10_000;
+const LIVE_BID_REQUEST_TIMEOUT_MS = 10_000;
+const OPPORTUNITY_REQUEST_TIMEOUT_MS = 8_000;
+const PUBLISHED_SNAPSHOT_TIMEOUT_MS = 6_000;
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -127,6 +137,57 @@ function statusTone(status: AuctionOpportunity["assessment"]["status"]) {
   if (status === "watch") return "watch";
   if (status === "avoid") return "negative";
   return "neutral";
+}
+
+function mergeOpportunityFeed(
+  current: readonly AuctionOpportunity[],
+  incoming: readonly AuctionOpportunity[],
+): AuctionOpportunity[] {
+  const existing = new Map(current.map((auction) => [auction.id, auction]));
+  return incoming.map((fresh) => {
+    const newer = existing.get(fresh.id);
+    let merged = !newer || Date.parse(newer.lastCheckedAt) <= Date.parse(fresh.lastCheckedAt)
+      ? fresh
+      : {
+          ...fresh,
+          status: newer.status,
+          currentBidCents: newer.currentBidCents,
+          bidderCount: newer.bidderCount,
+          endsAt: newer.endsAt,
+          lastCheckedAt: newer.lastCheckedAt,
+          assessment: newer.assessment,
+        };
+    if (
+      newer &&
+      newer.valuation.status !== "unavailable" &&
+      merged.valuation.status === "unavailable"
+    ) {
+      merged = applyValuationToOpportunity(merged, newer.valuation, merged.lastCheckedAt);
+    }
+    return merged;
+  });
+}
+
+async function publishedSnapshotOpportunities(): Promise<{
+  data: AuctionOpportunity[];
+  generatedAt: string;
+  imagesFresh: boolean;
+}> {
+  const snapshot = await fetchGsaRunnerSnapshot({ timeoutMs: PUBLISHED_SNAPSHOT_TIMEOUT_MS });
+  const now = Date.now();
+  const imagesFresh = Date.parse(snapshot.imageExpiresAt) > now;
+  const activeAuctions = snapshot.auctions
+    .filter((auction) => auction.status === "active" && (
+      auction.endsAt === null || Date.parse(auction.endsAt) > now
+    ))
+    .map((auction) => imagesFresh ? auction : { ...auction, imageUrl: null, images: [] });
+  return {
+    data: activeAuctions.map((auction) =>
+      discoveryToOpportunity(auction, snapshot.sourceHealth.observedAt)
+    ),
+    generatedAt: snapshot.generatedAt,
+    imagesFresh,
+  };
 }
 
 function DealScore({ score, status }: { score: number; status: AuctionOpportunity["assessment"]["status"] }) {
@@ -337,6 +398,7 @@ export function DealBoard() {
     status: "checking",
     vehicleLots: 0,
     liveBidPolling: false,
+    message: "Connecting to the official catalog and published snapshot.",
   });
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("deal");
@@ -378,10 +440,18 @@ export function DealBoard() {
         const externalIds = batch.map((auction) => auction.externalId);
         for (const externalId of externalIds) marketValueAttempts.current.set(externalId, checkedAt);
 
+        const batchController = new AbortController();
+        const abortBatch = () => batchController.abort();
+        controller.signal.addEventListener("abort", abortBatch, { once: true });
+        const batchTimeout = window.setTimeout(
+          () => batchController.abort(),
+          MARKET_VALUE_REQUEST_TIMEOUT_MS,
+        );
+
         try {
           const response = await fetch(
             publicApiUrl(`/api/market-values?ids=${encodeURIComponent(externalIds.join(","))}`),
-            { cache: "no-store", signal: controller.signal },
+            { signal: batchController.signal },
           );
           if (!response.ok) throw new Error(`Market value feed returned ${response.status}`);
           const payload = await response.json() as MarketValueResponse;
@@ -398,12 +468,14 @@ export function DealBoard() {
               ? applyValuationToOpportunity(auction, valuation, calculatedAt)
               : auction;
           }));
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") return;
+        } catch {
+          if (controller.signal.aborted) return;
           // A transient batch failure should be eligible for the next manual or
           // scheduled refresh instead of becoming a one-session dead end.
           for (const externalId of externalIds) marketValueAttempts.current.delete(externalId);
         } finally {
+          window.clearTimeout(batchTimeout);
+          controller.signal.removeEventListener("abort", abortBatch);
           setMarketValueLoadingIds((current) => {
             const next = new Set(current);
             for (const externalId of externalIds) next.delete(externalId);
@@ -430,9 +502,37 @@ export function DealBoard() {
     opportunityRequest.current = controller;
     setRefreshing(true);
 
+    let primaryAccepted = false;
+    const publishedSnapshot = publishedSnapshotOpportunities()
+      .then((snapshot) => {
+        if (
+          primaryAccepted ||
+          opportunityRequest.current !== controller ||
+          snapshot.data.length === 0
+        ) return snapshot;
+
+        setAuctions((current) => mergeOpportunityFeed(current, snapshot.data));
+        void loadMarketValues(snapshot.data);
+        setSourceMeta({
+          mode: "published-gsa-snapshot",
+          status: "snapshot",
+          vehicleLots: snapshot.data.length,
+          liveBidPolling: false,
+          message: snapshot.imagesFresh
+            ? "Published official GSA snapshot loaded while live source checks continue."
+            : "Published official GSA records loaded; listing photos and bids require verification at GSA.",
+        });
+        return snapshot;
+      })
+      .catch(() => null);
+
+    const requestTimeout = window.setTimeout(
+      () => controller.abort(),
+      OPPORTUNITY_REQUEST_TIMEOUT_MS,
+    );
+
     try {
       const response = await fetch(publicApiUrl("/api/opportunities"), {
-        cache: "no-store",
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
@@ -446,52 +546,55 @@ export function DealBoard() {
       };
       if (!Array.isArray(payload.data)) throw new Error("Opportunity feed omitted its data array");
 
-      setAuctions((current) => {
-        const existing = new Map(current.map((auction) => [auction.id, auction]));
-        return payload.data!.map((fresh) => {
-          const newer = existing.get(fresh.id);
-          let merged = !newer || Date.parse(newer.lastCheckedAt) <= Date.parse(fresh.lastCheckedAt)
-            ? fresh
-            : {
-                ...fresh,
-                status: newer.status,
-                currentBidCents: newer.currentBidCents,
-                bidderCount: newer.bidderCount,
-                endsAt: newer.endsAt,
-                lastCheckedAt: newer.lastCheckedAt,
-                assessment: newer.assessment,
-              };
-          if (
-            newer &&
-            newer.valuation.status !== "unavailable" &&
-            merged.valuation.status === "unavailable"
-          ) {
-            merged = applyValuationToOpportunity(
-              merged,
-              newer.valuation,
-              merged.lastCheckedAt,
-            );
-          }
-          return merged;
+      if (payload.data.length === 0) {
+        const snapshot = await publishedSnapshot;
+        if (opportunityRequest.current !== controller) return;
+        if (snapshot?.data.length) return;
+
+        setAuctions([]);
+        setSourceMeta({
+          mode: payload.meta?.mode ?? "official-catalog-empty",
+          status: payload.meta?.sourceHealth?.status ?? "unavailable",
+          vehicleLots: 0,
+          liveBidPolling: false,
+          message: payload.meta?.sourceHealth?.status === "live"
+            ? "The official catalog currently reports no active vehicle lots."
+            : "The live catalog and published snapshot are temporarily unavailable. Try again shortly.",
         });
-      });
+        return;
+      }
+
+      primaryAccepted = true;
+      setAuctions((current) => mergeOpportunityFeed(current, payload.data!));
       void loadMarketValues(payload.data);
       setSourceMeta({
         mode: payload.meta?.mode ?? "unknown",
         status: payload.meta?.sourceHealth?.status ?? "unknown",
         vehicleLots: payload.meta?.coverage?.vehicleLots ?? payload.data.length,
         liveBidPolling: payload.meta?.sourceHealth?.liveBidPolling === true,
+        message: payload.meta?.sourceHealth?.liveBidPolling === true
+          ? "Official GSA catalog is connected with live bid checks available."
+          : "Official GSA records loaded from the latest published source snapshot.",
       });
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
-      setSourceMeta((current) => ({
-        ...current,
-        mode: "last-known-client-snapshot",
+      if (opportunityRequest.current !== controller) return;
+      const snapshot = await publishedSnapshot;
+      if (opportunityRequest.current !== controller || snapshot?.data.length) return;
+      setSourceMeta({
+        mode: "official-sources-unavailable",
         status: "unavailable",
+        vehicleLots: 0,
         liveBidPolling: false,
-      }));
+        message: error instanceof Error && error.name === "AbortError"
+          ? "The live source timed out and the published snapshot could not be loaded. Try Refresh view."
+          : "The live catalog and published snapshot could not be loaded. Try Refresh view.",
+      });
     } finally {
-      if (opportunityRequest.current === controller) setRefreshing(false);
+      window.clearTimeout(requestTimeout);
+      if (opportunityRequest.current === controller) {
+        opportunityRequest.current = null;
+        setRefreshing(false);
+      }
     }
   }, [loadMarketValues]);
 
@@ -502,10 +605,14 @@ export function DealBoard() {
     const controller = new AbortController();
     liveBidRequests.current.set(auction.id, controller);
     liveBidAttempts.current.set(auction.id, Date.now());
+    const requestTimeout = window.setTimeout(
+      () => controller.abort(),
+      LIVE_BID_REQUEST_TIMEOUT_MS,
+    );
     try {
       const response = await fetch(
         publicApiUrl(`/api/live-bid?id=${encodeURIComponent(auction.externalId)}`),
-        { cache: "no-store", signal: controller.signal },
+        { signal: controller.signal },
       );
       if (!response.ok) throw new Error(`Live bid feed returned ${response.status}`);
       const payload = await response.json() as { data?: LiveBidSnapshot };
@@ -518,6 +625,7 @@ export function DealBoard() {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
     } finally {
+      window.clearTimeout(requestTimeout);
       if (liveBidRequests.current.get(auction.id) === controller) {
         liveBidRequests.current.delete(auction.id);
       }
@@ -574,8 +682,15 @@ export function DealBoard() {
     liveBidRequests.current.clear();
   }, []);
 
-  const states = useMemo(() => Array.from(new Set(auctions.map((item) => item.location.state))).sort(), [auctions]);
+  const stateOptions = useMemo(() => buildStateFilterOptions(auctions), [auctions]);
   const conditions = useMemo(() => Array.from(new Set(auctions.map((item) => item.vehicle.condition))).sort(), [auctions]);
+  const visibleStateOptions = useMemo(() => {
+    if (stateFilter === "all" || stateOptions.some((option) => option.value === stateFilter)) {
+      return stateOptions;
+    }
+    return [...stateOptions, { value: stateFilter, count: 0 }]
+      .sort((a, b) => a.value.localeCompare(b.value, "en-US"));
+  }, [stateFilter, stateOptions]);
 
   const opportunities = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -583,7 +698,7 @@ export function DealBoard() {
     const result = auctions.filter((auction) => {
       const haystack = `${auction.title} ${auction.vehicle.vin ?? ""} ${auction.location.city} ${auction.location.state} ${auction.vehicle.bodyStyle ?? ""}`.toLowerCase();
       if (normalizedQuery && !haystack.includes(normalizedQuery)) return false;
-      if (stateFilter !== "all" && auction.location.state !== stateFilter) return false;
+      if (!auctionMatchesState(auction, stateFilter)) return false;
       if (conditionFilter !== "all" && auction.vehicle.condition !== conditionFilter) return false;
       if (maxBidCents !== null && (auction.currentBidCents === null || auction.currentBidCents > maxBidCents)) return false;
       if (quickFilter === "closing") {
@@ -608,6 +723,13 @@ export function DealBoard() {
       return b.assessment.score - a.assessment.score;
     });
   }, [auctions, conditionFilter, maxBid, now, query, quickFilter, saved, sort, stateFilter]);
+
+  const activeAuctionCount = auctions.filter((auction) => auction.status === "active").length;
+  const advancedFilterCount = countAdvancedBoardFilters({
+    state: stateFilter,
+    condition: conditionFilter,
+    maxBid,
+  });
 
   const profitEvidence = auctions
     .map((item) => item.assessment.projectedProfitCents)
@@ -645,6 +767,18 @@ export function DealBoard() {
     void loadOpportunities();
   }
 
+  function resetAdvancedFilters() {
+    setStateFilter("all");
+    setConditionFilter("all");
+    setMaxBid("");
+  }
+
+  function resetAllFilters() {
+    setQuery("");
+    setQuickFilter("all");
+    resetAdvancedFilters();
+  }
+
   return (
     <div className="app-shell">
       <aside className={`nav-rail ${navOpen ? "is-open" : ""}`}>
@@ -666,8 +800,8 @@ export function DealBoard() {
         </nav>
 
         <div className="source-health-card" id="source-health">
-          <div><Activity size={16} /><span>Source health</span><strong>{sourceMeta.status === "live" ? "Operational" : sourceMeta.status === "checking" ? "Checking" : "Snapshot"}</strong></div>
-          <p>{sourceMeta.status === "live" ? `Official GSA catalog delivered ${sourceMeta.vehicleLots} vehicle lots.` : `${sourceMeta.vehicleLots || "Last-known"} official vehicle records are visible. Verify every current bid at GSA.`}</p>
+          <div><Activity size={16} /><span>Source health</span><strong>{sourceMeta.status === "live" ? "Operational" : sourceMeta.status === "checking" ? "Checking" : sourceMeta.vehicleLots ? "Snapshot" : "Unavailable"}</strong></div>
+          <p>{sourceMeta.message}</p>
           <div className={`health-meter ${sourceMeta.status === "live" ? "" : "is-stale"}`}><span /></div>
           <small>{sourceMeta.liveBidPolling ? "Hourly discovery · adaptive closing checks" : "Static snapshot · live bid refresh unavailable"}</small>
         </div>
@@ -685,7 +819,7 @@ export function DealBoard() {
           </div>
           <div className="topbar-status">
             <span className={`live-dot ${sourceMeta.status === "live" ? "" : "is-stale"}`} />
-            <div><strong>Official source</strong><small>{sourceMeta.liveBidPolling ? "Live source checks" : "Snapshot · verify bids"}</small></div>
+            <div><strong>Official source</strong><small>{sourceMeta.liveBidPolling ? "Live source checks" : sourceMeta.status === "checking" ? "Connecting…" : sourceMeta.vehicleLots ? "Snapshot · verify bids" : "Temporarily unavailable"}</small></div>
           </div>
           <button className="icon-button" type="button" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></button>
           <div className="avatar">ZK</div>
@@ -702,7 +836,7 @@ export function DealBoard() {
               <button type="button" className="refresh-button" onClick={refreshSnapshot} disabled={refreshing}>
                 <RefreshCw size={16} className={refreshing ? "spin" : ""} /> {refreshing ? "Checking…" : "Refresh view"}
               </button>
-              <button type="button" className="filter-button" onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={16} /> Filters</button>
+              <button type="button" className="filter-button" onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={16} /> Filters{advancedFilterCount > 0 && <span className="filter-count">{advancedFilterCount}</span>}</button>
             </div>
           </section>
 
@@ -755,7 +889,7 @@ export function DealBoard() {
             <Database size={18} />
             <div>
               <strong>Comparable ledger</strong>
-              <span>This installation records closed high bids after two confirmed catalog misses; award price remains unknown until an authoritative outcome source confirms it. Historical bulk backfill is not active.</span>
+              <span>Official closed-catalog results are imported hourly and merged with outcomes observed by this installation. High bids remain separate from awarded prices unless an authoritative source confirms the award.</span>
             </div>
             <Link href="/comps">Open ledger <ArrowRight size={14} /></Link>
           </section>
@@ -773,19 +907,28 @@ export function DealBoard() {
               ))}
             </div>
             <div className="board-controls">
+              <label className={`state-select ${stateFilter !== "all" ? "is-active" : ""}`}>
+                <MapPin size={15} />
+                <span>State</span>
+                <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} aria-label="Filter auctions by state">
+                  <option value="all">All states ({activeAuctionCount})</option>
+                  {visibleStateOptions.map((state) => <option key={state.value} value={state.value}>{state.value} ({state.count})</option>)}
+                </select>
+                <ChevronDown size={14} />
+              </label>
               <label className="sort-select"><ArrowDownUp size={15} /><select value={sort} onChange={(event) => setSort(event.target.value as SortKey)} aria-label="Sort auctions"><option value="deal">Best deal</option><option value="ending">Ending soon</option><option value="profit">Highest profit</option><option value="bid">Lowest bid</option></select><ChevronDown size={14} /></label>
               <div className="view-switch" aria-label="View style"><button type="button" className={!compact ? "active" : ""} onClick={() => setCompact(false)} aria-label="Card view"><Grid2X2 size={16} /></button><button type="button" className={compact ? "active" : ""} onClick={() => setCompact(true)} aria-label="Compact view"><List size={17} /></button></div>
             </div>
           </section>
 
-          <div className="result-line"><strong>{opportunities.length} opportunities</strong><span>Deal Score order; insufficient-evidence rows remain unscored</span></div>
+          <div className="result-line"><strong>{opportunities.length} opportunities</strong><span>{stateFilter === "all" ? "All states" : stateFilter} · Deal Score order; market values continue filling in after vehicles appear</span></div>
 
           <section className={`opportunity-list ${compact ? "compact-list" : ""}`}>
             {opportunities.map((auction) => (
               <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} livePollingAvailable={sourceMeta.liveBidPolling} marketValueLoading={marketValueLoadingIds.has(auction.externalId)} />
             ))}
             {!opportunities.length && (
-              <div className="empty-state"><Search size={28} /><h2>{sourceMeta.status === "checking" ? "Checking the official GSA catalog" : auctions.length === 0 ? "No active vehicle lots are available" : "No vehicles match these filters"}</h2><p>{auctions.length === 0 ? "The board will populate when the official source or a still-active reference snapshot is available." : "Clear a filter or widen the bid range to bring opportunities back into view."}</p><button type="button" onClick={() => { setQuery(""); setQuickFilter("all"); setStateFilter("all"); setConditionFilter("all"); setMaxBid(""); }}>Reset filters</button></div>
+              <div className="empty-state"><Search size={28} /><h2>{sourceMeta.status === "checking" ? "Checking the official GSA catalog" : auctions.length === 0 && sourceMeta.status === "unavailable" ? "Vehicle catalog temporarily unavailable" : auctions.length === 0 ? "No active vehicle lots are available" : "No vehicles match these filters"}</h2><p>{auctions.length === 0 ? sourceMeta.message : "Clear a filter or widen the bid range to bring opportunities back into view."}</p><button type="button" onClick={resetAllFilters}>Reset filters</button></div>
             )}
           </section>
 
@@ -800,11 +943,11 @@ export function DealBoard() {
         <div className="filter-backdrop" role="presentation" onMouseDown={() => setFiltersOpen(false)}>
           <section className="filter-panel" role="dialog" aria-modal="true" aria-labelledby="filter-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="filter-header"><div><p>Opportunity controls</p><h2 id="filter-title">Refine the board</h2></div><button type="button" className="icon-button" onClick={() => setFiltersOpen(false)} aria-label="Close filters"><X /></button></div>
-            <label><span>State</span><select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}><option value="all">All states</option>{states.map((state) => <option key={state} value={state}>{state}</option>)}</select></label>
+            <label><span>State</span><select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}><option value="all">All states ({activeAuctionCount})</option>{visibleStateOptions.map((state) => <option key={state.value} value={state.value}>{state.value} ({state.count})</option>)}</select></label>
             <label><span>Condition</span><select value={conditionFilter} onChange={(event) => setConditionFilter(event.target.value)}><option value="all">All conditions</option>{conditions.map((condition) => <option key={condition} value={condition}>{condition}</option>)}</select></label>
             <label><span>Maximum current bid</span><div className="money-input"><span>$</span><input inputMode="numeric" value={maxBid} onChange={(event) => setMaxBid(event.target.value.replace(/\D/g, ""))} placeholder="No maximum" /></div></label>
-            <div className="filter-summary"><Settings2 size={16} /><span>Cost profile</span><strong>Standard buyer · 12% risk reserve</strong></div>
-            <div className="filter-actions"><button type="button" onClick={() => { setStateFilter("all"); setConditionFilter("all"); setMaxBid(""); }}>Reset</button><button type="button" className="apply" onClick={() => setFiltersOpen(false)}>Show {opportunities.length} vehicles</button></div>
+            <div className="filter-summary"><Settings2 size={16} /><span>Current selection</span><strong>{opportunities.length} of {activeAuctionCount} active vehicles · {advancedFilterCount} filter{advancedFilterCount === 1 ? "" : "s"}</strong></div>
+            <div className="filter-actions"><button type="button" onClick={resetAdvancedFilters}>Reset</button><button type="button" className="apply" onClick={() => setFiltersOpen(false)}>Show {opportunities.length} vehicles</button></div>
           </section>
         </div>
       )}
@@ -813,7 +956,7 @@ export function DealBoard() {
         <a className={quickFilter === "all" ? "active" : ""} href="#deal-board" onClick={() => setQuickFilter("all")}><LayoutDashboard size={19} /><span>Deals</span></a>
         <a className={quickFilter === "closing" ? "active" : ""} href="#deal-board" onClick={() => setQuickFilter("closing")}><Clock3 size={19} /><span>Closing</span></a>
         <a className={quickFilter === "saved" ? "active" : ""} href="#deal-board" onClick={() => setQuickFilter("saved")}><Bookmark size={19} /><span>Saved</span></a>
-        <button type="button" onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={19} /><span>Filters</span></button>
+        <button type="button" className={advancedFilterCount > 0 ? "active" : ""} onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={19} /><span>Filters{advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ""}</span></button>
       </nav>
     </div>
   );

@@ -5,12 +5,13 @@ import type {
   VehicleOperability,
 } from "./auction-types";
 import { getGsaMarketValuation } from "./gsa-market-valuation-snapshot.ts";
+import { canonicalVehicleFamily } from "./gsa-market-valuations.ts";
 
 const CARMAX_PROVIDER = "CarMax recent offers";
 const GSA_COMPS_PROVIDER = "Observed GSA auction comps";
 const CARMAX_WINDOW = "the last 45 days";
 const CARMAX_CACHE_MS = 24 * 60 * 60 * 1_000;
-const GSA_COMPS_CACHE_MS = 6 * 60 * 60 * 1_000;
+const GSA_COMPS_CACHE_MS = 60 * 60 * 1_000;
 const MISS_CACHE_MS = 60 * 60 * 1_000;
 const FETCH_TIMEOUT_MS = 7_000;
 const MAX_RESPONSE_BYTES = 2_000_000;
@@ -688,7 +689,9 @@ function valuationFromRow(row: D1ValuationRow): ValuationReference {
   };
 }
 
-function condition(value: string): VehicleCondition {
+export function normalizeMarketCondition(value: string): VehicleCondition {
+  if (value === "usable" || value === "new") return "good";
+  if (value === "scrap") return "salvage";
   return value === "good" || value === "fair" || value === "repairable" || value === "salvage"
     ? value
     : "unknown";
@@ -724,7 +727,7 @@ function vehicleFromRow(row: D1VehicleRow): MarketVehicleRecord {
     series: row.series,
     vin: row.vin,
     mileage: row.mileage,
-    condition: condition(row.condition),
+    condition: normalizeMarketCondition(row.condition),
     operability: operability(row.operability),
     damageFlags: stringArray(row.damage_flags_json),
     issueFlags: stringArray(row.feature_flags_json),
@@ -813,24 +816,115 @@ function bundledGsaComparableValuation(externalId: string): ValuationReference |
   };
 }
 
+export function buildD1GsaComparableValuation(
+  vehicle: MarketVehicleRecord,
+  identity: CanonicalVehicleIdentity,
+  rowsValue: readonly D1ComparableRow[],
+  asOf: string,
+): ValuationReference | null {
+  const rows = [...rowsValue]
+    .filter((row) =>
+      Number.isSafeInteger(row.closed_high_bid_cents) && row.closed_high_bid_cents > 0 &&
+      Number.isFinite(Date.parse(row.ended_at))
+    )
+    .sort((left, right) => {
+      if (vehicle.mileage !== null) {
+        const leftDifference = left.mileage === null
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(left.mileage - vehicle.mileage);
+        const rightDifference = right.mileage === null
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(right.mileage - vehicle.mileage);
+        if (leftDifference !== rightDifference) return leftDifference - rightDifference;
+      }
+      return Date.parse(right.ended_at) - Date.parse(left.ended_at);
+    })
+    .slice(0, 25);
+  if (!rows.length) return null;
+
+  const rawAmounts = rows.map((row) => row.closed_high_bid_cents).sort((a, b) => a - b);
+  const mileageAdjustedAmounts = rows.map((row) => {
+    if (!vehicle.mileage || !row.mileage || vehicle.mileage <= 0 || row.mileage <= 0) {
+      return row.closed_high_bid_cents;
+    }
+    const mileageFactor = Math.min(
+      1.45,
+      Math.max(0.65, Math.pow(row.mileage / vehicle.mileage, 0.28)),
+    );
+    return Math.max(1, Math.round(row.closed_high_bid_cents * mileageFactor));
+  }).sort((a, b) => a - b);
+  const rawMedianCents = median(rawAmounts)!;
+  const mileageAdjustedMedianCents = median(mileageAdjustedAmounts)!;
+  const conditionAdjustment = listingConditionAdjustment(vehicle);
+  const conditionFactor = 1 + conditionAdjustment.pct;
+  const adjustedAmounts = mileageAdjustedAmounts
+    .map((amount) => Math.max(1, Math.round(amount * conditionFactor)))
+    .sort((a, b) => a - b);
+  const medianCents = median(adjustedAmounts)!;
+  const comparableMedianMileage = median(
+    rows.map((row) => row.mileage).filter((value): value is number => value !== null),
+  );
+  const newest = [...rows].sort((a, b) => Date.parse(b.ended_at) - Date.parse(a.ended_at))[0]!;
+  const nearest = rows[0]!;
+  const mileageSampleCount = rows.filter((row) => row.mileage !== null).length;
+  return {
+    status: "reference-only",
+    provider: GSA_COMPS_PROVIDER,
+    providerKind: "market-comps",
+    valuationType: "auction-comp",
+    lowCents: quartile(adjustedAmounts, 0.25),
+    medianCents,
+    highCents: quartile(adjustedAmounts, 0.75),
+    asOf: newest.ended_at || asOf,
+    confidence: Number(Math.min(0.7, 0.3 + rows.length * 0.055).toFixed(2)),
+    sampleSize: rows.length,
+    sourceUrl: nearest.canonical_url ?? "https://gsaauctions.gov/auctions/home",
+    provenanceNote: `Mileage- and listing-condition-adjusted range from ${rows.length} terminal GSA closed high bid${rows.length === 1 ? "" : "s"} for the exact stored or VIN-decoded year/make/model; ${mileageSampleCount} reported mileage and the closest available mileage is shown first. A closed high bid is not proof of award, and the current subject bid was never used as market value.`,
+    evidence: {
+      rawLowCents: quartile(rawAmounts, 0.25),
+      rawMedianCents,
+      rawHighCents: quartile(rawAmounts, 0.75),
+      inputMileage: vehicle.mileage,
+      comparableMedianMileage,
+      mileageAdjustmentCents: mileageAdjustedMedianCents - rawMedianCents,
+      conditionAdjustmentCents: medianCents - mileageAdjustedMedianCents,
+      conditionAdjustmentPct: conditionAdjustment.pct,
+      conditionBasis: conditionAdjustment.basis,
+      matchBasis: `${identity.matchBasis}; official terminal closed-high-bid only; nearest-mileage first`,
+    },
+  };
+}
+
 async function gsaComparableValuation(
   db: D1Database,
   vehicle: MarketVehicleRecord,
   identity: CanonicalVehicleIdentity,
   asOf: string,
 ): Promise<ValuationReference | null> {
-  const canonicalKey = `${identity.year}|${identity.make}|${identity.model}`
-    .toLowerCase().replace(/\s+/g, " ").trim();
+  const family = canonicalVehicleFamily({
+    make: identity.make,
+    modelLabel: identity.model,
+    title: `${identity.year} ${identity.make} ${identity.model}`,
+  });
+  const canonicalKey = family
+    ? `${identity.year}|${family}`
+    : `${identity.year}|${identity.make}|${identity.model}`
+      .toLowerCase().replace(/\s+/g, " ").trim();
   const result = await db.prepare(
     `SELECT external_id, canonical_url, mileage, closed_high_bid_cents, ended_at
      FROM comparable_sales
      WHERE external_id <> ?1
        AND closed_high_bid_cents > 0
+       AND outcome_status = 'closed-high-bid-official-catalog'
+       AND ended_at <= ?6
        AND (
          normalized_vehicle_key = ?2 OR
          (year = ?3 AND lower(make) = lower(?4) AND lower(model) = lower(?5))
        )
-     ORDER BY ended_at DESC
+     ORDER BY
+       CASE WHEN ?7 IS NULL OR mileage IS NULL THEN 1 ELSE 0 END,
+       ABS(COALESCE(mileage, ?7) - COALESCE(?7, mileage)) ASC,
+       ended_at DESC
      LIMIT 25`,
   ).bind(
     vehicle.externalId,
@@ -838,43 +932,10 @@ async function gsaComparableValuation(
     identity.year,
     identity.make,
     identity.model,
+    asOf,
+    vehicle.mileage,
   ).all<D1ComparableRow>();
-  const rows = result.results ?? [];
-  if (!rows.length) return null;
-  const amounts = rows.map((row) => row.closed_high_bid_cents).sort((a, b) => a - b);
-  const lowCents = quartile(amounts, 0.25);
-  const medianCents = median(amounts)!;
-  const highCents = quartile(amounts, 0.75);
-  const comparableMedianMileage = median(
-    rows.map((row) => row.mileage).filter((value): value is number => value !== null),
-  );
-  const newest = [...rows].sort((a, b) => Date.parse(b.ended_at) - Date.parse(a.ended_at))[0]!;
-  return {
-    status: "reference-only",
-    provider: GSA_COMPS_PROVIDER,
-    providerKind: "market-comps",
-    valuationType: "auction-comp",
-    lowCents,
-    medianCents,
-    highCents,
-    asOf: newest.ended_at || asOf,
-    confidence: Number(Math.min(0.68, 0.3 + rows.length * 0.055).toFixed(2)),
-    sampleSize: rows.length,
-    sourceUrl: newest.canonical_url ?? "https://gsaauctions.gov/auctions/home",
-    provenanceNote: `Median of ${rows.length} closed high bid${rows.length === 1 ? "" : "s"} for the exact stored or VIN-decoded year/make/model. A closed high bid is not proof of award, and the current subject bid was never used as market value.`,
-    evidence: {
-      rawLowCents: lowCents,
-      rawMedianCents: medianCents,
-      rawHighCents: highCents,
-      inputMileage: vehicle.mileage,
-      comparableMedianMileage,
-      mileageAdjustmentCents: null,
-      conditionAdjustmentCents: null,
-      conditionAdjustmentPct: null,
-      conditionBasis: null,
-      matchBasis: identity.matchBasis,
-    },
-  };
+  return buildD1GsaComparableValuation(vehicle, identity, result.results ?? [], asOf);
 }
 
 async function persistValuation(
@@ -1017,9 +1078,35 @@ export async function resolveMarketValuationBatch(
       };
     }
 
-    // Every covered active lot has a precomputed official GSA value. Return it
-    // without waiting for CarMax, Jina, NHTSA, or a database write.
+    // The bundled corpus keeps this path immediate. A local D1 query may
+    // supersede it only when at least three exact-identity, official terminal
+    // comps closed after the bundle was generated; no upstream request is made.
     if (bundled) {
+      try {
+        const incremental = await gsaComparableValuation(
+          db,
+          vehicle,
+          gsaCanonicalIdentity(vehicle),
+          nowIso,
+        );
+        if (
+          incremental && incremental.sampleSize >= 3 &&
+          Date.parse(incremental.asOf) > Date.parse(bundled.asOf)
+        ) {
+          try {
+            await persistValuation(db, vehicle, incremental, nowIso);
+          } catch {
+            // The fresh value remains usable even if cache persistence fails.
+          }
+          return {
+            item: { externalId, valuation: incremental, cacheStatus: "refreshed" },
+            refreshed: true,
+          };
+        }
+      } catch {
+        // Bundled values remain available when D1 has not been initialized or
+        // the incremental ledger is temporarily unavailable.
+      }
       return {
         item: { externalId, valuation: bundled, cacheStatus: "fresh" },
         refreshed: false,

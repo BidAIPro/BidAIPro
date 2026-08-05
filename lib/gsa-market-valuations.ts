@@ -41,6 +41,8 @@ export interface GsaComparableAdjustment {
   endedAt: string;
   year: number | null;
   mileage: number | null;
+  mileageDifference: number | null;
+  mileageCloseness: number;
   condition: GsaVehicleCondition;
   rawClosedHighBidCents: number;
   adjustedHighBidCents: number;
@@ -328,7 +330,10 @@ function matchCandidates(
 ) {
   const subjectFamily = canonicalVehicleFamily(subject);
   const subjectClass = classifyVehicle(subject);
-  const candidates: Candidate[] = comps.map((comp) => {
+  const subjectExternalId = externalId(subject);
+  const candidates: Candidate[] = comps
+    .filter((comp) => comp.auctionId !== subjectExternalId && comp.id !== subject.id)
+    .map((comp) => {
     const comparableShape = {
       make: comp.make,
       modelLabel: comp.modelLabel,
@@ -345,7 +350,7 @@ function matchCandidates(
       vehicleClass,
       preliminaryScore: preliminaryScore(subject, comp, familyMatch, classMatch),
     };
-  });
+    });
 
   const exact = candidates.filter(({ comp, family }) => {
     if (!subjectFamily || family !== subjectFamily) return false;
@@ -433,9 +438,11 @@ function externalId(subject: GsaMarketValuationSubject): string {
 
 function matchLabel(basis: GsaMarketMatchBasis): string {
   if (basis === "family-year-mileage") {
-    return "Same vehicle family; year-banded and mileage-weighted";
+    return "Same vehicle family; year-banded, mileage-weighted, nearest mileage shown first";
   }
-  if (basis === "family") return "Same vehicle family; broader year and mileage range";
+  if (basis === "family") {
+    return "Same vehicle family; broader range, mileage-weighted, nearest mileage shown first";
+  }
   return "Same vehicle class only; low-confidence auction benchmark";
 }
 
@@ -491,9 +498,24 @@ export function buildGsaMarketValuation(
     };
   }
 
-  const selected = [...match.candidates]
-    .sort((left, right) => right.preliminaryScore - left.preliminaryScore)
-    .slice(0, MAX_COMPARABLES);
+  const rankedCandidates = [...match.candidates]
+    .sort((left, right) => right.preliminaryScore - left.preliminaryScore);
+  const selected = rankedCandidates.slice(0, MAX_COMPARABLES);
+  if (subject.mileage !== null) {
+    const nearestMileageCandidate = match.candidates
+      .filter(({ comp }) => comp.mileage !== null)
+      .sort((left, right) =>
+        Math.abs(left.comp.mileage! - subject.mileage!) -
+          Math.abs(right.comp.mileage! - subject.mileage!) ||
+        right.preliminaryScore - left.preliminaryScore
+      )[0];
+    if (
+      nearestMileageCandidate &&
+      !selected.some(({ comp }) => comp.id === nearestMileageCandidate.comp.id)
+    ) {
+      selected[Math.max(0, selected.length - 1)] = nearestMileageCandidate;
+    }
+  }
   const samples = selected.map(({ comp, preliminaryScore }): GsaComparableAdjustment => {
     const yearFactor = subject.year !== null && comp.year !== null
       ? clamp(Math.exp((subject.year - comp.year) * 0.045), 0.7, 1.4)
@@ -531,6 +553,10 @@ export function buildGsaMarketValuation(
       endedAt: comp.endedAt,
       year: comp.year,
       mileage: comp.mileage,
+      mileageDifference: subject.mileage !== null && comp.mileage !== null
+        ? Math.abs(subject.mileage - comp.mileage)
+        : null,
+      mileageCloseness: Number(ratioCloseness(subject.mileage, comp.mileage).toFixed(4)),
       condition: comp.condition,
       rawClosedHighBidCents: comp.closedHighBidCents,
       adjustedHighBidCents: Math.max(1, Math.round(comp.closedHighBidCents * totalFactor)),
@@ -549,7 +575,21 @@ export function buildGsaMarketValuation(
     value: sample.adjustedHighBidCents,
     weight: sample.weight,
   }));
-  const publishedSamples = samples.slice(0, MAX_PUBLISHED_SAMPLES);
+  // Keep the closest reported mileage visible first. The valuation itself
+  // still uses every selected sample with year, mileage, condition, issue, and
+  // recency weights; this ordering makes the nearest available odometer match
+  // explicit when an identical-mileage comparable does not exist.
+  const publishedSamples = [...samples]
+    .sort((left, right) => {
+      if (subject.mileage !== null) {
+        const leftDifference = left.mileageDifference ?? Number.POSITIVE_INFINITY;
+        const rightDifference = right.mileageDifference ?? Number.POSITIVE_INFINITY;
+        if (leftDifference !== rightDifference) return leftDifference - rightDifference;
+      }
+      return right.matchScore - left.matchScore ||
+        Date.parse(right.endedAt) - Date.parse(left.endedAt);
+    })
+    .slice(0, MAX_PUBLISHED_SAMPLES);
 
   return {
     subjectAuctionId: subject.id,

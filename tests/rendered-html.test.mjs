@@ -72,7 +72,7 @@ test("server-renders the comparable outcome ledger with explicit award semantics
   const html = await response.text();
   assert.match(html, /Comparable ledger/i);
   assert.match(html, /closed high bid is not proof/i);
-  assert.match(html, /Historical bulk backfill is not active/i);
+  assert.match(html, /hourly official closed-catalog sync adds terminal high bids/i);
 });
 
 test("keeps social metadata and database capability wired", async () => {
@@ -91,13 +91,29 @@ test("keeps social metadata and database capability wired", async () => {
 });
 
 test("keeps the open deal board fresh and expires reference snapshots", async () => {
-  const [board, opportunityRoute, gallery] = await Promise.all([
+  const [board, opportunityRoute, gallery, liveDetail, comparableLedger] = await Promise.all([
     readFile(new URL("../app/components/deal-board.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/opportunities/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/components/vehicle-gallery.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/live-vehicle-detail.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/comps/comparable-ledger.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(board, /fetch\(publicApiUrl\("\/api\/opportunities"\)/);
+  assert.match(board, /fetchGsaRunnerSnapshot/);
+  assert.match(board, /publishedSnapshotOpportunities/);
+  assert.match(board, /OPPORTUNITY_REQUEST_TIMEOUT_MS/);
+  assert.match(board, /LIVE_BID_REQUEST_TIMEOUT_MS/);
+  assert.match(board, /controller\.abort\(\)/);
+  assert.match(board, /Vehicle catalog temporarily unavailable/);
+  assert.match(board, /className={`state-select/);
+  assert.match(board, /All states \(\{activeAuctionCount\}\)/);
+  assert.match(board, /market values continue filling in after vehicles appear/);
+  assert.match(board, /Official closed-catalog results are imported hourly/);
+  assert.match(liveDetail, /OPPORTUNITY_REQUEST_TIMEOUT_MS/);
+  assert.match(liveDetail, /MARKET_VALUE_REQUEST_TIMEOUT_MS/);
+  assert.match(liveDetail, /LIVE_BID_REQUEST_TIMEOUT_MS/);
+  assert.match(comparableLedger, /LEDGER_REQUEST_TIMEOUT_MS/);
   assert.match(board, /setInterval\(\(\) => void loadOpportunities\(\), 60 \* 60_000\)/);
   assert.match(board, /setAuctions\(\(current\) =>/);
   assert.match(board, /\/api\/live-bid\?id=\$\{encodeURIComponent\(auction\.externalId\)\}/);
@@ -110,6 +126,9 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /applyValuationToOpportunity/);
   assert.match(board, /VehicleGallery/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
+  for (const publicClient of [board, liveDetail, comparableLedger]) {
+    assert.doesNotMatch(publicClient, /cache:\s*["']no-store["']/);
+  }
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
   assert.match(opportunityRoute, /status: "stale"/);
   assert.match(opportunityRoute, /liveBidPolling: false/);

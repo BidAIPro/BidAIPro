@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { runClosingWindowRefresh } from "../lib/gsa-closing-refresh";
+import { syncClosedGsaVehicleComps } from "../lib/gsa-closed-comp-sync";
 import { getGsaVehicleAuctions } from "../lib/gsa-client";
 import { persistGsaDiscovery, recordGsaSourceFailure } from "../lib/gsa-persistence";
 
@@ -47,6 +48,22 @@ const worker = {
       await runClosingWindowRefresh(env.DB, {
         sleep: (delayMs) => scheduler.wait(delayMs),
       });
+      return;
+    }
+
+    if (controller.cron === "39 * * * *") {
+      try {
+        await syncClosedGsaVehicleComps(env.DB, {
+          bootstrapDays: 2,
+          overlapDays: 1,
+          maxWindowDays: 7,
+          detailConcurrency: 4,
+          signal: AbortSignal.timeout(45_000),
+        });
+      } catch {
+        // The sync records its own failed source check. It runs on a separate
+        // cron and must never interrupt active-catalog or closing-bid refreshes.
+      }
       return;
     }
 

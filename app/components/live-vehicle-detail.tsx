@@ -30,6 +30,9 @@ import { VehicleGallery } from "./vehicle-gallery";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const OPPORTUNITY_REQUEST_TIMEOUT_MS = 8_000;
+const MARKET_VALUE_REQUEST_TIMEOUT_MS = 10_000;
+const LIVE_BID_REQUEST_TIMEOUT_MS = 10_000;
 
 function dollars(cents: number | null | undefined) {
   return cents === null || cents === undefined ? "Unavailable" : money.format(cents / 100);
@@ -72,9 +75,14 @@ export function LiveVehicleDetail() {
     if (!requestedId) return;
 
     const controller = new AbortController();
+    let mounted = true;
+    const requestTimeout = window.setTimeout(
+      () => controller.abort(),
+      OPPORTUNITY_REQUEST_TIMEOUT_MS,
+    );
     async function load() {
       try {
-        const response = await fetch(publicApiUrl("/api/opportunities"), { cache: "no-store", signal: controller.signal });
+        const response = await fetch(publicApiUrl("/api/opportunities"), { signal: controller.signal });
         if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
         const payload = await response.json() as {
           data?: AuctionOpportunity[];
@@ -84,13 +92,18 @@ export function LiveVehicleDetail() {
         setAuction(match);
         setLiveBidPolling(payload.meta?.sourceHealth?.liveBidPolling === true);
         setStatus(match ? "ready" : "missing");
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setStatus("error");
+      } catch {
+        if (mounted) setStatus("error");
+      } finally {
+        window.clearTimeout(requestTimeout);
       }
     }
     void load();
-    return () => controller.abort();
+    return () => {
+      mounted = false;
+      window.clearTimeout(requestTimeout);
+      controller.abort();
+    };
   }, [requestedId]);
 
   const marketValueExternalId = auction?.externalId ?? null;
@@ -101,12 +114,16 @@ export function LiveVehicleDetail() {
     const controller = new AbortController();
     marketValueRequest.current = controller;
     setMarketValueLoading(true);
+    const requestTimeout = window.setTimeout(
+      () => controller.abort(),
+      MARKET_VALUE_REQUEST_TIMEOUT_MS,
+    );
 
     void (async () => {
       try {
         const response = await fetch(
           publicApiUrl(`/api/market-values?ids=${encodeURIComponent(marketValueExternalId)}`),
-          { cache: "no-store", signal: controller.signal },
+          { signal: controller.signal },
         );
         if (!response.ok) throw new Error(`Market value feed returned ${response.status}`);
         const payload = await response.json() as {
@@ -133,6 +150,7 @@ export function LiveVehicleDetail() {
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
       } finally {
+        window.clearTimeout(requestTimeout);
         if (marketValueRequest.current === controller) {
           marketValueRequest.current = null;
           setMarketValueLoading(false);
@@ -141,6 +159,7 @@ export function LiveVehicleDetail() {
     })();
 
     return () => {
+      window.clearTimeout(requestTimeout);
       controller.abort();
       if (marketValueRequest.current === controller) marketValueRequest.current = null;
     };
@@ -168,11 +187,15 @@ export function LiveVehicleDetail() {
       const controller = new AbortController();
       liveBidRequest.current = controller;
       liveBidLastAttempt.current = checkedAt;
+      const requestTimeout = window.setTimeout(
+        () => controller.abort(),
+        LIVE_BID_REQUEST_TIMEOUT_MS,
+      );
       void (async () => {
         try {
           const response = await fetch(
             publicApiUrl(`/api/live-bid?id=${encodeURIComponent(auction.externalId)}`),
-            { cache: "no-store", signal: controller.signal },
+            { signal: controller.signal },
           );
           if (!response.ok) throw new Error(`Live bid feed returned ${response.status}`);
           const payload = await response.json() as { data?: LiveBidSnapshot };
@@ -183,6 +206,7 @@ export function LiveVehicleDetail() {
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError") return;
         } finally {
+          window.clearTimeout(requestTimeout);
           if (liveBidRequest.current === controller) liveBidRequest.current = null;
         }
       })();
