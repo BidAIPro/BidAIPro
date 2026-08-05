@@ -896,7 +896,6 @@ async function graphqlRequest(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query, variables }),
-      redirect: "error",
       signal: abort.signal,
     });
     payload = await readJson(response, operation);

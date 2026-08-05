@@ -163,6 +163,7 @@ test("fetches a bounded complete active/coming snapshot and normalizes source cl
   assert.equal("credentials" in calls[0].init, false);
   assert.equal("cache" in calls[0].init, false);
   assert.equal("referrerPolicy" in calls[0].init, false);
+  assert.equal("redirect" in calls[0].init, false);
   assert.equal(new Headers(calls[0].init.headers).get("authorization"), null);
   assert.deepEqual(calls[0].body.variables.filters[0].conditions[0].value, [
     "Coming soon",
