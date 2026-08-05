@@ -155,15 +155,18 @@ img { display: block; max-width: 100%; }
 .quick-filters button:hover { background: #edf1ef; }
 .quick-filters button.active { color: #18382e; background: #e2f1eb; border-color: #cfe6dd; }
 .board-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
-.state-select { display: flex; height: 36px; align-items: center; gap: 7px; padding: 0 9px; color: #60716a; background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
+.state-select { position: relative; display: flex; width: 190px; height: 36px; align-items: center; gap: 7px; padding: 0 9px; color: #60716a; background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; transition: border-color .18s ease, box-shadow .18s ease, background .18s ease; }
 .state-select:hover { border-color: #b6c8c0; }
 .state-select:focus-within { border-color: #69ab95; box-shadow: 0 0 0 3px #e5f5ef; }
 .state-select.is-active { color: #145f49; background: #ecf8f3; border-color: #bcded2; }
 .state-select > span { color: #7a8983; font-size: 10px; font-weight: 720; letter-spacing: .045em; text-transform: uppercase; }
 .state-select.is-active > span { color: #34745f; }
-.state-select select { max-width: 145px; padding: 0; color: #263a32; background: transparent; border: 0; outline: none; appearance: none; font-size: 12px; font-weight: 680; cursor: pointer; }
-.sort-select { display: flex; height: 33px; align-items: center; gap: 6px; padding: 0 8px; color: #65726c; background: #fff; border: 1px solid var(--line); border-radius: 7px; }
-.sort-select select { padding: 0 2px; color: #2f3e38; background: transparent; border: 0; outline: none; appearance: none; font-size: 9px; font-weight: 630; }
+.state-select > strong, .sort-select > strong { min-width: 0; flex: 1; overflow: hidden; color: #263a32; font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.state-select > svg, .state-select > span, .state-select > strong, .sort-select > svg, .sort-select > strong { pointer-events: none; }
+.state-select select, .sort-select select { position: absolute; inset: 0; z-index: 1; width: 100%; max-width: none; height: 100%; padding: 0; opacity: 0; border: 0; cursor: pointer; }
+.sort-select { position: relative; display: flex; width: 170px; height: 36px; align-items: center; gap: 6px; padding: 0 8px; color: #65726c; background: #fff; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; transition: border-color .18s ease, box-shadow .18s ease; }
+.sort-select:hover { border-color: #b6c8c0; }
+.sort-select:focus-within { border-color: #69ab95; box-shadow: 0 0 0 3px #e5f5ef; }
 .view-switch { display: flex; gap: 2px; padding: 2px; background: #e7ecea; border-radius: 7px; }
 .view-switch button { display: grid; width: 28px; height: 27px; place-items: center; color: #718079; background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
 .view-switch button.active { color: #20352c; background: #fff; box-shadow: 0 1px 3px rgba(15,30,24,.09); }

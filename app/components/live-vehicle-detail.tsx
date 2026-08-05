@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { AuctionOpportunity, ValuationReference } from "../../lib/auction-types";
+import { closeForecastEvidenceLabel, valuationEvidenceCountLabel } from "../../lib/evidence-labels";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
 import { applyValuationToOpportunity } from "../../lib/opportunity-adapter";
 import { publicApiUrl } from "../../lib/public-api";
@@ -273,7 +274,7 @@ export function LiveVehicleDetail() {
             <div className="decision-grid">
               <article><span>Current bid · before costs</span><strong>{dollars(auction.currentBidCents)}</strong><small>Observed GSA auction price only</small></article>
               <article className="all-in-decision"><span>Modeled all-in now</span><strong>{dollars(allInNow)}</strong><small>{addedCostsNow === null ? "Added costs unavailable" : `Includes ${dollars(addedCostsNow)} modeled added costs`}</small></article>
-              <article><span>Adjusted market value</span><strong>{auction.valuation.medianCents === null ? marketValueLoading ? "Pulling…" : "Unavailable" : dollars(auction.valuation.medianCents)}</strong><small>{auction.valuation.medianCents === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${auction.valuation.sampleSize} observations`}</small></article>
+              <article><span>Adjusted market value</span><strong>{auction.valuation.medianCents === null ? marketValueLoading ? "Pulling…" : "Unavailable" : dollars(auction.valuation.medianCents)}</strong><small>{auction.valuation.medianCents === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${valuationEvidenceCountLabel(auction.valuation)}`}</small></article>
               <article className="primary-decision"><span>Safe bid ceiling · before costs</span><strong>{dollars(auction.assessment.safeMaxBidCents)}</strong><small>Maximum auction bid under current assumptions</small></article>
             </div>
 
@@ -292,7 +293,7 @@ export function LiveVehicleDetail() {
         <section className="detail-stat-strip">
           <article><CircleDollarSign size={17} /><span>Projected close<strong>{dollars(auction.forecast.expectedCents)}</strong><small>Before added costs</small></span></article>
           <article><TrendingUp size={17} /><span>Conservative value<strong>{dollars(auction.assessment.conservativeValueCents)}</strong><small>Independent of live bid</small></span></article>
-          <article><Database size={17} /><span>Evidence base<strong>{auction.forecast.sampleSize} comps</strong><small>{auction.forecast.exactModelCount} exact-model matches</small></span></article>
+          <article><Database size={17} /><span>Forecast evidence<strong>{closeForecastEvidenceLabel(auction.forecast)}</strong><small>{auction.forecast.exactModelCount} exact-model matches</small></span></article>
           <article><ShieldCheck size={17} /><span>Model confidence<strong>{Math.round(auction.assessment.confidence * 100)}%</strong><small>Forecast, not a guarantee</small></span></article>
         </section>
 

@@ -23,6 +23,7 @@ import { notFound } from "next/navigation";
 import { MarketValueEvidence } from "../../components/market-reference-links";
 import { VehicleGallery } from "../../components/vehicle-gallery";
 import type { AuctionOpportunity } from "../../../lib/auction-types";
+import { closeForecastEvidenceLabel, valuationEvidenceCountLabel } from "../../../lib/evidence-labels";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
 
 const money = new Intl.NumberFormat("en-US", {
@@ -156,13 +157,13 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
         <section className="detail-stat-strip">
           <article><CircleDollarSign size={17} /><span>Projected profit<strong>{dollars(auction.assessment.projectedProfitCents)}</strong><small>{asPercent(auction.assessment.roi)} modeled ROI</small></span></article>
           <article><Scale size={17} /><span>Break-even bid<strong>{dollars(auction.assessment.breakEvenBidCents)}</strong><small>Current cost profile</small></span></article>
-          <article><Database size={17} /><span>Evidence base<strong>{auction.forecast.sampleSize} comps</strong><small>{auction.forecast.exactModelCount} exact-model matches</small></span></article>
+          <article><Database size={17} /><span>Forecast evidence<strong>{closeForecastEvidenceLabel(auction.forecast)}</strong><small>{auction.forecast.exactModelCount} exact-model matches</small></span></article>
           <article><TrendingUp size={17} /><span>Win under ceiling<strong>{asPercent(auction.assessment.probabilityWinUnderCeiling)}</strong><small>Forecast, not a guarantee</small></span></article>
         </section>
 
         <div className="detail-grid">
           <section className="analysis-card market-card">
-            <div className="section-heading"><div><p>Market intelligence</p><h2>Numeric value range &amp; bid position</h2></div><span className="evidence-label"><Database size={13} /> {auction.valuation.sampleSize} reference observations</span></div>
+            <div className="section-heading"><div><p>Market intelligence</p><h2>Numeric value range &amp; bid position</h2></div><span className="evidence-label"><Database size={13} /> {valuationEvidenceCountLabel(auction.valuation)}</span></div>
             <p className="section-copy">The numeric market evidence stays independent of the live GSA bid. Condition, mileage, title, operability, geography, and data gaps remain explicit.</p>
             <div className="market-range">
               <div className="range-labels"><span>Low {dollars(auction.valuation.lowCents)}</span><span>Median {dollars(auction.valuation.medianCents)}</span><span>High {dollars(auction.valuation.highCents)}</span></div>

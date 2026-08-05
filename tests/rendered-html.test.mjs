@@ -63,6 +63,8 @@ test("server-renders a complete vehicle underwriting dossier", async () => {
   assert.match(html, /Secondary verification links/i);
   assert.match(html, /KBB/i);
   assert.match(html, /Comparable outcome ledger/i);
+  assert.match(html, /Forecast evidence/i);
+  assert.match(html, /Close forecast/i);
   assert.match(html, /Open official auction/i);
 });
 
@@ -91,12 +93,14 @@ test("keeps social metadata and database capability wired", async () => {
 });
 
 test("keeps the open deal board fresh and expires reference snapshots", async () => {
-  const [board, opportunityRoute, gallery, liveDetail, comparableLedger] = await Promise.all([
+  const [board, opportunityRoute, gallery, liveDetail, comparableLedger, styles, evidenceLabels] = await Promise.all([
     readFile(new URL("../app/components/deal-board.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/opportunities/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/components/vehicle-gallery.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/live-vehicle-detail.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/comps/comparable-ledger.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/evidence-labels.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(board, /fetch\(publicApiUrl\("\/api\/opportunities"\)/);
@@ -129,6 +133,13 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /\/api\/market-values\?ids=/);
   assert.match(board, /applyValuationToOpportunity/);
   assert.match(board, /VehicleGallery/);
+  assert.match(board, /value: "confidence", label: "Highest confidence"/);
+  assert.match(board, /sort === "confidence"[^\n]+assessment\.confidence/);
+  assert.match(board, /selectedSort\.orderCopy/);
+  assert.match(evidenceLabels, /Close forecast · no matched comps/);
+  assert.match(evidenceLabels, /valuation .*comps.* used/);
+  assert.doesNotMatch(board, /forecast\.sampleSize\} GSA comps/);
+  assert.match(styles, /\.state-select select, \.sort-select select \{ position: absolute; inset: 0;[^}]+opacity: 0;/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   for (const publicClient of [board, liveDetail, comparableLedger]) {
     assert.doesNotMatch(publicClient, /cache:\s*["']no-store["']/);

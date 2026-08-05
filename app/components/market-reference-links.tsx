@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { AuctionOpportunity, ValuationEvidence, ValuationReference } from "../../lib/auction-types";
+import { valuationEvidenceCountLabel } from "../../lib/evidence-labels";
 import { freeMarketReferences } from "../../lib/market-references";
 
 type MarketValueEvidenceProps = {
@@ -44,10 +45,6 @@ function rangeLabel(low: number | null, high: number | null) {
   if (low === null) return `Up to ${dollars(high)}`;
   if (high === null) return `From ${dollars(low)}`;
   return `${dollars(low)}–${dollars(high)}`;
-}
-
-function observationLabel(sampleSize: number) {
-  return `${integer.format(sampleSize)} ${sampleSize === 1 ? "observation" : "observations"}`;
 }
 
 function valuationTypeLabel(type: ValuationReference["valuationType"]) {
@@ -95,7 +92,7 @@ export function MarketValueEvidence({
             <strong>{hasNumericValue ? "Automatic market evidence" : loading ? "Pulling market value…" : "No automatic market match"}</strong>
             <small>
               {hasNumericValue
-                ? `${valuation.provider} · ${observationLabel(valuation.sampleSize)}`
+                ? `${valuation.provider} · ${valuationEvidenceCountLabel(valuation)}`
                 : loading
                   ? "Matching year, make, model, and mileage"
                   : "This source has no usable numeric match yet"}
@@ -146,7 +143,7 @@ export function MarketValueEvidence({
           </div>
 
           <div className="market-evidence-facts">
-            <span><Database size={14} /><b>{observationLabel(valuation.sampleSize)}</b></span>
+            <span><Database size={14} /><b>{valuationEvidenceCountLabel(valuation)}</b></span>
             <span><CalendarDays size={14} /><b>As of {shortDate(valuation.asOf)}</b></span>
             <span><Gauge size={14} /><b>{inputMileage === null ? "Mileage not captured" : `${integer.format(inputMileage)} mi input`}</b></span>
             <span><ShieldCheck size={14} /><b>{evidence?.matchBasis ?? "Year / make / model match"}</b></span>

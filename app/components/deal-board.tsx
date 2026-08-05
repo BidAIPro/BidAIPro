@@ -38,6 +38,7 @@ import { fetchGsaRunnerSnapshot } from "../../lib/gsa-runner-snapshot";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
 import { applyValuationToOpportunity, discoveryToOpportunity } from "../../lib/opportunity-adapter";
 import { mergeOpportunityFeed } from "../../lib/opportunity-feed";
+import { closeForecastEvidenceLabel, valuationEvidenceCountLabel } from "../../lib/evidence-labels";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
 import {
@@ -48,8 +49,20 @@ import {
 import { MarketValueEvidence } from "./market-reference-links";
 import { VehicleGallery } from "./vehicle-gallery";
 
-type SortKey = "deal" | "ending" | "profit" | "bid";
+type SortKey = "deal" | "ending" | "confidence" | "profit" | "bid";
 type QuickFilter = "all" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
+
+const SORT_OPTIONS: ReadonlyArray<{
+  value: SortKey;
+  label: string;
+  orderCopy: string;
+}> = [
+  { value: "deal", label: "Best deal", orderCopy: "Deal Score order" },
+  { value: "ending", label: "Ending soon", orderCopy: "Closing-time order" },
+  { value: "confidence", label: "Highest confidence", orderCopy: "Confidence order" },
+  { value: "profit", label: "Highest profit", orderCopy: "Projected-profit order" },
+  { value: "bid", label: "Lowest bid", orderCopy: "Current-bid order" },
+];
 
 type MarketValueResponse = {
   data?: Array<{
@@ -328,12 +341,12 @@ function OpportunityCard({
           <div>
             <span>Projected close · before costs</span>
             <strong>{dollars(predictedClose)}</strong>
-            <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}` : "More evidence needed"}</small>
+            <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}` : "Needs matched close-price comps"}</small>
           </div>
           <div>
             <span>Adjusted market value</span>
             <strong>{marketValue === null ? marketValueLoading ? "Pulling…" : "Unavailable" : dollars(marketValue)}</strong>
-            <small>{marketValue === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${auction.valuation.sampleSize} observations`}</small>
+            <small>{marketValue === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${valuationEvidenceCountLabel(auction.valuation)}`}</small>
           </div>
           <div className="all-in-metric">
             <span>Modeled all-in now</span>
@@ -357,7 +370,10 @@ function OpportunityCard({
 
         <div className="evidence-row">
           <div>
-            <span className="evidence-chip"><Database size={13} /> {auction.forecast.sampleSize} GSA comps</span>
+            <span
+              className="evidence-chip"
+              title="Comparable closed outcomes used for the projected-close forecast; separate from the market-value observations above."
+            ><Database size={13} /> {closeForecastEvidenceLabel(auction.forecast)}</span>
             <span className="evidence-chip"><ShieldCheck size={13} /> VIN {auction.vehicle.vin ? "captured" : "pending"}</span>
             <PollingLabel auction={auction} now={now} livePollingAvailable={livePollingAvailable} />
           </div>
@@ -745,6 +761,7 @@ export function DealBoard() {
 
     return result.sort((a, b) => {
       if (sort === "ending") return (a.endsAt ? new Date(a.endsAt).getTime() : Number.POSITIVE_INFINITY) - (b.endsAt ? new Date(b.endsAt).getTime() : Number.POSITIVE_INFINITY);
+      if (sort === "confidence") return b.assessment.confidence - a.assessment.confidence || b.assessment.score - a.assessment.score;
       if (sort === "profit") return (b.assessment.projectedProfitCents ?? -Infinity) - (a.assessment.projectedProfitCents ?? -Infinity);
       if (sort === "bid") return (a.currentBidCents ?? Number.POSITIVE_INFINITY) - (b.currentBidCents ?? Number.POSITIVE_INFINITY);
       return b.assessment.score - a.assessment.score;
@@ -779,6 +796,10 @@ export function DealBoard() {
   const marketValuedCount = auctions.filter((auction) =>
     auction.valuation.status !== "unavailable" && auction.valuation.medianCents !== null
   ).length;
+  const selectedStateLabel = stateFilter === "all"
+    ? `All states (${activeAuctionCount})`
+    : `${stateFilter} (${stateOptions.find((state) => state.value === stateFilter)?.count ?? 0})`;
+  const selectedSort = SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0]!;
 
   function toggleSaved(id: string) {
     setSaved((current) => {
@@ -935,20 +956,28 @@ export function DealBoard() {
             </div>
             <div className="board-controls">
               <label className={`state-select ${stateFilter !== "all" ? "is-active" : ""}`}>
-                <MapPin size={15} />
+                <MapPin size={15} aria-hidden="true" />
                 <span>State</span>
+                <strong>{selectedStateLabel}</strong>
                 <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} aria-label="Filter auctions by state">
                   <option value="all">All states ({activeAuctionCount})</option>
                   {visibleStateOptions.map((state) => <option key={state.value} value={state.value}>{state.value} ({state.count})</option>)}
                 </select>
-                <ChevronDown size={14} />
+                <ChevronDown size={14} aria-hidden="true" />
               </label>
-              <label className="sort-select"><ArrowDownUp size={15} /><select value={sort} onChange={(event) => setSort(event.target.value as SortKey)} aria-label="Sort auctions"><option value="deal">Best deal</option><option value="ending">Ending soon</option><option value="profit">Highest profit</option><option value="bid">Lowest bid</option></select><ChevronDown size={14} /></label>
+              <label className="sort-select">
+                <ArrowDownUp size={15} aria-hidden="true" />
+                <strong>{selectedSort.label}</strong>
+                <select value={sort} onChange={(event) => setSort(event.target.value as SortKey)} aria-label="Sort auctions">
+                  {SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <ChevronDown size={14} aria-hidden="true" />
+              </label>
               <div className="view-switch" aria-label="View style"><button type="button" className={!compact ? "active" : ""} onClick={() => setCompact(false)} aria-label="Card view"><Grid2X2 size={16} /></button><button type="button" className={compact ? "active" : ""} onClick={() => setCompact(true)} aria-label="Compact view"><List size={17} /></button></div>
             </div>
           </section>
 
-          <div className="result-line"><strong>{opportunities.length} opportunities</strong><span>{stateFilter === "all" ? "All states" : stateFilter} · Deal Score order; market values continue filling in after vehicles appear</span></div>
+          <div className="result-line"><strong>{opportunities.length} opportunities</strong><span>{stateFilter === "all" ? "All states" : stateFilter} · {selectedSort.orderCopy}; market values continue filling in after vehicles appear</span></div>
 
           <section className={`opportunity-list ${compact ? "compact-list" : ""}`}>
             {opportunities.map((auction) => (
