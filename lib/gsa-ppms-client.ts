@@ -12,9 +12,8 @@ export const GSA_PPMS_SALE_PREVIEW_ENDPOINT =
 export const GSA_PPMS_IMAGE_SIGNING_ENDPOINT =
   "https://www.ppms.gov/gw/common/ppms/api/v1/storage/presigned-urls";
 
-// PPMS applies an Origin allowlist to edge-originated requests as well as
-// browser requests. Sites edge subrequests receive 403 unless they use the
-// target service's own origin.
+// This is a server-to-server request, so it must not inherit a browser Origin
+// from the public API caller. PPMS rejects unrecognized browser origins.
 function ppmsRequest(
   input: string | URL,
   init: RequestInit = {},
@@ -22,7 +21,7 @@ function ppmsRequest(
 ): Request {
   const request = new Request(input, init);
   request.headers.set("Accept", "application/json");
-  request.headers.set("Origin", new URL(request.url).origin);
+  request.headers.delete("Origin");
   if (jsonBody) request.headers.set("Content-Type", "application/json");
   return request;
 }

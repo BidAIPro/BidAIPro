@@ -101,7 +101,7 @@ test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk A
     assert.equal(primaryCalls.some((call) => call.url.searchParams.has("api_key")), false);
     assert.equal(
       primaryCalls.every(
-        (call) => call.headers.get("origin") === "https://www.ppms.gov",
+        (call) => call.headers.get("origin") === null,
       ),
       true,
     );

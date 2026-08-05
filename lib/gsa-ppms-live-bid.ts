@@ -289,9 +289,9 @@ export async function fetchPpmsLiveBid(
       },
     );
     upstreamRequest.headers.set("Accept", "application/json");
-    // Rewriting a mutable Request and setting the target origin follows the
-    // Cloudflare Workers CORS-proxy pattern and prevents PPMS's 403 response.
-    upstreamRequest.headers.set("Origin", new URL(upstreamRequest.url).origin);
+    // A server subrequest must not inherit the GitHub Pages caller's Origin;
+    // PPMS rejects browser origins outside its own public-site allowlist.
+    upstreamRequest.headers.delete("Origin");
     const request = fetchImpl(upstreamRequest);
     const timedRequest = new Promise<Response>((_, reject) => {
       timeout = setTimeout(() => {
