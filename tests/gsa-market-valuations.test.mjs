@@ -286,6 +286,28 @@ test("penalizes dispersed adjusted outcomes in confidence", () => {
   assert.ok(clustered.confidence > dispersed.confidence);
 });
 
+test("excludes an isolated implausible price without discarding sparse newer-vehicle evidence", () => {
+  const guarded = buildGsaMarketValuation(subject(), [
+    comp(6_200, { closedHighBidCents: 9_966 }),
+    comp(6_201, { closedHighBidCents: 760_000 }),
+    comp(6_202, { closedHighBidCents: 790_000 }),
+    comp(6_203, { closedHighBidCents: 820_000 }),
+    comp(6_204, { closedHighBidCents: 850_000 }),
+    comp(6_205, { closedHighBidCents: 880_000 }),
+  ], asOf);
+  const sparse = buildGsaMarketValuation(subject(), [
+    comp(6_300, { closedHighBidCents: 9_966 }),
+    comp(6_301, { closedHighBidCents: 820_000 }),
+  ], asOf);
+
+  assert.equal(guarded.status, "available");
+  assert.equal(guarded.sampleSize, 5);
+  assert.equal(guarded.comparables.some((sample) => sample.auctionId === "6200"), false);
+  assert.ok(guarded.lowCents > 500_000);
+  assert.equal(sparse.status, "available");
+  assert.equal(sparse.sampleSize, 2);
+});
+
 test("builds and validates a complete snapshot and rejects subject-bid leakage", () => {
   const corpus = {
     from: "2026-05-07T00:00:00.000",

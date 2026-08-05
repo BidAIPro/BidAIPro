@@ -12,6 +12,8 @@ const CALCULATION_VERSION = "gsa-weighted-auction-comps-v2";
 const MAX_COMPARABLES = 15;
 const MAX_PUBLISHED_SAMPLES = 12;
 const MIN_BODY_CLASS_COMPARABLES = 3;
+const MIN_PRICE_OUTLIER_COHORT = 5;
+const MAX_MEDIAN_PRICE_RATIO = 3;
 
 export type GsaMarketMatchBasis =
   | "family-year-mileage"
@@ -617,11 +619,34 @@ function adjustmentDetail(
     notes: [
       "Subject auction bid is not an input to this valuation.",
       "Each comparable is adjusted toward the subject's year, mileage, condition, operability, and disclosed issue burden.",
+      "When at least five comparable outcomes exist, an isolated adjusted price outside one-third to three times the cohort median is excluded only if a majority of the cohort remains.",
       basis === "body-class"
         ? "Same-class fallback is a low-confidence auction benchmark, not an exact model valuation."
         : "Closed GSA high bids are auction-market evidence and are not confirmed award prices or retail appraisals.",
     ],
   };
+}
+
+function filterPriceOutliers(
+  samples: readonly GsaComparableAdjustment[],
+): GsaComparableAdjustment[] {
+  if (samples.length < MIN_PRICE_OUTLIER_COHORT) return [...samples];
+  const prices = samples
+    .map((sample) => sample.adjustedHighBidCents)
+    .sort((left, right) => left - right);
+  const middle = Math.floor(prices.length / 2);
+  const median = prices.length % 2 === 0
+    ? Math.round((prices[middle - 1]! + prices[middle]!) / 2)
+    : prices[middle]!;
+  const minimum = median / MAX_MEDIAN_PRICE_RATIO;
+  const maximum = median * MAX_MEDIAN_PRICE_RATIO;
+  const guarded = samples.filter((sample) =>
+    sample.adjustedHighBidCents >= minimum &&
+    sample.adjustedHighBidCents <= maximum
+  );
+  return guarded.length >= Math.floor(samples.length / 2) + 1
+    ? guarded
+    : [...samples];
 }
 
 function externalId(subject: GsaMarketValuationSubject): string {
@@ -716,7 +741,7 @@ export function buildGsaMarketValuation(
   const rankedCandidates = [...match.candidates]
     .sort((left, right) => right.preliminaryScore - left.preliminaryScore);
   const selected = rankedCandidates.slice(0, MAX_COMPARABLES);
-  const samples = selected.map(({ comp, preliminaryScore }): GsaComparableAdjustment => {
+  const adjustedSamples = selected.map(({ comp, preliminaryScore }): GsaComparableAdjustment => {
     const yearFactor = subject.year !== null && comp.year !== null
       ? clamp(Math.exp((subject.year - comp.year) * 0.045), 0.7, 1.4)
       : 1;
@@ -772,6 +797,7 @@ export function buildGsaMarketValuation(
       },
     };
   });
+  const samples = filterPriceOutliers(adjustedSamples);
   const quantileInput = samples.map((sample) => ({
     value: sample.adjustedHighBidCents,
     weight: sample.weight,
