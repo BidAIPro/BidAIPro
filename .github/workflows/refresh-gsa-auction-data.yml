@@ -24,7 +24,10 @@ concurrency:
 
 jobs:
   refresh:
-    runs-on: ubuntu-latest
+    # GSA rejects the Azure egress used by GitHub's Linux runners with HTTP
+    # 403. GitHub's macOS runner uses a separate network for the same public
+    # catalog request exercised by the validated local exporter.
+    runs-on: macos-latest
     timeout-minutes: 12
     steps:
       - name: Check out application source
