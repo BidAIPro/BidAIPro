@@ -122,7 +122,18 @@ function DealScore({ score, status }: { score: number; status: AuctionOpportunit
   );
 }
 
-function PollingLabel({ auction, now }: { auction: AuctionOpportunity; now: number }) {
+function PollingLabel({
+  auction,
+  now,
+  livePollingAvailable,
+}: {
+  auction: AuctionOpportunity;
+  now: number;
+  livePollingAvailable: boolean;
+}) {
+  if (!livePollingAvailable) {
+    return <span className="poll-label"><AlertTriangle size={13} /> Snapshot only · verify bid</span>;
+  }
   if (!auction.id.startsWith("live-")) {
     return <span className="poll-label"><Activity size={13} /> Reference snapshot</span>;
   }
@@ -157,12 +168,14 @@ function OpportunityCard({
   saved,
   onSave,
   compact,
+  livePollingAvailable,
 }: {
   auction: AuctionOpportunity;
   now: number;
   saved: boolean;
   onSave: () => void;
   compact: boolean;
+  livePollingAvailable: boolean;
 }) {
   const countdown = timeLeft(auction.endsAt, now);
   const currentBid = auction.currentBidCents;
@@ -279,7 +292,7 @@ function OpportunityCard({
           <div>
             <span className="evidence-chip"><Database size={13} /> {auction.forecast.sampleSize} GSA comps</span>
             <span className="evidence-chip"><ShieldCheck size={13} /> VIN {auction.vehicle.vin ? "captured" : "pending"}</span>
-            <PollingLabel auction={auction} now={now} />
+            <PollingLabel auction={auction} now={now} livePollingAvailable={livePollingAvailable} />
           </div>
           <div className="card-actions">
             <span className="freshness">Checked {relativeTime(auction.lastCheckedAt, now)}</span>
@@ -299,6 +312,7 @@ export function DealBoard() {
     mode: "loading",
     status: "checking",
     vehicleLots: 0,
+    liveBidPolling: false,
   });
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("deal");
@@ -332,7 +346,7 @@ export function DealBoard() {
         meta?: {
           mode?: string;
           coverage?: { vehicleLots?: number } | null;
-          sourceHealth?: { status?: string } | null;
+          sourceHealth?: { status?: string; liveBidPolling?: boolean } | null;
         };
       };
       if (!Array.isArray(payload.data)) throw new Error("Opportunity feed omitted its data array");
@@ -359,6 +373,7 @@ export function DealBoard() {
         mode: payload.meta?.mode ?? "unknown",
         status: payload.meta?.sourceHealth?.status ?? "unknown",
         vehicleLots: payload.meta?.coverage?.vehicleLots ?? payload.data.length,
+        liveBidPolling: payload.meta?.sourceHealth?.liveBidPolling === true,
       });
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
@@ -366,6 +381,7 @@ export function DealBoard() {
         ...current,
         mode: "last-known-client-snapshot",
         status: "unavailable",
+        liveBidPolling: false,
       }));
     } finally {
       if (opportunityRequest.current === controller) setRefreshing(false);
@@ -417,6 +433,7 @@ export function DealBoard() {
   }, [loadOpportunities]);
 
   useEffect(() => {
+    if (!sourceMeta.liveBidPolling) return;
     function refreshDueClosingAuctions() {
       const checkedAt = Date.now();
       for (const auction of auctions) {
@@ -441,7 +458,7 @@ export function DealBoard() {
     refreshDueClosingAuctions();
     const timer = window.setInterval(refreshDueClosingAuctions, 5_000);
     return () => window.clearInterval(timer);
-  }, [auctions, loadLiveBid]);
+  }, [auctions, loadLiveBid, sourceMeta.liveBidPolling]);
 
   useEffect(() => () => {
     for (const controller of liveBidRequests.current.values()) controller.abort();
@@ -534,10 +551,10 @@ export function DealBoard() {
         </nav>
 
         <div className="source-health-card" id="source-health">
-          <div><Activity size={16} /><span>Source health</span><strong>{sourceMeta.status === "live" ? "Operational" : sourceMeta.status === "checking" ? "Checking" : "Fallback"}</strong></div>
-          <p>{sourceMeta.status === "live" ? `Official GSA catalog delivered ${sourceMeta.vehicleLots} vehicle lots.` : "Last-known official snapshot is visible. Closing-detail adapter remains permission-gated."}</p>
+          <div><Activity size={16} /><span>Source health</span><strong>{sourceMeta.status === "live" ? "Operational" : sourceMeta.status === "checking" ? "Checking" : "Snapshot"}</strong></div>
+          <p>{sourceMeta.status === "live" ? `Official GSA catalog delivered ${sourceMeta.vehicleLots} vehicle lots.` : `${sourceMeta.vehicleLots || "Last-known"} official vehicle records are visible. Verify every current bid at GSA.`}</p>
           <div className={`health-meter ${sourceMeta.status === "live" ? "" : "is-stale"}`}><span /></div>
-          <small>Hourly discovery · adaptive watch planned</small>
+          <small>{sourceMeta.liveBidPolling ? "Hourly discovery · adaptive closing checks" : "Static snapshot · live bid refresh unavailable"}</small>
         </div>
 
         <button className="settings-link" type="button"><Settings2 size={17} /> Preferences</button>
@@ -553,7 +570,7 @@ export function DealBoard() {
           </div>
           <div className="topbar-status">
             <span className={`live-dot ${sourceMeta.status === "live" ? "" : "is-stale"}`} />
-            <div><strong>Official source</strong><small>{sourceMeta.status === "live" ? "Hourly feed" : "Snapshot fallback"}</small></div>
+            <div><strong>Official source</strong><small>{sourceMeta.liveBidPolling ? "Live source checks" : "Snapshot · verify bids"}</small></div>
           </div>
           <button className="icon-button" type="button" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></button>
           <div className="avatar">ZK</div>
@@ -578,7 +595,7 @@ export function DealBoard() {
             <article>
               <div className="metric-icon blue"><CarFront size={18} /></div>
               <div><span>Tracked opportunities</span><strong>{auctions.length}</strong><small>Official GSA vehicle lots</small></div>
-              <em>{sourceMeta.status === "live" ? "Live hourly discovery" : sourceMeta.status === "checking" ? "Checking official source" : "Last-known snapshot"}</em>
+              <em>{sourceMeta.liveBidPolling ? "Live source checks" : sourceMeta.status === "checking" ? "Checking official source" : "Snapshot · verify bids"}</em>
             </article>
             <article>
               <div className="metric-icon green"><CircleDollarSign size={18} /></div>
@@ -605,6 +622,17 @@ export function DealBoard() {
             </div>
             <a href="#source-health">View source ledger <ArrowRight size={14} /></a>
           </section>
+
+          {!sourceMeta.liveBidPolling && sourceMeta.status !== "checking" && (
+            <section className="source-notice snapshot-warning">
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Current bids are snapshot values</strong>
+                <span>This host cannot reach GSA&apos;s live bid service. Check the official auction before acting; the displayed bid may have changed since the listed check time.</span>
+              </div>
+              <a href="https://gsaauctions.gov/auctions/auctions-list" target="_blank" rel="noreferrer">Verify at GSA <ExternalLink size={14} /></a>
+            </section>
+          )}
 
           <section className="source-notice comp-ledger-notice" id="comp-ledger">
             <Database size={18} />
@@ -637,7 +665,7 @@ export function DealBoard() {
 
           <section className={`opportunity-list ${compact ? "compact-list" : ""}`}>
             {opportunities.map((auction) => (
-              <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} />
+              <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} livePollingAvailable={sourceMeta.liveBidPolling} />
             ))}
             {!opportunities.length && (
               <div className="empty-state"><Search size={28} /><h2>{sourceMeta.status === "checking" ? "Checking the official GSA catalog" : auctions.length === 0 ? "No active vehicle lots are available" : "No vehicles match these filters"}</h2><p>{auctions.length === 0 ? "The board will populate when the official source or a still-active reference snapshot is available." : "Clear a filter or widen the bid range to bring opportunities back into view."}</p><button type="button" onClick={() => { setQuery(""); setQuickFilter("all"); setStateFilter("all"); setConditionFilter("all"); setMaxBid(""); }}>Reset filters</button></div>

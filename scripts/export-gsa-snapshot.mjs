@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { GSA_CACHE_SECONDS, GSA_PUBLIC_FEED_LIMITATIONS } from "../lib/gsa-client.ts";
@@ -9,7 +9,6 @@ import {
 } from "../lib/gsa-ppms-client.ts";
 
 const outputPath = resolve(process.argv[2] ?? "work/gsa-vehicles.json");
-const previousPath = process.argv[3] ? resolve(process.argv[3]) : null;
 const now = new Date();
 const discovery = await fetchPpmsVehicleAuctions(fetch, now, AbortSignal.timeout(120_000));
 const auctions = discovery.auctions.filter((auction) => auction.status === "active");
@@ -25,29 +24,6 @@ if (
   discovery.coverage.detailEnrichment.succeeded < Math.ceil(auctions.length * 0.9)
 ) {
   throw new Error("Refusing to publish a materially incomplete GSA detail snapshot.");
-}
-
-let previousCount = null;
-if (previousPath) {
-  try {
-    const previous = JSON.parse(await readFile(previousPath, "utf8"));
-    if (
-      previous?.schemaVersion !== 1 ||
-      previous?.source !== "gsa-ppms" ||
-      !Number.isSafeInteger(previous?.itemCount) ||
-      previous.itemCount < 10
-    ) {
-      throw new Error("The prior GSA snapshot metadata was invalid.");
-    }
-    previousCount = previous.itemCount;
-    if (auctions.length < Math.ceil(previousCount * 0.5)) {
-      throw new Error(
-        `Refusing to publish a collapsed GSA catalog (${auctions.length} of ${previousCount}).`,
-      );
-    }
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
 }
 
 const generatedAt = now.toISOString();
@@ -102,5 +78,4 @@ console.log(JSON.stringify({
   expiresAt: snapshot.expiresAt,
   imageExpiresAt: snapshot.imageExpiresAt,
   revision,
-  previousCount,
 }));

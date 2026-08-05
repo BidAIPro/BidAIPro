@@ -594,6 +594,18 @@ img { display: block; max-width: 100%; }
 /* Readability and underwriting disclosures */
 body { font-size: 15px; line-height: 1.45; }
 
+.snapshot-warning { border-color: #ebcf9c; background: #fff9ee; }
+.snapshot-warning > svg { color: #a96708; }
+.snapshot-warning strong { color: #80520f; }
+.snapshot-warning span { color: #765f3c; }
+
+.detail-feed-warning { display: flex; align-items: center; gap: 12px; margin: 18px 0; padding: 14px 16px; color: #735421; background: #fff8eb; border: 1px solid #ead1a4; border-radius: 10px; }
+.detail-feed-warning > svg { flex: 0 0 auto; color: #ae6d0c; }
+.detail-feed-warning > div { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.detail-feed-warning strong { font-size: 13px; }
+.detail-feed-warning span { font-size: 12px; line-height: 1.5; }
+.detail-feed-warning a { color: #80520f; font-size: 12px; font-weight: 750; white-space: nowrap; }
+
 .critical-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
 .mileage-fact, .condition-fact { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 10px 11px; color: #255143; background: #edf8f4; border: 1px solid #d7ece4; border-radius: 9px; }
 .mileage-fact > svg, .condition-fact > svg { flex: 0 0 auto; color: var(--emerald); }
@@ -767,6 +779,8 @@ body { font-size: 15px; line-height: 1.45; }
   .valuation-verification { grid-template-columns: 1fr; }
   .valuation-verification a { width: max-content; grid-column: 1; grid-row: auto; }
   .cost-comparison { grid-template-columns: 1fr; }
+  .detail-feed-warning { align-items: flex-start; flex-wrap: wrap; }
+  .detail-feed-warning a { margin-left: 30px; }
 }
 
 @media (max-width: 480px) {

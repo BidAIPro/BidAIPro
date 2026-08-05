@@ -59,6 +59,7 @@ export function LiveVehicleDetail() {
   const requestedId = searchParams.get("id")?.trim() ?? "";
   const [auction, setAuction] = useState<AuctionOpportunity | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [liveBidPolling, setLiveBidPolling] = useState(false);
   const liveBidRequest = useRef<AbortController | null>(null);
   const liveBidLastAttempt = useRef(0);
 
@@ -70,9 +71,13 @@ export function LiveVehicleDetail() {
       try {
         const response = await fetch(publicApiUrl("/api/opportunities"), { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
-        const payload = await response.json() as { data?: AuctionOpportunity[] };
+        const payload = await response.json() as {
+          data?: AuctionOpportunity[];
+          meta?: { sourceHealth?: { liveBidPolling?: boolean } | null };
+        };
         const match = payload.data?.find((item) => item.id === requestedId || item.externalId === requestedId) ?? null;
         setAuction(match);
+        setLiveBidPolling(payload.meta?.sourceHealth?.liveBidPolling === true);
         setStatus(match ? "ready" : "missing");
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
@@ -84,7 +89,7 @@ export function LiveVehicleDetail() {
   }, [requestedId]);
 
   useEffect(() => {
-    if (!auction?.id.startsWith("live-") || !auction.endsAt || !/^\d+$/.test(auction.externalId)) {
+    if (!liveBidPolling || !auction?.id.startsWith("live-") || !auction.endsAt || !/^\d+$/.test(auction.externalId)) {
       return;
     }
 
@@ -132,7 +137,7 @@ export function LiveVehicleDetail() {
       liveBidRequest.current?.abort();
       liveBidRequest.current = null;
     };
-  }, [auction]);
+  }, [auction, liveBidPolling]);
 
   if (!requestedId) return <LoadingState title="Choose a vehicle from the deal board" copy="This analysis page needs an active GSA vehicle identifier." />;
   if (status === "loading") return <LoadingState title="Loading vehicle analysis" copy="Retrieving the latest GSA listing snapshot…" />;
@@ -159,7 +164,7 @@ export function LiveVehicleDetail() {
       <header className="detail-topbar">
         <Link href="/" className="detail-brand"><span><TrendingUp size={18} /></span><strong>BIDAI</strong><em>PRO</em></Link>
         <Link href="/" className="back-link"><ArrowLeft size={15} /> Back to deal board</Link>
-        <div className="detail-source-status"><span /> Latest active-feed snapshot</div>
+        <div className="detail-source-status"><span /> {liveBidPolling ? "Live source checks available" : "Snapshot · verify current bid"}</div>
       </header>
 
       <div className="detail-wrap">
@@ -193,6 +198,14 @@ export function LiveVehicleDetail() {
             <div className="decision-actions"><a href={auction.sourceUrl} target="_blank" rel="noreferrer" className="official-cta">Open official auction <ExternalLink size={16} /></a><Link href="#cost-model" className="outline-cta">Inspect costs <Wrench size={15} /></Link><span><Clock3 size={14} /> Updated {new Date(auction.lastCheckedAt).toLocaleString()}</span></div>
           </div>
         </section>
+
+        {!liveBidPolling && (
+          <section className="detail-feed-warning" aria-label="Bid freshness warning">
+            <AlertTriangle size={18} />
+            <div><strong>Snapshot bid — live refresh unavailable</strong><span>GSA blocks the hosted live-bid connection. Verify the bid, bidder count, extensions, and closing status at the official auction before acting.</span></div>
+            <a href={auction.sourceUrl} target="_blank" rel="noreferrer">Verify live at GSA <ExternalLink size={14} /></a>
+          </section>
+        )}
 
         <section className="detail-stat-strip">
           <article><CircleDollarSign size={17} /><span>Projected close<strong>{dollars(auction.forecast.expectedCents)}</strong><small>Before added costs</small></span></article>

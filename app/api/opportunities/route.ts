@@ -4,6 +4,9 @@ import {
   fetchGsaRunnerSnapshot,
   GsaRunnerSnapshotError,
 } from "../../../lib/gsa-runner-snapshot";
+import type { GsaRunnerSnapshot } from "../../../lib/gsa-runner-snapshot";
+import type { GsaCoverage, GsaVehicleAuction } from "../../../lib/gsa-normalizer";
+import { persistGsaDiscovery } from "../../../lib/gsa-persistence";
 import { discoveryToOpportunity } from "../../../lib/opportunity-adapter";
 import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 
@@ -19,22 +22,74 @@ function isActiveAt(auction: { status: string; endsAt: string | null }, now: num
     (auction.endsAt === null || Date.parse(auction.endsAt) > now);
 }
 
+function coverageForResponse(
+  original: GsaCoverage,
+  auctions: GsaVehicleAuction[],
+): GsaCoverage {
+  const enriched = auctions.filter((auction) => auction.detailEnriched !== false).length;
+  const imageCount = auctions.reduce((total, auction) => total + auction.images.length, 0);
+  return {
+    ...original,
+    totalLots: auctions.length + original.excludedLots,
+    vehicleLots: auctions.length,
+    withVin: auctions.filter((auction) => auction.vin !== null).length,
+    withMileage: auctions.filter((auction) => auction.mileage !== null).length,
+    withBodyType: auctions.filter((auction) => auction.bodyType !== null).length,
+    withImage: auctions.filter((auction) => auction.imageUrl !== null).length,
+    withCurrentBid: auctions.filter((auction) => auction.currentBid !== null).length,
+    statusCounts: { active: auctions.length, preview: 0, scheduled: 0, unknown: 0 },
+    detailEnrichment: {
+      requested: auctions.length,
+      succeeded: enriched,
+      failed: auctions.length - enriched,
+      imagesDiscovered: imageCount,
+      imagesSigned: imageCount,
+    },
+  };
+}
+
+async function persistSnapshotOnce(snapshot: GsaRunnerSnapshot, now: number) {
+  if (Date.parse(snapshot.sourceHealth.cachedUntil) <= now) return "snapshot-too-old";
+  try {
+    const existing = await env.DB.prepare(
+      `SELECT id FROM source_checks
+       WHERE source_key = 'gsa-auctions'
+         AND scope = 'hourly-catalog'
+         AND checked_at = ?1
+         AND success = 1
+       LIMIT 1`,
+    ).bind(snapshot.sourceHealth.observedAt).first();
+    if (existing) return "already-stored";
+    await persistGsaDiscovery(env.DB, {
+      auctions: snapshot.auctions,
+      coverage: snapshot.coverage,
+      sourceHealth: snapshot.sourceHealth,
+    });
+    return "stored";
+  } catch {
+    return "unavailable";
+  }
+}
+
 export async function GET() {
   try {
     const discovery = await getGsaVehicleAuctions({ apiKey: env.GSA_API_KEY });
     const now = Date.now();
-    const active = discovery.auctions
-      .filter((auction) => isActiveAt(auction, now))
-      .map((auction) => discoveryToOpportunity(auction, discovery.sourceHealth.observedAt));
-    const opportunities = active;
+    const activeAuctions = discovery.auctions.filter((auction) => isActiveAt(auction, now));
+    const opportunities = activeAuctions.map((auction) =>
+      discoveryToOpportunity(auction, discovery.sourceHealth.observedAt),
+    );
 
     return Response.json(
       {
         data: opportunities,
         meta: {
           mode: "official-gsa-public-catalog",
-          coverage: discovery.coverage,
-          sourceHealth: discovery.sourceHealth,
+          coverage: coverageForResponse(discovery.coverage, activeAuctions),
+          sourceHealth: {
+            ...discovery.sourceHealth,
+            liveBidPolling: discovery.sourceHealth.sourceMode === "ppms-public-catalog",
+          },
         },
       },
       { headers: publicApiHeaders({ "Cache-Control": CACHE_CONTROL }) },
@@ -46,21 +101,23 @@ export async function GET() {
       const now = Date.now();
       const observedAt = snapshot.sourceHealth.observedAt;
       const imagesFresh = Date.parse(snapshot.imageExpiresAt) > now;
-      const opportunities = snapshot.auctions
+      const responseAuctions = snapshot.auctions
         .filter((auction) => isActiveAt(auction, now))
         .map((auction) =>
-          discoveryToOpportunity(
-            imagesFresh ? auction : { ...auction, imageUrl: null, images: [] },
-            observedAt,
-          ),
+          imagesFresh ? auction : { ...auction, imageUrl: null, images: [] },
         );
+      const opportunities = responseAuctions.map((auction) =>
+        discoveryToOpportunity(auction, observedAt),
+      );
+      const persistence = await persistSnapshotOnce(snapshot, now);
 
       return Response.json(
         {
           data: opportunities,
           meta: {
             mode: "official-gsa-runner-snapshot",
-            coverage: snapshot.coverage,
+            coverage: coverageForResponse(snapshot.coverage, responseAuctions),
+            persistence,
             snapshot: {
               revision: snapshot.revision,
               generatedAt: snapshot.generatedAt,
@@ -70,18 +127,25 @@ export async function GET() {
             },
             sourceHealth: {
               ...snapshot.sourceHealth,
-              status: "live",
-              cache: "refresh",
+              status: "stale",
+              cache: "stale-fallback",
+              staleSince: snapshot.generatedAt,
               ageSeconds: Math.max(
                 0,
                 Math.floor((now - Date.parse(snapshot.generatedAt)) / 1_000),
               ),
               lastErrorCode: directErrorCode,
-              delivery: "github-actions-snapshot",
+              delivery: "github-branch-snapshot",
+              liveBidPolling: false,
             },
           },
         },
-        { headers: publicApiHeaders({ "Cache-Control": CACHE_CONTROL }) },
+        {
+          headers: publicApiHeaders({
+            "Cache-Control": "no-store",
+            Warning: '110 - "Official GSA snapshot; live refresh unavailable"',
+          }),
+        },
       );
     } catch (snapshotError) {
       const snapshotErrorCode =

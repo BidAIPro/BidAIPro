@@ -100,7 +100,12 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /\/api\/live-bid\?id=\$\{encodeURIComponent\(auction\.externalId\)\}/);
   assert.match(board, /getRefreshDecision/);
   assert.match(board, /remainingMs > 30 \* 60_000/);
+  assert.match(board, /if \(!sourceMeta\.liveBidPolling\) return/);
+  assert.match(board, /Snapshot only · verify bid/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
+  assert.match(opportunityRoute, /status: "stale"/);
+  assert.match(opportunityRoute, /liveBidPolling: false/);
+  assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
 });
