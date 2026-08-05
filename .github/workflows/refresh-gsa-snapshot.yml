@@ -1,6 +1,16 @@
 name: Refresh official GSA vehicle snapshot
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/refresh-gsa-snapshot.yml"
+      - "scripts/export-gsa-snapshot.mjs"
+      - "lib/gsa-client.ts"
+      - "lib/gsa-normalizer.ts"
+      - "lib/gsa-ppms-client.ts"
+      - "lib/gsa-ppms-normalizer.ts"
   schedule:
     - cron: "17,47 * * * *"
   workflow_dispatch:
