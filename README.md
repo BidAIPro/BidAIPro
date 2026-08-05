@@ -21,10 +21,11 @@ It is configured to push `main` to `https://github.com/BidAIPro/BidAIPro.git`. T
 ## Source policy
 
 - The official source is [`gsaauctions.gov`](https://gsaauctions.gov/), not `gsaauctions.com`.
-- Hourly discovery uses the documented [GSA Auctions API](https://gsa.github.io/auctions_api/).
-- A personal `GSA_API_KEY` is required for dependable production discovery. The shared `DEMO_KEY` fallback is development-only and can be rate limited.
-- The public bulk feed can lag the interactive auction page. The sub-minute live-detail adapter remains disabled until GSA authorizes that access or supplies a higher-freshness feed.
-- KBB is not scraped. `KBB_API_KEY` is reserved for a licensed commercial integration. Demo market references are labeled as reference-only throughout the product.
+- Primary discovery uses the same first-party PPMS category-300 catalog, lot-detail, image-signing, and live-auction JSON services used by the public GSA Auctions site. It does not scrape auction-page HTML.
+- The catalog is paginated and rejected if its returned rows do not match GSA's advertised active-vehicle count. The legacy documented [GSA Auctions API](https://gsa.github.io/auctions_api/) remains a fallback and uses `GSA_API_KEY` when configured.
+- Official listing photos use short-lived GSA-signed URLs. They are refreshed with expiry headroom and degrade to an accessible placeholder if GSA cannot supply an image.
+- Structured odometer mileage is retained as the primary source fact. When the narrative description reports a different mileage, both readings are preserved and the vehicle is visibly marked for verification.
+- KBB is not scraped or impersonated. The dossier links to KBB's consumer verification flow and shows the VIN, mileage, ZIP, and condition needed for a manual check. Automatic KBB values require a licensed commercial integration.
 - A closed GSA high bid is not called a sale until an authoritative award source confirms the outcome.
 - The comparable ledger currently accrues outcomes for lots observed by this installation. Historical bulk backfill is intentionally not active without an authorized, dependable closed-record source.
 
@@ -45,7 +46,7 @@ pnpm lint
 pnpm exec drizzle-kit generate
 ```
 
-The test suite covers the official-feed normalizer and credential-safe client, nullable source facts, valuation/forecast separation, cost and safe-ceiling math, auction refresh boundaries, server-rendered pages, and social metadata.
+The test suite covers PPMS catalog/detail/image normalization, the legacy credential-safe fallback, mileage conflicts, damage and issue extraction, nullable source facts, valuation/forecast separation, cost and safe-ceiling math, live-bid refresh boundaries, server-rendered pages, and social metadata.
 
 ## Monitoring cadence
 
@@ -57,7 +58,7 @@ The test suite covers the official-feed normalizer and credential-safe client, n
 | Final minute | 15 seconds |
 | Scheduled close, outcome unconfirmed | 15-second grace, then reconciliation |
 
-The scheduling policy is implemented and tested independently of the source adapter. Production sub-minute checks must use an authorized live-detail source; the hourly public feed cannot meet that service level.
+The server stores the complete catalog hourly, then a minute trigger switches only closing-window vehicles to the first-party per-auction live endpoint. It performs 30-second and 15-second sub-passes inside the scheduled invocation and persists changed bids, extensions, and terminal high bids even when no browser is open. The browser mirrors the same cadence while a user is viewing the board.
 
 ## Important disclaimer
 

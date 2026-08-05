@@ -3,17 +3,128 @@ import test from "node:test";
 
 import { getGsaVehicleAuctions } from "../lib/gsa-client.ts";
 
-test("keeps the API key server-side, follows the official download safely, and falls back stale", async () => {
+function json(value, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk API, and serves stale good data", async () => {
   const previousKey = process.env.GSA_API_KEY;
   const secret = "test-secret-that-must-not-leak";
   process.env.GSA_API_KEY = secret;
 
   try {
-    const calls = [];
-    const fetchImpl = async (input, init = {}) => {
-      calls.push({ url: String(input), headers: new Headers(init.headers) });
+    const primaryCalls = [];
+    const primaryFetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      primaryCalls.push({ url, init, headers: new Headers(init.headers) });
+      if (url.pathname.endsWith("/api/v1/auctions")) {
+        const request = JSON.parse(init.body);
+        assert.deepEqual(request.categoryCodeList, ["300"]);
+        assert.equal(request.auctionStatus, "active");
+        assert.equal(url.searchParams.get("size"), "200");
+        return json({
+          totalPages: 1,
+          totalElements: 1,
+          auctionDTOList: [
+            {
+              lotId: 400035,
+              auctionId: 372373,
+              lotNumber: 4,
+              salesNumber: "41QSCI26417",
+              status: "Active",
+              startDate: "2026-08-01T10:21:00",
+              endDate: "2026-08-08T10:21:00",
+              categoryCode: "320",
+              lotName: "2009 Ford E-150 Van",
+              currentBid: 8504,
+              numberOfBidders: 7,
+              location: { city: "Ridgefield", state: "WA", zipCode: "98642" },
+            },
+          ],
+        });
+      }
+      if (url.pathname.endsWith("/sales/preview/auctions/400035")) {
+        return json({
+          propertyLocation: { city: "Ridgefield", state: "WA", zipCode: "98642" },
+          imagesAndDocs: {
+            image: [
+              {
+                id: 2536152,
+                uri: "sales/41QSCI26417/4/2536152.jpeg",
+                name: "van.jpeg",
+                valid: true,
+                virusScanStatus: "CLEAN",
+                attachmentOrder: 1,
+              },
+            ],
+          },
+          auctionDescriptionDTO: {
+            make: "FORD MOTOR CO",
+            model: "E150",
+            odometer: "20631",
+            bodyType: "VA",
+            conditionCode: "U",
+            itemDescription:
+              "<ul><li>Mileage: 20,631</li><li>VIN: 1FMNE11W89DA83114</li><li>Body Style: Van</li></ul>",
+          },
+        });
+      }
+      if (url.pathname.endsWith("/storage/presigned-urls")) {
+        return json([
+          {
+            id: "2536152",
+            uri: "sales/41QSCI26417/4/2536152.jpeg",
+            fileName: "van.jpeg",
+            presignedUrl:
+              "https://gsa-prod-ppms-attachments-prod.s3.amazonaws.com/sales/van.jpeg?X-Amz-Expires=3600",
+          },
+        ]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
 
-      if (calls.length === 1) {
+    const fresh = await getGsaVehicleAuctions({
+      fetchImpl: primaryFetch,
+      forceRefresh: true,
+      now: new Date("2026-08-04T12:00:00.000Z"),
+    });
+
+    assert.equal(primaryCalls.length, 3);
+    assert.equal(primaryCalls.some((call) => call.url.searchParams.has("api_key")), false);
+    assert.equal(fresh.auctions.length, 1);
+    assert.equal(fresh.auctions[0].mileage, 20_631);
+    assert.equal(fresh.auctions[0].images.length, 1);
+    assert.equal(fresh.sourceHealth.status, "live");
+    assert.equal(fresh.sourceHealth.sourceMode, "ppms-public-catalog");
+    assert.equal(fresh.sourceHealth.credentialMode, "public-catalog");
+    assert.equal(JSON.stringify(fresh).includes(secret), false);
+
+    const staleCalls = [];
+    const stale = await getGsaVehicleAuctions({
+      fetchImpl: async (input) => {
+        staleCalls.push(String(input));
+        return new Response(null, { status: 429 });
+      },
+      forceRefresh: true,
+      now: new Date("2026-08-04T14:00:00.000Z"),
+    });
+
+    assert.equal(stale.sourceHealth.status, "stale");
+    assert.equal(stale.sourceHealth.cache, "stale-fallback");
+    assert.match(stale.sourceHealth.lastErrorCode, /GSA_PPMS.*GSA_UPSTREAM_HTTP_ERROR/);
+    assert.equal(stale.auctions[0].id, fresh.auctions[0].id);
+    const legacyAttempt = new URL(staleCalls.find((url) => url.startsWith("https://api.gsa.gov/")));
+    assert.equal(legacyAttempt.searchParams.get("api_key"), secret);
+
+    const fallbackCalls = [];
+    const legacyFetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      fallbackCalls.push({ url, headers: new Headers(init.headers) });
+      if (url.hostname === "www.ppms.gov") return new Response(null, { status: 503 });
+      if (url.hostname === "api.gsa.gov") {
         return new Response(null, {
           status: 303,
           headers: {
@@ -22,50 +133,31 @@ test("keeps the API key server-side, follows the official download safely, and f
           },
         });
       }
-
-      return new Response(
-        JSON.stringify({
-          results: [
-            {
-              SaleNo: "TEST-SALE",
-              LotNo: "1",
-              ItemName: "2020 Toyota Camry Sedan",
-              AuctionStatus: "A",
-              HighBidAmount: "5000",
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return json({
+        results: [
+          {
+            SaleNo: "TEST-SALE",
+            LotNo: "1",
+            ItemName: "2020 Toyota Camry Sedan",
+            AuctionStatus: "A",
+            HighBidAmount: "5000",
+          },
+        ],
+      });
     };
-
-    const fresh = await getGsaVehicleAuctions({
-      fetchImpl,
+    const fallback = await getGsaVehicleAuctions({
+      fetchImpl: legacyFetch,
       forceRefresh: true,
-      now: new Date("2026-08-04T12:00:00.000Z"),
+      now: new Date("2026-08-04T15:00:00.000Z"),
     });
-
-    assert.equal(calls.length, 2);
-    assert.equal(calls[0].headers.get("x-api-key"), secret);
-    assert.equal(calls[1].headers.get("x-api-key"), null);
-    assert.match(calls[0].url, /^https:\/\/api\.gsa\.gov\//);
-    assert.doesNotMatch(calls[0].url, /test-secret|api_key=/i);
-    assert.equal(fresh.auctions.length, 1);
-    assert.equal(fresh.sourceHealth.status, "live");
-    assert.equal(fresh.sourceHealth.credentialMode, "configured");
-    assert.equal(JSON.stringify(fresh).includes(secret), false);
-    assert.match(fresh.sourceHealth.limitations.join(" "), /not a sub-minute live bid stream/i);
-
-    const stale = await getGsaVehicleAuctions({
-      fetchImpl: async () => new Response(null, { status: 429 }),
-      forceRefresh: true,
-      now: new Date("2026-08-04T14:00:00.000Z"),
-    });
-
-    assert.equal(stale.sourceHealth.status, "stale");
-    assert.equal(stale.sourceHealth.cache, "stale-fallback");
-    assert.equal(stale.sourceHealth.lastErrorCode, "GSA_UPSTREAM_HTTP_ERROR");
-    assert.equal(stale.auctions[0].id, fresh.auctions[0].id);
+    const apiCall = fallbackCalls.find((call) => call.url.hostname === "api.gsa.gov");
+    const downloadCall = fallbackCalls.find((call) => call.url.hostname.endsWith("amazonaws.com"));
+    assert.equal(apiCall.url.searchParams.get("api_key"), secret);
+    assert.equal(apiCall.headers.get("x-api-key"), null);
+    assert.equal(downloadCall.url.searchParams.has("api_key"), false);
+    assert.equal(downloadCall.headers.get("x-api-key"), null);
+    assert.equal(fallback.sourceHealth.sourceMode, "legacy-bulk-feed");
+    assert.equal(JSON.stringify(fallback).includes(secret), false);
   } finally {
     if (previousKey === undefined) delete process.env.GSA_API_KEY;
     else process.env.GSA_API_KEY = previousKey;

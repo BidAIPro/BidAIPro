@@ -3,20 +3,31 @@ import {
   type GsaCoverage,
   type GsaVehicleAuction,
 } from "./gsa-normalizer.ts";
+import {
+  GSA_PPMS_CATALOG_ENDPOINT,
+  PpmsClientError,
+  fetchPpmsVehicleAuctions,
+} from "./gsa-ppms-client.ts";
 
+/** Legacy documented bulk feed, retained only as a fallback. */
 export const GSA_AUCTIONS_ENDPOINT = "https://api.gsa.gov/assets/gsaauctions/v2/auctions";
-export const GSA_CACHE_SECONDS = 60 * 60;
+export const GSA_DISCOVERY_ENDPOINT = GSA_PPMS_CATALOG_ENDPOINT;
+// PPMS image signatures last one hour. Refresh with headroom so a cached page
+// never receives an image URL that is already at its expiry boundary.
+export const GSA_CACHE_SECONDS = 45 * 60;
 export const GSA_STALE_MAX_AGE_SECONDS = 24 * 60 * 60;
 
-const REQUEST_TIMEOUT_MS = 20_000;
+const PPMS_REQUEST_TIMEOUT_MS = 45_000;
+const LEGACY_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 
 export const GSA_PUBLIC_FEED_LIMITATIONS = [
-  "The official public bulk feed is suitable for hourly discovery, not a sub-minute live bid stream.",
-  "Bid amount and bidder count are point-in-time feed fields and can lag the interactive auction page.",
-  "VIN, mileage, body style, images, and reserve information are not guaranteed for every lot.",
-  "The public feed does not provide a dependable closed-sale comp history or Kelley Blue Book valuation.",
-  "Soft-close and inactivity extensions require a separate authorized live-detail/status integration; this connector does not scrape auction pages.",
+  "Discovery uses the first-party public GSA Auctions category-300 JSON catalog and bounded lot-detail requests, not auction-page HTML scraping.",
+  "Bid amount and bidder count are point-in-time fields and can lag the interactive bidding screen.",
+  "Mileage is seller-reported and not independently verified; conflicting structured and narrative readings are retained and flagged.",
+  "Images use GSA-issued short-lived storage URLs and are refreshed before their one-hour expiry.",
+  "VIN, mileage, body style, images, condition details, and reserve information are not guaranteed for every lot.",
+  "The GSA catalog does not provide a dependable closed-sale comp history or Kelley Blue Book valuation.",
 ] as const;
 
 export type GsaSourceStatus = "live" | "stale";
@@ -25,10 +36,11 @@ export type GsaCacheStatus = "refresh" | "memory-hit" | "stale-fallback";
 export interface GsaSourceHealth {
   source: "GSA Auctions API";
   official: true;
-  endpoint: typeof GSA_AUCTIONS_ENDPOINT;
+  endpoint: string;
+  sourceMode: "ppms-public-catalog" | "legacy-bulk-feed";
   status: GsaSourceStatus;
   cache: GsaCacheStatus;
-  credentialMode: "configured" | "shared-demo";
+  credentialMode: "public-catalog" | "configured" | "shared-demo";
   fetchedAt: string;
   observedAt: string;
   cachedUntil: string;
@@ -69,7 +81,9 @@ interface Snapshot {
   fetchedAt: string;
   observedAt: string;
   cachedUntil: string;
-  credentialMode: "configured" | "shared-demo";
+  credentialMode: "public-catalog" | "configured" | "shared-demo";
+  endpoint: string;
+  sourceMode: "ppms-public-catalog" | "legacy-bulk-feed";
 }
 
 interface ClientOptions {
@@ -109,7 +123,8 @@ function sourceHealth(
   return {
     source: "GSA Auctions API",
     official: true,
-    endpoint: GSA_AUCTIONS_ENDPOINT,
+    endpoint: snapshot.endpoint,
+    sourceMode: snapshot.sourceMode,
     status,
     cache,
     credentialMode: snapshot.credentialMode,
@@ -155,18 +170,14 @@ function isTrustedDownloadUrl(url: URL): boolean {
 async function fetchOfficialFeed(
   fetchImpl: typeof fetch,
   requestUrl: URL,
-  apiKey: string,
   signal: AbortSignal,
 ): Promise<Response> {
   const cacheOptions = { revalidate: GSA_CACHE_SECONDS };
   let currentUrl = requestUrl;
 
   for (let redirectCount = 0; redirectCount <= 4; redirectCount += 1) {
-    const remainsOnApiGsa = currentUrl.hostname === "api.gsa.gov";
     const response = await fetchImpl(currentUrl, {
-      headers: remainsOnApiGsa
-        ? { Accept: "application/json", "X-API-KEY": apiKey }
-        : { Accept: "application/json" },
+      headers: { Accept: "application/json" },
       redirect: "manual",
       signal,
       next: cacheOptions,
@@ -258,16 +269,59 @@ async function readJsonWithLimit(response: Response): Promise<unknown> {
   }
 }
 
-async function refreshSnapshot(fetchImpl: typeof fetch, now: Date, apiKey?: string): Promise<Snapshot> {
+async function refreshPpmsSnapshot(fetchImpl: typeof fetch, now: Date): Promise<Snapshot> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PPMS_REQUEST_TIMEOUT_MS);
+  try {
+    const normalized = await fetchPpmsVehicleAuctions(fetchImpl, now, controller.signal);
+    const fetchedAt = now.toISOString();
+    return {
+      auctions: normalized.auctions,
+      coverage: normalized.coverage,
+      fetchedAt,
+      observedAt: normalized.observedAt,
+      cachedUntil: new Date(now.getTime() + GSA_CACHE_SECONDS * 1000).toISOString(),
+      credentialMode: "public-catalog",
+      endpoint: GSA_PPMS_CATALOG_ENDPOINT,
+      sourceMode: "ppms-public-catalog",
+    };
+  } catch (error) {
+    if (error instanceof PpmsClientError) {
+      throw new GsaClientError(error.code, error.message, {
+        cause: error,
+        upstreamStatus: error.upstreamStatus ?? undefined,
+      });
+    }
+    const timedOut = controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
+    throw new GsaClientError(
+      timedOut ? "GSA_PPMS_TIMEOUT" : "GSA_PPMS_NETWORK_ERROR",
+      timedOut
+        ? "The official GSA Auctions public catalog timed out."
+        : "The official GSA Auctions public catalog could not be reached.",
+      { cause: error },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function refreshLegacySnapshot(
+  fetchImpl: typeof fetch,
+  now: Date,
+  apiKey?: string,
+): Promise<Snapshot> {
   const credential = getCredential(apiKey);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), LEGACY_REQUEST_TIMEOUT_MS);
   const requestUrl = new URL(GSA_AUCTIONS_ENDPOINT);
+  // This legacy API's official documentation requires api_key as a query
+  // parameter. It is never returned to clients and is stripped on redirects.
+  requestUrl.searchParams.set("api_key", credential.apiKey);
   requestUrl.searchParams.set("format", "JSON");
 
   let response: Response;
   try {
-    response = await fetchOfficialFeed(fetchImpl, requestUrl, credential.apiKey, controller.signal);
+    response = await fetchOfficialFeed(fetchImpl, requestUrl, controller.signal);
   } catch (error) {
     clearTimeout(timeout);
     if (error instanceof GsaClientError) throw error;
@@ -318,7 +372,38 @@ async function refreshSnapshot(fetchImpl: typeof fetch, now: Date, apiKey?: stri
     observedAt: normalized.observedAt,
     cachedUntil: new Date(now.getTime() + GSA_CACHE_SECONDS * 1000).toISOString(),
     credentialMode: credential.mode,
+    endpoint: GSA_AUCTIONS_ENDPOINT,
+    sourceMode: "legacy-bulk-feed",
   };
+}
+
+async function refreshSnapshot(fetchImpl: typeof fetch, now: Date, apiKey?: string): Promise<Snapshot> {
+  let ppmsError: unknown;
+  try {
+    return await refreshPpmsSnapshot(fetchImpl, now);
+  } catch (error) {
+    ppmsError = error;
+  }
+
+  try {
+    return await refreshLegacySnapshot(fetchImpl, now, apiKey);
+  } catch (legacyError) {
+    const primaryCode = ppmsError instanceof GsaClientError ? ppmsError.code : "GSA_PPMS_UNAVAILABLE";
+    const fallbackCode = legacyError instanceof GsaClientError ? legacyError.code : "GSA_LEGACY_UNAVAILABLE";
+    throw new GsaClientError(
+      `${primaryCode}__${fallbackCode}`,
+      "Both official GSA Auctions discovery sources are currently unavailable.",
+      {
+        cause: legacyError,
+        upstreamStatus:
+          legacyError instanceof GsaClientError
+            ? legacyError.upstreamStatus ?? undefined
+            : ppmsError instanceof GsaClientError
+              ? ppmsError.upstreamStatus ?? undefined
+              : undefined,
+      },
+    );
+  }
 }
 
 function errorCode(error: unknown): string {

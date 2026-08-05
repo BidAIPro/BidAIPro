@@ -2,6 +2,7 @@ import type {
   AuctionOpportunity,
   ClosingForecast,
   ValuationReference,
+  VehicleCondition,
 } from "./auction-types";
 import {
   assessDeal,
@@ -51,6 +52,45 @@ function insufficientForecast(observedAt: string): ClosingForecast {
   };
 }
 
+function vehicleCondition(condition: GsaVehicleAuction["condition"]): VehicleCondition {
+  switch (condition) {
+    case "new":
+    case "usable":
+      return "good";
+    case "repairable":
+      return "repairable";
+    case "salvage":
+    case "scrap":
+      return "salvage";
+    default:
+      return "unknown";
+  }
+}
+
+function readableFlag(value: string): string {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function sourceRiskFlags(auction: GsaVehicleAuction): string[] {
+  const flags = [
+    ...auction.damageFlags.map(readableFlag),
+    ...auction.issueFlags.map(readableFlag),
+    ...auction.conditionNotes,
+    ...(auction.openRecall === true ? ["Open recall disclosed"] : []),
+    ...(auction.mileage === null ? ["Mileage not reported by GSA"] : []),
+  ];
+  const seen = new Set<string>();
+  return flags.filter((flag) => {
+    const clean = flag.trim();
+    const key = clean.toLocaleLowerCase("en-US");
+    if (!clean || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Converts an official hourly discovery record into a deliberately incomplete
  * Deal Board record. It is visible, but cannot receive a safe ceiling or an
@@ -76,9 +116,9 @@ export function discoveryToOpportunity(
     source: "gsa-auctions",
     title,
     sourceUrl: auction.url,
-    // The official API may return a short-lived signed image URL. The product
-    // does not persist or rehost it before reuse rights are confirmed.
-    imageUrl: "",
+    // PPMS signs official listing images for one hour. The feed refreshes them
+    // with headroom and the client falls back cleanly if a signature expires.
+    imageUrl: auction.imageUrl ?? auction.images[0] ?? "",
     imageSource: "gsa-auctions",
     status: auction.status === "active" ? "active" : "preview",
     currentBidCents,
@@ -97,15 +137,15 @@ export function discoveryToOpportunity(
       model,
       vin: auction.vin ?? undefined,
       mileage: auction.mileage ?? undefined,
+      odometerStatus: auction.odometerStatus,
       bodyStyle: auction.bodyType ?? undefined,
-      condition: "unknown",
-      operability: "unknown",
+      transmission: auction.transmission ?? undefined,
+      fuelType: auction.fuelType ?? undefined,
+      color: auction.color ?? undefined,
+      condition: vehicleCondition(auction.condition),
+      operability: auction.operability,
       description: auction.description || "Review the official GSA record for complete vehicle details.",
-      riskFlags: [
-        "Independent market value pending",
-        "Verified GSA outcome comps pending",
-        "Condition and operability require official-source verification",
-      ],
+      riskFlags: sourceRiskFlags(auction),
     },
     valuation,
     forecast,

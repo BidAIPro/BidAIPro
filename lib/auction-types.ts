@@ -37,6 +37,7 @@ export interface VehicleSnapshot {
   trim?: string;
   vin?: string;
   mileage?: number;
+  odometerStatus?: "reported-not-verified" | "conflicting-readings" | "not-reported";
   bodyStyle?: string;
   transmission?: string;
   fuelType?: string;

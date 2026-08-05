@@ -166,35 +166,51 @@ export async function persistGsaDiscovery(
       sale_lot_number = excluded.sale_lot_number,
       title = excluded.title,
       canonical_url = excluded.canonical_url,
-      status = excluded.status,
-      current_bid_cents = excluded.current_bid_cents,
-      bidder_count = excluded.bidder_count,
+      status = CASE
+        WHEN julianday(excluded.last_checked_at) >= julianday(auctions.last_checked_at)
+        THEN excluded.status ELSE auctions.status END,
+      current_bid_cents = CASE
+        WHEN julianday(excluded.last_checked_at) >= julianday(auctions.last_checked_at)
+        THEN excluded.current_bid_cents ELSE auctions.current_bid_cents END,
+      bidder_count = CASE
+        WHEN julianday(excluded.last_checked_at) >= julianday(auctions.last_checked_at)
+        THEN excluded.bidder_count ELSE auctions.bidder_count END,
       bid_increment_cents = excluded.bid_increment_cents,
       reserve_status = excluded.reserve_status,
       starts_at = excluded.starts_at,
-      ends_at = excluded.ends_at,
+      ends_at = CASE
+        WHEN julianday(excluded.last_checked_at) >= julianday(auctions.last_checked_at)
+        THEN excluded.ends_at ELSE auctions.ends_at END,
       seller_agency = excluded.seller_agency,
       city = excluded.city,
       state = excluded.state,
       postal_code = excluded.postal_code,
       address = excluded.address,
-      primary_image_url = excluded.primary_image_url,
-      last_seen_at = excluded.last_seen_at,
-      last_checked_at = excluded.last_checked_at,
+      primary_image_url = COALESCE(excluded.primary_image_url, auctions.primary_image_url),
+      last_seen_at = CASE
+        WHEN julianday(excluded.last_seen_at) >= julianday(auctions.last_seen_at)
+        THEN excluded.last_seen_at ELSE auctions.last_seen_at END,
+      last_checked_at = CASE
+        WHEN julianday(excluded.last_checked_at) >= julianday(auctions.last_checked_at)
+        THEN excluded.last_checked_at ELSE auctions.last_checked_at END,
       price_changed_at = CASE
-        WHEN auctions.current_bid_cents IS NOT excluded.current_bid_cents
-          OR auctions.bidder_count IS NOT excluded.bidder_count
+        WHEN julianday(excluded.last_checked_at) >= julianday(auctions.last_checked_at)
+          AND (auctions.current_bid_cents IS NOT excluded.current_bid_cents
+            OR auctions.bidder_count IS NOT excluded.bidder_count)
         THEN excluded.last_checked_at ELSE auctions.price_changed_at END,
-      updated_at = excluded.updated_at`;
+      updated_at = CASE
+        WHEN julianday(excluded.updated_at) >= julianday(auctions.updated_at)
+        THEN excluded.updated_at ELSE auctions.updated_at END`;
 
   const upsertVehicleSql = `INSERT INTO vehicles (
       id, auction_id, vin, normalized_vehicle_key, year, make, model,
-      body_style, mileage, condition, operability, condition_description,
+      body_style, mileage, odometer_status, transmission, cylinders,
+      fuel_type, exterior_color, condition, operability, condition_description,
       damage_flags_json, feature_flags_json, service_records_json,
       source_description, created_at, updated_at
     ) VALUES (
-      ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'unknown', 'unknown', ?10,
-      '[]', '[]', '[]', ?10, ?11, ?11
+      ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+      ?15, ?16, ?17, ?18, ?19, '[]', ?20, ?21, ?21
     ) ON CONFLICT(auction_id) DO UPDATE SET
       vin = COALESCE(excluded.vin, vehicles.vin),
       normalized_vehicle_key = excluded.normalized_vehicle_key,
@@ -203,7 +219,27 @@ export async function persistGsaDiscovery(
       model = excluded.model,
       body_style = COALESCE(excluded.body_style, vehicles.body_style),
       mileage = COALESCE(excluded.mileage, vehicles.mileage),
-      source_description = excluded.source_description,
+      odometer_status = CASE
+        WHEN excluded.source_description IS NULL THEN vehicles.odometer_status
+        ELSE excluded.odometer_status END,
+      transmission = COALESCE(excluded.transmission, vehicles.transmission),
+      cylinders = COALESCE(excluded.cylinders, vehicles.cylinders),
+      fuel_type = COALESCE(excluded.fuel_type, vehicles.fuel_type),
+      exterior_color = COALESCE(excluded.exterior_color, vehicles.exterior_color),
+      condition = CASE
+        WHEN excluded.source_description IS NULL OR excluded.condition = 'unknown'
+        THEN vehicles.condition ELSE excluded.condition END,
+      operability = CASE
+        WHEN excluded.source_description IS NULL OR excluded.operability = 'unknown'
+        THEN vehicles.operability ELSE excluded.operability END,
+      condition_description = COALESCE(excluded.condition_description, vehicles.condition_description),
+      damage_flags_json = CASE
+        WHEN excluded.source_description IS NULL THEN vehicles.damage_flags_json
+        ELSE excluded.damage_flags_json END,
+      feature_flags_json = CASE
+        WHEN excluded.source_description IS NULL THEN vehicles.feature_flags_json
+        ELSE excluded.feature_flags_json END,
+      source_description = COALESCE(excluded.source_description, vehicles.source_description),
       updated_at = excluded.updated_at`;
 
   const insertObservationSql = `INSERT INTO bid_observations (
@@ -227,6 +263,7 @@ export async function persistGsaDiscovery(
       const address = auction.location.addressLines.join(", ") || null;
       const previous = existing.get(auction.id) ?? null;
       const didChange = changed(previous, auction);
+      const hasFreshDetail = auction.detailEnriched !== false;
 
       writes.push(
         auctionStatement.bind(
@@ -263,7 +300,22 @@ export async function persistGsaDiscovery(
           auction.modelLabel ?? auction.title,
           auction.bodyType,
           auction.mileage,
-          auction.description,
+          auction.odometerStatus,
+          auction.transmission,
+          auction.cylinders,
+          auction.fuelType,
+          auction.color,
+          auction.condition,
+          auction.operability,
+          hasFreshDetail ? auction.conditionNotes.join(" ") || auction.description : null,
+          JSON.stringify(auction.damageFlags),
+          JSON.stringify([
+            ...auction.issueFlags,
+            ...(auction.openRecall === true && !auction.issueFlags.includes("open-recall")
+              ? ["open-recall"]
+              : []),
+          ]),
+          hasFreshDetail ? auction.description : null,
           observedAt,
         ),
       );

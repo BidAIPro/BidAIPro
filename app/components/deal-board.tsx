@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  AlertTriangle,
   ArrowDownUp,
   ArrowRight,
   Bell,
@@ -33,7 +34,10 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuctionOpportunity } from "../../lib/auction-types";
+import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
 import { publicApiUrl } from "../../lib/public-api";
+import { getRefreshDecision } from "../../lib/refresh-policy";
+import { VehicleImage } from "./vehicle-image";
 
 type SortKey = "deal" | "ending" | "profit" | "bid";
 type QuickFilter = "all" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
@@ -52,6 +56,12 @@ function dollars(cents: number | null | undefined) {
 
 function formatMileage(value: number | null | undefined) {
   return value === null || value === undefined ? "Mileage unknown" : `${integer.format(value)} mi`;
+}
+
+function odometerStatusLabel(status: AuctionOpportunity["vehicle"]["odometerStatus"]) {
+  if (status === "conflicting-readings") return "Conflicting GSA readings";
+  if (status === "not-reported") return "Not reported";
+  return "GSA reported · verify";
 }
 
 function timeLeft(endsAt: string | null, now: number) {
@@ -112,13 +122,31 @@ function DealScore({ score, status }: { score: number; status: AuctionOpportunit
   );
 }
 
-function PollingLabel({ auction }: { auction: AuctionOpportunity }) {
-  if (auction.id.startsWith("live-")) {
-    return <span className="poll-label"><Activity size={13} /> 1 hr catalog</span>;
+function PollingLabel({ auction, now }: { auction: AuctionOpportunity; now: number }) {
+  if (!auction.id.startsWith("live-")) {
+    return <span className="poll-label"><Activity size={13} /> Reference snapshot</span>;
   }
+  if (!auction.endsAt) {
+    return <span className="poll-label"><Activity size={13} /> Hourly checks</span>;
+  }
+  const decision = getRefreshDecision({
+    now,
+    endsAt: auction.endsAt,
+    lastCheckedAt: auction.lastCheckedAt,
+    status: auction.status,
+  });
+  const cadence = decision.intervalMs === null
+    ? "Final status captured"
+    : decision.intervalMs <= 15_000
+      ? "15 sec checks"
+      : decision.intervalMs <= 30_000
+        ? "30 sec checks"
+        : decision.intervalMs <= 5 * 60_000
+          ? "5 min checks"
+          : "Hourly checks";
   return (
     <span className="poll-label">
-      <Activity size={13} /> Reference snapshot
+      <Activity size={13} /> {cadence}
     </span>
   );
 }
@@ -136,27 +164,30 @@ function OpportunityCard({
   onSave: () => void;
   compact: boolean;
 }) {
-  const discoveryOnly = auction.id.startsWith("live-");
-  const countdown = discoveryOnly
-    ? { label: "Exact time at GSA", urgent: false, seconds: Number.POSITIVE_INFINITY }
-    : timeLeft(auction.endsAt, now);
+  const countdown = timeLeft(auction.endsAt, now);
   const currentBid = auction.currentBidCents;
   const marketValue = auction.valuation.medianCents;
   const predictedClose = auction.forecast.expectedCents;
   const safeMax = auction.assessment.safeMaxBidCents;
+  const allInNow = currentBid === null ? null : auction.assessment.allInAtCurrentBidCents;
+  const addedCostsNow = currentBid === null || allInNow === null ? null : Math.max(0, allInNow - currentBid);
   const headroom = marketValue === null ? null : marketValue - auction.assessment.allInAtCurrentBidCents;
   const headroomPct = marketValue && headroom !== null ? Math.max(0, Math.min(100, (headroom / marketValue) * 100)) : 0;
   const primaryReason = auction.assessment.reasonCodes[0]?.replaceAll("_", " ") ?? "Review source evidence";
+  const issueSummary = auction.vehicle.riskFlags.length
+    ? `${auction.vehicle.riskFlags.slice(0, 2).join(" · ")}${auction.vehicle.riskFlags.length > 2 ? ` · +${auction.vehicle.riskFlags.length - 2} more` : ""}`
+    : "No structured damage disclosed; verify photos, description, and inspection.";
 
   return (
     <article className={`opportunity-card ${compact ? "is-compact" : ""}`}>
       <div className="vehicle-media">
-        {/* The source-provided image remains remote and links back to the official record. */}
-        {auction.imageUrl ? (
-          <img src={auction.imageUrl} alt={`${auction.title} from the official GSA listing`} loading="lazy" />
-        ) : (
-          <div className="vehicle-placeholder"><CarFront size={44} /><span>{auction.vehicle.year} {auction.vehicle.make}</span><small>Photos available at the official GSA listing</small></div>
-        )}
+        <VehicleImage
+          src={auction.imageUrl}
+          alt={`${auction.title} shown in the official GSA listing`}
+          fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make}`}
+          fallbackCopy="Official photo unavailable here; open the GSA listing for its gallery."
+          variant="card"
+        />
         <div className="media-scrim" />
         <div className="media-topline">
           <span className={`status-pill ${statusTone(auction.assessment.status)}`}>
@@ -184,7 +215,6 @@ function OpportunityCard({
             </div>
             <h2>{auction.title}</h2>
             <div className="vehicle-meta">
-              <span><Gauge size={14} /> {formatMileage(auction.vehicle.mileage)}</span>
               <span><MapPin size={14} /> {auction.location.city}, {auction.location.state}</span>
               <span><CarFront size={14} /> {auction.vehicle.drivetrain ?? auction.vehicle.bodyStyle ?? "Vehicle"}</span>
             </div>
@@ -195,26 +225,42 @@ function OpportunityCard({
           </div>
         </div>
 
+        <div className="critical-facts" aria-label="Mileage and condition summary">
+          <div className={`mileage-fact ${auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "is-unknown" : ""}`}>
+            <Gauge size={19} aria-hidden="true" />
+            <span><small>Odometer mileage</small><strong>{formatMileage(auction.vehicle.mileage)}</strong><em className={`odometer-status ${auction.vehicle.odometerStatus === "conflicting-readings" ? "has-conflict" : ""}`}>{odometerStatusLabel(auction.vehicle.odometerStatus)}</em></span>
+          </div>
+          <div className="condition-fact">
+            <CarFront size={18} aria-hidden="true" />
+            <span><small>Condition / operability</small><strong>{auction.vehicle.condition} · {auction.vehicle.operability}</strong></span>
+          </div>
+        </div>
+
+        <div className={`issue-disclosure ${auction.vehicle.riskFlags.length ? "has-issues" : ""}`}>
+          <AlertTriangle size={15} aria-hidden="true" />
+          <div><strong>Damage &amp; issues</strong><span>{issueSummary}</span></div>
+        </div>
+
         <div className="price-stack">
           <div>
-            <span>Current bid</span>
+            <span>Current bid · before costs</span>
             <strong>{dollars(currentBid)}</strong>
-            <small>{auction.bidderCount === null ? "Bidder count unavailable" : `${auction.bidderCount} bidders`}</small>
+            <small>{auction.bidderCount === null ? "GSA bid only; bidders unavailable" : `GSA bid only · ${auction.bidderCount} bidders`}</small>
           </div>
           <div>
-            <span>Projected close</span>
+            <span>Projected close · before costs</span>
             <strong>{dollars(predictedClose)}</strong>
             <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}` : "More evidence needed"}</small>
           </div>
           <div>
             <span>Market reference</span>
             <strong>{dollars(marketValue)}</strong>
-            <small>{auction.valuation.status === "provider" ? auction.valuation.provider : "Demo reference · not KBB"}</small>
+            <small>{auction.valuation.status === "provider" ? auction.valuation.provider : auction.valuation.status === "reference-only" ? "Demo reference · not KBB" : "Not connected · verify at KBB"}</small>
           </div>
-          <div className="ceiling-metric">
-            <span>Safe bid ceiling</span>
-            <strong>{dollars(safeMax)}</strong>
-            <small>After costs + risk reserve</small>
+          <div className="all-in-metric">
+            <span>Modeled all-in now</span>
+            <strong>{dollars(allInNow)}</strong>
+            <small>{addedCostsNow === null ? "Added costs unavailable" : `Bid + ${dollars(addedCostsNow)} modeled costs`}</small>
           </div>
         </div>
 
@@ -226,22 +272,18 @@ function OpportunityCard({
           <div className="headroom-track" aria-label={`${Math.round(headroomPct)} percent headroom`}>
             <span style={{ width: `${headroomPct}%` }} />
           </div>
-          <span className="reason-chip"><Sparkles size={13} /> {primaryReason}</span>
+          <span className="reason-chip"><Sparkles size={13} /> Safe bid {dollars(safeMax)} before costs · {primaryReason}</span>
         </div>
 
         <div className="evidence-row">
           <div>
             <span className="evidence-chip"><Database size={13} /> {auction.forecast.sampleSize} GSA comps</span>
             <span className="evidence-chip"><ShieldCheck size={13} /> VIN {auction.vehicle.vin ? "captured" : "pending"}</span>
-            <PollingLabel auction={auction} />
+            <PollingLabel auction={auction} now={now} />
           </div>
           <div className="card-actions">
             <span className="freshness">Checked {relativeTime(auction.lastCheckedAt, now)}</span>
-            {auction.id.startsWith("live-") ? (
-              <span className="secondary-button disabled">Valuation pending</span>
-            ) : (
-              <Link href={`/vehicle/${auction.id}`} className="secondary-button">Full analysis <ArrowRight size={15} /></Link>
-            )}
+            <Link href={`/vehicle/?id=${encodeURIComponent(auction.id)}`} className="secondary-button">Full analysis <ArrowRight size={15} /></Link>
             <a href={auction.sourceUrl} target="_blank" rel="noreferrer" className="primary-button">View at GSA <ExternalLink size={15} /></a>
           </div>
         </div>
@@ -270,6 +312,8 @@ export function DealBoard() {
   const [saved, setSaved] = useState<Set<string>>(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
   const opportunityRequest = useRef<AbortController | null>(null);
+  const liveBidRequests = useRef<Map<string, AbortController>>(new Map());
+  const liveBidAttempts = useRef<Map<string, number>>(new Map());
 
   const loadOpportunities = useCallback(async () => {
     opportunityRequest.current?.abort();
@@ -293,7 +337,24 @@ export function DealBoard() {
       };
       if (!Array.isArray(payload.data)) throw new Error("Opportunity feed omitted its data array");
 
-      setAuctions(payload.data);
+      setAuctions((current) => {
+        const existing = new Map(current.map((auction) => [auction.id, auction]));
+        return payload.data!.map((fresh) => {
+          const newer = existing.get(fresh.id);
+          if (!newer || Date.parse(newer.lastCheckedAt) <= Date.parse(fresh.lastCheckedAt)) {
+            return fresh;
+          }
+          return {
+            ...fresh,
+            status: newer.status,
+            currentBidCents: newer.currentBidCents,
+            bidderCount: newer.bidderCount,
+            endsAt: newer.endsAt,
+            lastCheckedAt: newer.lastCheckedAt,
+            assessment: newer.assessment,
+          };
+        });
+      });
       setSourceMeta({
         mode: payload.meta?.mode ?? "unknown",
         status: payload.meta?.sourceHealth?.status ?? "unknown",
@@ -308,6 +369,35 @@ export function DealBoard() {
       }));
     } finally {
       if (opportunityRequest.current === controller) setRefreshing(false);
+    }
+  }, []);
+
+  const loadLiveBid = useCallback(async (auction: AuctionOpportunity) => {
+    if (!auction.id.startsWith("live-") || !/^\d+$/.test(auction.externalId)) return;
+    if (liveBidRequests.current.has(auction.id)) return;
+
+    const controller = new AbortController();
+    liveBidRequests.current.set(auction.id, controller);
+    liveBidAttempts.current.set(auction.id, Date.now());
+    try {
+      const response = await fetch(
+        publicApiUrl(`/api/live-bid?id=${encodeURIComponent(auction.externalId)}`),
+        { cache: "no-store", signal: controller.signal },
+      );
+      if (!response.ok) throw new Error(`Live bid feed returned ${response.status}`);
+      const payload = await response.json() as { data?: LiveBidSnapshot };
+      if (!payload.data || payload.data.externalId !== auction.externalId) {
+        throw new Error("Live bid feed returned the wrong auction");
+      }
+      setAuctions((current) => current.map((item) =>
+        item.id === auction.id ? applyLiveBidSnapshot(item, payload.data!) : item
+      ));
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+    } finally {
+      if (liveBidRequests.current.get(auction.id) === controller) {
+        liveBidRequests.current.delete(auction.id);
+      }
     }
   }, []);
 
@@ -326,6 +416,38 @@ export function DealBoard() {
     };
   }, [loadOpportunities]);
 
+  useEffect(() => {
+    function refreshDueClosingAuctions() {
+      const checkedAt = Date.now();
+      for (const auction of auctions) {
+        if (!auction.id.startsWith("live-") || !auction.endsAt) continue;
+        const remainingMs = Date.parse(auction.endsAt) - checkedAt;
+        // The complete catalog refresh handles the normal hourly bucket. Only
+        // closing vehicles receive isolated, higher-frequency source checks.
+        if (remainingMs > 30 * 60_000) continue;
+        const decision = getRefreshDecision({
+          now: checkedAt,
+          endsAt: auction.endsAt,
+          lastCheckedAt: auction.lastCheckedAt,
+          status: auction.status,
+        });
+        if (!decision.shouldRefresh || decision.intervalMs === null) continue;
+        const lastAttempt = liveBidAttempts.current.get(auction.id) ?? 0;
+        if (checkedAt - lastAttempt < Math.max(10_000, decision.intervalMs - 1_000)) continue;
+        void loadLiveBid(auction);
+      }
+    }
+
+    refreshDueClosingAuctions();
+    const timer = window.setInterval(refreshDueClosingAuctions, 5_000);
+    return () => window.clearInterval(timer);
+  }, [auctions, loadLiveBid]);
+
+  useEffect(() => () => {
+    for (const controller of liveBidRequests.current.values()) controller.abort();
+    liveBidRequests.current.clear();
+  }, []);
+
   const states = useMemo(() => Array.from(new Set(auctions.map((item) => item.location.state))).sort(), [auctions]);
   const conditions = useMemo(() => Array.from(new Set(auctions.map((item) => item.vehicle.condition))).sort(), [auctions]);
 
@@ -339,7 +461,7 @@ export function DealBoard() {
       if (conditionFilter !== "all" && auction.vehicle.condition !== conditionFilter) return false;
       if (maxBidCents !== null && (auction.currentBidCents === null || auction.currentBidCents > maxBidCents)) return false;
       if (quickFilter === "closing") {
-        if (auction.id.startsWith("live-") || !auction.endsAt) return false;
+        if (!auction.endsAt) return false;
         const remaining = new Date(auction.endsAt).getTime() - now;
         if (remaining < 0 || remaining > 30 * 60_000) return false;
       }
@@ -358,15 +480,24 @@ export function DealBoard() {
     });
   }, [auctions, conditionFilter, maxBid, now, query, quickFilter, saved, sort, stateFilter]);
 
-  const totalHeadroom = auctions.reduce((sum, item) => sum + Math.max(0, item.assessment.projectedProfitCents ?? 0), 0);
+  const profitEvidence = auctions
+    .map((item) => item.assessment.projectedProfitCents)
+    .filter((value): value is number => value !== null);
+  const totalHeadroom = profitEvidence.length
+    ? profitEvidence.reduce((sum, value) => sum + Math.max(0, value), 0)
+    : null;
   const closingCount = auctions.filter((item) => {
     if (!item.endsAt) return false;
     const remaining = new Date(item.endsAt).getTime() - now;
-    return !item.id.startsWith("live-") && remaining >= 0 && remaining <= 30 * 60_000;
+    return remaining >= 0 && remaining <= 30 * 60_000;
   }).length;
-  const medianDiscount = [...auctions]
-    .map((item) => item.assessment.discountToValue ?? 0)
-    .sort((a, b) => a - b)[Math.floor(auctions.length / 2)] ?? 0;
+  const discountEvidence = auctions
+    .map((item) => item.assessment.discountToValue)
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+  const medianDiscount = discountEvidence.length
+    ? discountEvidence[Math.floor(discountEvidence.length / 2)]!
+    : null;
 
   function toggleSaved(id: string) {
     setSaved((current) => {
@@ -451,13 +582,13 @@ export function DealBoard() {
             </article>
             <article>
               <div className="metric-icon green"><CircleDollarSign size={18} /></div>
-              <div><span>Modeled headroom</span><strong>{dollars(totalHeadroom)}</strong><small>Across active shortlist</small></div>
-              <em>After risk reserves</em>
+              <div><span>Modeled headroom</span><strong>{dollars(totalHeadroom)}</strong><small>{totalHeadroom === null ? "Licensed value required" : "Across active shortlist"}</small></div>
+              <em>{totalHeadroom === null ? "Not yet scored" : "After risk reserves"}</em>
             </article>
             <article>
               <div className="metric-icon violet"><TrendingUp size={18} /></div>
-              <div><span>Median value gap</span><strong>{Math.round(medianDiscount * 100)}%</strong><small>At projected close</small></div>
-              <em>Reference-only</em>
+              <div><span>Median value gap</span><strong>{medianDiscount === null ? "—" : `${Math.round(medianDiscount * 100)}%`}</strong><small>{medianDiscount === null ? "Verified value required" : "At projected close"}</small></div>
+              <em>{medianDiscount === null ? "Not yet scored" : "Reference-only"}</em>
             </article>
             <article>
               <div className="metric-icon amber"><Clock3 size={18} /></div>
@@ -470,7 +601,7 @@ export function DealBoard() {
             <ShieldCheck size={18} />
             <div>
               <strong>Evidence-aware by design</strong>
-              <span>Market values are demo references until a licensed KBB, Black Book, J.D. Power, or other provider is connected. A safe bid ceiling activates only with sufficient independent evidence; current GSA bids never substitute for value.</span>
+              <span>Market values are unavailable or explicitly labeled demo references until a licensed KBB, Black Book, J.D. Power, or other provider is connected. A safe bid ceiling activates only with sufficient independent evidence; current GSA bids never substitute for value.</span>
             </div>
             <a href="#source-health">View source ledger <ArrowRight size={14} /></a>
           </section>

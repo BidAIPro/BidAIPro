@@ -26,10 +26,22 @@ function discovery(overrides = {}) {
     images: ["https://example.com/signed.jpg"],
     vin: "NM0GE9E26M1495395",
     mileage: 11081,
+    odometerStatus: "reported-not-verified",
     bodyType: "minivan",
     year: 2021,
     make: "Ford",
     modelLabel: "Transit",
+    transmission: "Automatic",
+    fuelType: "Gasoline",
+    cylinders: 4,
+    color: "White",
+    openRecall: false,
+    conditionCode: "U",
+    condition: "usable",
+    operability: "runs-and-drives",
+    damageFlags: ["paint-damage"],
+    issueFlags: [],
+    conditionNotes: ["Scratches on the passenger-side door."],
     location: { addressLines: [], city: "Fort Worth", state: "TX", postalCode: "76102" },
     saleLocation: { addressLines: [], city: null, state: null, postalCode: null },
     agency: { code: null, name: null, bureauCode: null, bureauName: null },
@@ -44,7 +56,15 @@ test("official discovery stays visible without fabricating value or a safe ceili
   assert.equal(opportunity.currentBidCents, 918600);
   assert.equal(opportunity.bidderCount, 3);
   assert.equal(opportunity.vehicle.vin, "NM0GE9E26M1495395");
-  assert.equal(opportunity.imageUrl, "");
+  assert.equal(opportunity.imageUrl, "https://example.com/signed.jpg");
+  assert.equal(opportunity.vehicle.mileage, 11081);
+  assert.equal(opportunity.vehicle.odometerStatus, "reported-not-verified");
+  assert.equal(opportunity.vehicle.condition, "good");
+  assert.equal(opportunity.vehicle.operability, "runs-and-drives");
+  assert.deepEqual(opportunity.vehicle.riskFlags, [
+    "Paint Damage",
+    "Scratches on the passenger-side door.",
+  ]);
   assert.equal(opportunity.valuation.status, "unavailable");
   assert.equal(opportunity.forecast.status, "insufficient");
   assert.equal(opportunity.assessment.status, "insufficient");

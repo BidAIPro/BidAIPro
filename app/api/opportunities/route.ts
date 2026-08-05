@@ -4,12 +4,12 @@ import { discoveryToOpportunity } from "../../../lib/opportunity-adapter";
 import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
 
-export const revalidate = 3600;
+export const revalidate = 300;
 
 export const OPTIONS = publicApiPreflight;
 
 const CACHE_CONTROL =
-  "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400";
+  "public, max-age=0, s-maxage=300, stale-while-revalidate=300, stale-if-error=600";
 
 export async function GET() {
   try {
@@ -23,7 +23,7 @@ export async function GET() {
       {
         data: opportunities,
         meta: {
-          mode: "official-hourly-feed",
+          mode: "official-gsa-public-catalog",
           coverage: discovery.coverage,
           sourceHealth: discovery.sourceHealth,
         },

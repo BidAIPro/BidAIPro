@@ -52,7 +52,14 @@ test("server-renders a complete vehicle underwriting dossier", async () => {
   const html = await response.text();
   assert.match(html, /2018 Dodge Durango SXT/i);
   assert.match(html, /Vehicle dossier/i);
+  assert.match(html, /Odometer mileage/i);
+  assert.match(html, /Damage, condition &amp; disclosed issues/i);
   assert.match(html, /All-in cost waterfall/i);
+  assert.match(html, /Current bid .*no added costs/i);
+  assert.match(html, /Modeled added-cost total/i);
+  assert.match(html, /Modeled all-in cost now/i);
+  assert.match(html, /Check value at KBB/i);
+  assert.match(html, /No KBB value is imported or represented as integrated yet/i);
   assert.match(html, /Comparable outcome ledger/i);
   assert.match(html, /Open official auction/i);
 });
@@ -89,7 +96,10 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
 
   assert.match(board, /fetch\(publicApiUrl\("\/api\/opportunities"\)/);
   assert.match(board, /setInterval\(\(\) => void loadOpportunities\(\), 60 \* 60_000\)/);
-  assert.match(board, /setAuctions\(payload\.data\)/);
+  assert.match(board, /setAuctions\(\(current\) =>/);
+  assert.match(board, /\/api\/live-bid\?id=\$\{encodeURIComponent\(auction\.externalId\)\}/);
+  assert.match(board, /getRefreshDecision/);
+  assert.match(board, /remainingMs > 30 \* 60_000/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
   assert.match(opportunityRoute, /publicApiHeaders/);

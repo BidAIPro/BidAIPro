@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { VehicleImage } from "../../components/vehicle-image";
+import type { AuctionOpportunity } from "../../../lib/auction-types";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
 
 const money = new Intl.NumberFormat("en-US", {
@@ -37,6 +39,12 @@ function dollars(cents: number | null | undefined) {
 
 function asPercent(value: number | null | undefined) {
   return value === null || value === undefined ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function odometerStatusLabel(status: AuctionOpportunity["vehicle"]["odometerStatus"]) {
+  if (status === "conflicting-readings") return "Conflicting GSA readings";
+  if (status === "not-reported") return "Not reported";
+  return "GSA reported · verify";
 }
 
 export function generateStaticParams() {
@@ -66,6 +74,8 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
   const bidPosition = auction.currentBidCents === null ? 0 : Math.max(0, Math.min(100, ((auction.currentBidCents - valueLow) / rangeSpan) * 100));
   const ceilingPosition = auction.assessment.safeMaxBidCents === null ? 0 : Math.max(0, Math.min(100, ((auction.assessment.safeMaxBidCents - valueLow) / rangeSpan) * 100));
   const forecastPosition = auction.forecast.expectedCents === null ? 0 : Math.max(0, Math.min(100, ((auction.forecast.expectedCents - valueLow) / rangeSpan) * 100));
+  const allInNow = auction.currentBidCents === null ? null : auction.assessment.allInAtCurrentBidCents;
+  const addedCostsNow = auction.currentBidCents === null || allInNow === null ? null : Math.max(0, allInNow - auction.currentBidCents);
 
   const costRows = [
     ["Current bid", costs.purchaseBidCents],
@@ -95,14 +105,17 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
 
         <section className="detail-hero">
           <div className="detail-photo">
-            {auction.imageUrl ? (
-              <img src={auction.imageUrl} alt={`${auction.title} from the official GSA listing`} />
-            ) : (
-              <div className="detail-photo-placeholder"><CarFront size={72} /><strong>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</strong><span>Open the official GSA record to view its complete photo gallery.</span></div>
-            )}
+            <VehicleImage
+              src={auction.imageUrl}
+              alt={`${auction.title} shown in the official GSA listing`}
+              fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make} ${auction.vehicle.model}`}
+              fallbackCopy="Official photo unavailable here. Open the GSA record to view its complete gallery."
+              variant="detail"
+              priority
+            />
             <div className="detail-photo-overlay" />
             <span className="official-image-label"><BadgeCheck size={13} /> Official listing image</span>
-            <div className="detail-photo-meta"><span><MapPin size={13} /> {auction.location.city}, {auction.location.state}</span><span><Gauge size={13} /> {auction.vehicle.mileage ? `${integer.format(auction.vehicle.mileage)} miles` : "Mileage unknown"}</span></div>
+            <div className="detail-photo-meta"><span><MapPin size={13} /> {auction.location.city}, {auction.location.state}</span><span><Gauge size={13} /> {auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "Mileage unknown" : `${integer.format(auction.vehicle.mileage)} miles`} · {odometerStatusLabel(auction.vehicle.odometerStatus)}</span></div>
           </div>
 
           <div className="detail-decision">
@@ -115,16 +128,21 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               <div className={`detail-score ${auction.assessment.score >= 70 ? "good" : auction.assessment.score >= 45 ? "watch" : "risk"}`}><strong>{auction.assessment.score}</strong><span>Deal score</span></div>
             </div>
 
+            <div className={`mileage-spotlight ${auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "is-unknown" : ""}`}>
+              <Gauge size={24} aria-hidden="true" />
+              <div><span>Odometer mileage</span><strong>{auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "Unknown — verify before pricing" : `${integer.format(auction.vehicle.mileage)} miles`}</strong><small className={`odometer-status ${auction.vehicle.odometerStatus === "conflicting-readings" ? "has-conflict" : ""}`}>{odometerStatusLabel(auction.vehicle.odometerStatus)} · Mileage materially affects market value and the safe bid.</small></div>
+            </div>
+
             <div className="decision-banner">
               <div><ShieldCheck size={20} /><span><strong>{auction.assessment.status === "actionable" ? "Actionable opportunity" : auction.assessment.status === "watch" ? "Watch with discipline" : "Diligence required"}</strong><small>{auction.assessment.reasonCodes[0]?.replaceAll("_", " ") ?? "Review the complete evidence ledger"}</small></span></div>
               <em>{Math.round(auction.assessment.confidence * 100)}% model confidence</em>
             </div>
 
             <div className="decision-grid">
-              <article><span>Current bid</span><strong>{dollars(auction.currentBidCents)}</strong><small>{auction.bidderCount === null ? "Bidder count unavailable" : `${auction.bidderCount} bidders`} · GSA observed</small></article>
-              <article><span>Projected close</span><strong>{dollars(auction.forecast.expectedCents)}</strong><small>{dollars(auction.forecast.lowCents)}–{dollars(auction.forecast.highCents)}</small></article>
-              <article><span>Conservative value</span><strong>{dollars(auction.assessment.conservativeValueCents)}</strong><small>{auction.valuation.status === "provider" ? auction.valuation.provider : "Demo market reference"}</small></article>
-              <article className="primary-decision"><span>Safe bid ceiling</span><strong>{dollars(auction.assessment.safeMaxBidCents)}</strong><small>After all modeled costs</small></article>
+              <article><span>Current bid · before costs</span><strong>{dollars(auction.currentBidCents)}</strong><small>{auction.bidderCount === null ? "GSA auction price only" : `${auction.bidderCount} bidders · auction price only`}</small></article>
+              <article className="all-in-decision"><span>Modeled all-in now</span><strong>{dollars(allInNow)}</strong><small>{addedCostsNow === null ? "Added costs unavailable" : `Includes ${dollars(addedCostsNow)} modeled added costs`}</small></article>
+              <article><span>Projected close · before costs</span><strong>{dollars(auction.forecast.expectedCents)}</strong><small>{dollars(auction.forecast.lowCents)}–{dollars(auction.forecast.highCents)} auction price</small></article>
+              <article className="primary-decision"><span>Safe bid ceiling · before costs</span><strong>{dollars(auction.assessment.safeMaxBidCents)}</strong><small>Maximum auction bid under current assumptions</small></article>
             </div>
 
             <div className="decision-actions">
@@ -156,7 +174,12 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               </div>
             </div>
             <div className="market-legend"><span><i className="dot bid" /> Current bid {dollars(auction.currentBidCents)}</span><span><i className="dot forecast" /> Projected close {dollars(auction.forecast.expectedCents)}</span><span><i className="dot ceiling" /> Safe ceiling {dollars(auction.assessment.safeMaxBidCents)}</span></div>
-            <div className="provenance-note"><FileSearch size={16} /><div><strong>{auction.valuation.provider}</strong><span>{auction.valuation.provenanceNote}</span></div><em>{auction.valuation.status === "provider" ? "Licensed source" : "Reference only · not KBB"}</em></div>
+            <div className="provenance-note"><FileSearch size={16} /><div><strong>{auction.valuation.provider}</strong><span>{auction.valuation.provenanceNote}</span></div><em>{auction.valuation.status === "provider" ? "Licensed source" : auction.valuation.status === "reference-only" ? "Reference only · not KBB" : "No licensed value connected"}</em></div>
+            <div className="valuation-verification">
+              <div><BadgeCheck size={18} aria-hidden="true" /><span><strong>Verify the price independently</strong><small>No KBB value is imported or represented as integrated yet.</small></span></div>
+              <p>Have these listing facts ready: VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "unknown" : `${integer.format(auction.vehicle.mileage)} mi`}</b>, ZIP <b>{auction.location.postalCode}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
+              <a href="https://www.kbb.com/car-values/" target="_blank" rel="noreferrer">Check value at KBB <ExternalLink size={14} /></a>
+            </div>
           </section>
 
           <section className="analysis-card vehicle-card-detail">
@@ -165,6 +188,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               <div><dt>Year</dt><dd>{auction.vehicle.year}</dd></div>
               <div><dt>Make</dt><dd>{auction.vehicle.make}</dd></div>
               <div><dt>Model</dt><dd>{auction.vehicle.model}</dd></div>
+              <div className={`mileage-spec ${auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "is-unknown" : ""}`}><dt>Mileage</dt><dd><Gauge size={13} /> {auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "Unknown — verify" : `${integer.format(auction.vehicle.mileage)} mi`}</dd></div>
               <div><dt>Trim</dt><dd>{auction.vehicle.trim ?? "Not stated"}</dd></div>
               <div><dt>Body</dt><dd>{auction.vehicle.bodyStyle ?? "Not stated"}</dd></div>
               <div><dt>Drivetrain</dt><dd>{auction.vehicle.drivetrain ?? "Not stated"}</dd></div>
@@ -173,7 +197,16 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               <div><dt>Operability</dt><dd>{auction.vehicle.operability}</dd></div>
               <div><dt>Title status</dt><dd>{auction.vehicle.titleStatus ?? "SF-97 / verify"}</dd></div>
             </dl>
-            <p className="vehicle-description">{auction.vehicle.description}</p>
+            <div className={`condition-disclosure ${auction.vehicle.riskFlags.length ? "has-issues" : ""}`}>
+              <div><AlertTriangle size={17} aria-hidden="true" /><strong>Damage, condition &amp; disclosed issues</strong></div>
+              <p><b>{auction.vehicle.condition}</b> condition · <b>{auction.vehicle.operability}</b></p>
+              {auction.vehicle.riskFlags.length ? (
+                <ul>{auction.vehicle.riskFlags.map((risk) => <li key={risk}>{risk}</li>)}</ul>
+              ) : (
+                <p>No structured damage was captured. This is not a clean-condition guarantee—verify every photo, disclosure, and inspection report at GSA.</p>
+              )}
+            </div>
+            <p className="vehicle-description"><strong>Official listing description</strong>{auction.vehicle.description || "No description was captured; review the official listing before pricing."}</p>
           </section>
 
           <section className="analysis-card cost-card" id="cost-model">
@@ -181,7 +214,11 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
             <div className="cost-list">
               {costRows.map(([label, value]) => <div key={label}><span>{label}</span><strong>{dollars(value)}</strong></div>)}
             </div>
-            <div className="cost-total"><span><strong>Modeled all-in cost now</strong><small>Bid + acquisition + exit costs</small></span><strong>{dollars(costs.totalAllInCents)}</strong></div>
+            <div className="cost-comparison" aria-label="Price before and after modeled costs">
+              <div className="bid-only-total"><span><strong>Current bid · no added costs</strong><small>Observed auction price only</small></span><strong>{dollars(auction.currentBidCents)}</strong></div>
+              <div className="added-cost-total"><span><strong>Modeled added-cost total</strong><small>Acquisition + exit + risk costs</small></span><strong>{dollars(addedCostsNow)}</strong></div>
+              <div className="cost-total"><span><strong>Modeled all-in cost now</strong><small>Bid + acquisition + exit costs</small></span><strong>{dollars(allInNow)}</strong></div>
+            </div>
             <div className="profit-row"><span>Projected profit at expected close</span><strong className={(auction.assessment.projectedProfitCents ?? -1) >= 0 ? "profit" : "loss"}>{dollars(auction.assessment.projectedProfitCents)}</strong></div>
           </section>
 

@@ -1,18 +1,18 @@
 import { env } from "cloudflare:workers";
 import {
-  GSA_AUCTIONS_ENDPOINT,
+  GSA_DISCOVERY_ENDPOINT,
   GSA_PUBLIC_FEED_LIMITATIONS,
   GsaClientError,
   getGsaVehicleAuctions,
 } from "../../../../lib/gsa-client";
 import { publicApiHeaders, publicApiPreflight } from "../../../../lib/public-api-cors";
 
-export const revalidate = 3600;
+export const revalidate = 300;
 
 export const OPTIONS = publicApiPreflight;
 
 const SUCCESS_CACHE_CONTROL =
-  "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400";
+  "public, max-age=0, s-maxage=300, stale-while-revalidate=300, stale-if-error=600";
 
 export async function GET(): Promise<Response> {
   try {
@@ -49,7 +49,7 @@ export async function GET(): Promise<Response> {
           sourceHealth: {
             source: "GSA Auctions API",
             official: true,
-            endpoint: GSA_AUCTIONS_ENDPOINT,
+            endpoint: GSA_DISCOVERY_ENDPOINT,
             status: "unavailable",
             discoveryCadence: "hourly",
             lastErrorCode: code,

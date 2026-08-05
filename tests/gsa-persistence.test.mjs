@@ -52,6 +52,7 @@ function sourceHealth(status = "live") {
     source: "GSA Auctions API",
     official: true,
     endpoint: "https://api.gsa.gov/assets/gsaauctions/v2/auctions",
+    sourceMode: "legacy-bulk-feed",
     status,
     cache: status === "live" ? "refresh" : "stale-fallback",
     credentialMode: "configured",
@@ -88,10 +89,22 @@ function vehicle(overrides = {}) {
     images: [],
     vin: null,
     mileage: null,
+    odometerStatus: "not-reported",
     bodyType: "van",
     year: 2020,
     make: "Ford",
     modelLabel: "Transit",
+    transmission: null,
+    fuelType: null,
+    cylinders: null,
+    color: null,
+    openRecall: null,
+    conditionCode: null,
+    condition: "unknown",
+    operability: "unknown",
+    damageFlags: [],
+    issueFlags: [],
+    conditionNotes: [],
     location: { addressLines: [], city: "Dallas", state: "TX", postalCode: "75201" },
     saleLocation: { addressLines: [], city: null, state: null, postalCode: null },
     agency: { code: null, name: "GSA", bureauCode: null, bureauName: null },
@@ -161,4 +174,24 @@ test("preserves unknown bid facts, requires consecutive misses, and completes te
   const comparableIndex = runs.findIndex((operation) => operation.sql.includes("INSERT OR IGNORE INTO comparable_sales"));
   const completionIndex = runs.findIndex((operation) => operation.sql.includes("UPDATE source_checks") && operation.sql.includes("coverage_status = 'complete'"));
   assert.ok(comparableIndex >= 0 && completionIndex > comparableIndex);
+});
+
+test("does not erase stored enrichment when one PPMS lot detail is unavailable", async () => {
+  const database = new FakeD1();
+  await persistGsaDiscovery(database, discovery({
+    auctions: [vehicle({ detailEnriched: false })],
+  }));
+
+  const statements = database.operations
+    .filter((operation) => operation.kind === "batch")
+    .flatMap((operation) => operation.statements);
+  const auctionUpsert = statements.find((statement) => statement.sql.includes("INSERT INTO auctions"));
+  const vehicleUpsert = statements.find((statement) => statement.sql.includes("INSERT INTO vehicles"));
+
+  assert.match(auctionUpsert.sql, /primary_image_url = COALESCE/);
+  assert.match(auctionUpsert.sql, /julianday\(excluded\.last_checked_at\).*julianday\(auctions\.last_checked_at\)/s);
+  assert.match(vehicleUpsert.sql, /excluded\.source_description IS NULL THEN vehicles\.odometer_status/);
+  assert.match(vehicleUpsert.sql, /THEN vehicles\.damage_flags_json/);
+  assert.equal(vehicleUpsert.args[16], null);
+  assert.equal(vehicleUpsert.args[19], null);
 });

@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { runClosingWindowRefresh } from "../lib/gsa-closing-refresh";
 import { getGsaVehicleAuctions } from "../lib/gsa-client";
 import { persistGsaDiscovery, recordGsaSourceFailure } from "../lib/gsa-persistence";
 
@@ -41,28 +42,33 @@ const worker = {
     return handler.fetch(request, env, ctx);
   },
 
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (controller.cron === "* * * * *") {
+      await runClosingWindowRefresh(env.DB, {
+        sleep: (delayMs) => scheduler.wait(delayMs),
+      });
+      return;
+    }
+
     const syncStartedAt = new Date();
     const startedMs = syncStartedAt.getTime();
 
-    ctx.waitUntil((async () => {
-      try {
-        const discovery = await getGsaVehicleAuctions({
-          apiKey: env.GSA_API_KEY,
-          forceRefresh: true,
-          now: syncStartedAt,
-        });
-        await persistGsaDiscovery(env.DB, discovery, {
-          latencyMs: Date.now() - startedMs,
-        });
-      } catch (error) {
-        await recordGsaSourceFailure(env.DB, error, {
-          checkedAt: new Date().toISOString(),
-          latencyMs: Date.now() - startedMs,
-        });
-        throw error;
-      }
-    })());
+    try {
+      const discovery = await getGsaVehicleAuctions({
+        apiKey: env.GSA_API_KEY,
+        forceRefresh: true,
+        now: syncStartedAt,
+      });
+      await persistGsaDiscovery(env.DB, discovery, {
+        latencyMs: Date.now() - startedMs,
+      });
+    } catch (error) {
+      await recordGsaSourceFailure(env.DB, error, {
+        checkedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedMs,
+      });
+      throw error;
+    }
   },
 };
 

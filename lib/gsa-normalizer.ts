@@ -118,6 +118,20 @@ type JsonRecord = Record<string, unknown>;
 
 export type GsaAuctionStatus = "active" | "preview" | "scheduled" | "unknown";
 
+export type GsaVehicleCondition =
+  | "new"
+  | "usable"
+  | "repairable"
+  | "salvage"
+  | "scrap"
+  | "unknown";
+
+export type GsaVehicleOperability =
+  | "runs-and-drives"
+  | "runs"
+  | "non-operational"
+  | "unknown";
+
 export interface GsaVehicleEvidence {
   title: boolean;
   vin: boolean;
@@ -154,10 +168,24 @@ export interface GsaVehicleAuction {
   images: string[];
   vin: string | null;
   mileage: number | null;
+  odometerStatus: "reported-not-verified" | "conflicting-readings" | "not-reported";
   bodyType: string | null;
   year: number | null;
   make: string | null;
   modelLabel: string | null;
+  transmission: string | null;
+  fuelType: string | null;
+  cylinders: number | null;
+  color: string | null;
+  openRecall: boolean | null;
+  conditionCode: string | null;
+  condition: GsaVehicleCondition;
+  operability: GsaVehicleOperability;
+  damageFlags: string[];
+  issueFlags: string[];
+  conditionNotes: string[];
+  /** False only when a PPMS catalog row could not be enriched from its lot detail. */
+  detailEnriched?: boolean;
   location: GsaLocation;
   saleLocation: GsaLocation;
   agency: {
@@ -180,6 +208,13 @@ export interface GsaCoverage {
   withCurrentBid: number;
   statusCounts: Record<GsaAuctionStatus, number>;
   exclusionCounts: Record<string, number>;
+  detailEnrichment?: {
+    requested: number;
+    succeeded: number;
+    failed: number;
+    imagesDiscovered: number;
+    imagesSigned: number;
+  };
 }
 
 export interface NormalizedGsaPayload {
@@ -296,7 +331,7 @@ function uniqueTexts(values: Array<string | null>): string[] {
   return result;
 }
 
-function extractVin(text: string): string | null {
+export function extractVin(text: string): string | null {
   const labeled = text.match(/\bVIN\s*(?:NUMBER|NO\.?|#)?\s*[:=\-]?\s*([A-HJ-NPR-Z0-9]{17})\b/i);
   const candidate = labeled?.[1] ?? text.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0];
   if (!candidate || !/[A-Z]/i.test(candidate) || !/\d/.test(candidate)) return null;
@@ -309,7 +344,7 @@ function parseMileageCandidate(value: string | undefined): number | null {
   return Number.isSafeInteger(mileage) && mileage >= 0 && mileage <= 2_000_000 ? mileage : null;
 }
 
-function extractMileage(text: string): number | null {
+export function extractMileage(text: string): number | null {
   const labeled = text.match(
     /\b(?:mileage|odometer|odo)(?:\s+reading)?\s*(?:is|:|=|-)??\s*([\d,]{1,12})(?:\.\d+)?\b/i,
   );
@@ -317,14 +352,14 @@ function extractMileage(text: string): number | null {
   return parseMileageCandidate(labeled?.[1]) ?? parseMileageCandidate(followedByMiles?.[1]);
 }
 
-function extractBodyType(text: string): string | null {
+export function extractBodyType(text: string): string | null {
   for (const [pattern, bodyType] of ROAD_BODY_PATTERNS) {
     if (pattern.test(text)) return bodyType;
   }
   return null;
 }
 
-function extractYear(text: string, observedAt: Date): number | null {
+export function extractYear(text: string, observedAt: Date): number | null {
   const maximumYear = observedAt.getUTCFullYear() + 2;
   for (const match of text.matchAll(/\b((?:19|20)\d{2})\b/g)) {
     const year = Number.parseInt(match[1] ?? "", 10);
@@ -333,7 +368,7 @@ function extractYear(text: string, observedAt: Date): number | null {
   return null;
 }
 
-function extractMake(text: string): string | null {
+export function extractMake(text: string): string | null {
   for (const make of MAKE_NAMES) {
     const escaped = make.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]+");
     if (new RegExp(`\\b${escaped}\\b`, "i").test(text)) {
@@ -343,6 +378,54 @@ function extractMake(text: string): string | null {
     }
   }
   return null;
+}
+
+const DAMAGE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:dent(?:ed|s)?|body damage|collision|accident damage|hail damage)\b/i, "body-damage"],
+  [/\b(?:rust(?:ed|ing)?|corrosion|corroded)\b/i, "rust-or-corrosion"],
+  [/\b(?:cracked|broken|shattered)\s+(?:windshield|window|glass)\b|\bwindshield\s+(?:is\s+)?(?:cracked|broken)\b/i, "glass-damage"],
+  [/\b(?:mold|mildew|moss|water intrusion|water damage|flood damage)\b/i, "water-or-organic-growth"],
+  [/\b(?:missing parts?|parts? (?:is|are) missing|stripped)\b/i, "missing-parts"],
+  [/\b(?:flat|damaged|worn|dry-rotted)\s+tires?\b|\btires?\s+(?:are\s+)?(?:flat|damaged|worn|dry-rotted)\b/i, "tire-damage"],
+  [/\b(?:torn|ripped|damaged|stained)\s+(?:seat|seats|upholstery|interior)\b/i, "interior-damage"],
+  [/\b(?:fire damage|burned|burnt)\b/i, "fire-damage"],
+  [/\b(?:scratches|scratched|paint damage|peeling paint)\b/i, "paint-damage"],
+];
+
+const ISSUE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:does not|doesn't|will not|won't|unable to)\s+(?:start|run|drive)\b|\b(?:non[- ]?running|inoperable|non[- ]?operational)\b/i, "non-operational"],
+  [/\b(?:engine (?:issue|issues|problem|problems|damage)|check engine|engine knock|engine seized)\b/i, "engine-issue"],
+  [/\b(?:transmission (?:issue|issues|problem|problems|damage)|transmission slips?)\b/i, "transmission-issue"],
+  [/\b(?:dead battery|battery (?:is )?(?:dead|missing|weak|damaged))\b/i, "battery-issue"],
+  [/\b(?:fluid|oil|coolant|fuel|transmission)\s+leaks?\b|\bleaks?\s+(?:fluid|oil|coolant|fuel)\b/i, "fluid-leak"],
+  [/\bopen recall\s*:\s*yes\b|\bactive recall\b/i, "open-recall"],
+  [/\b(?:unknown operating condition|operating condition (?:is )?unknown|running condition (?:is )?unknown)\b/i, "operability-unknown"],
+];
+
+function matchingFlags(
+  text: string,
+  patterns: ReadonlyArray<readonly [RegExp, string]>,
+): string[] {
+  return patterns.filter(([pattern]) => pattern.test(text)).map(([, flag]) => flag);
+}
+
+export function extractDamageFlags(text: string): string[] {
+  return matchingFlags(text, DAMAGE_PATTERNS);
+}
+
+export function extractIssueFlags(text: string): string[] {
+  return matchingFlags(text, ISSUE_PATTERNS);
+}
+
+export function inferOperability(text: string): GsaVehicleOperability {
+  if (ISSUE_PATTERNS[0]![0].test(text)) return "non-operational";
+  if (/\b(?:runs? and drives?|starts? and drives?|operational and drivable)\b/i.test(text)) {
+    return "runs-and-drives";
+  }
+  if (/\b(?:engine runs?|vehicle runs?|starts? successfully|operational)\b/i.test(text)) {
+    return "runs";
+  }
+  return "unknown";
 }
 
 function classifyVehicle(title: string, descriptiveText: string, observedAt: Date): Classification {
@@ -581,6 +664,8 @@ function normalizeAuction(
   const images = normalizeImages(getField(record, "ImageURL", "ImageUrl", "Images"));
   const year = extractYear(`${title} ${description}`, observedAt);
   const make = extractMake(`${title} ${description}`);
+  const damageFlags = extractDamageFlags(description);
+  const issueFlags = extractIssueFlags(description);
   const fallbackSeed = [saleNumber, lotNumber, lotSequence, title, endsAt].filter(Boolean).join("|");
 
   const auction: GsaVehicleAuction = {
@@ -606,10 +691,22 @@ function normalizeAuction(
     images,
     vin: classification.vin,
     mileage: classification.mileage,
+    odometerStatus: classification.mileage === null ? "not-reported" : "reported-not-verified",
     bodyType: classification.bodyType,
     year,
     make,
     modelLabel: deriveModelLabel(title, year, make),
+    transmission: null,
+    fuelType: null,
+    cylinders: null,
+    color: null,
+    openRecall: issueFlags.includes("open-recall") ? true : null,
+    conditionCode: null,
+    condition: "unknown",
+    operability: inferOperability(description),
+    damageFlags,
+    issueFlags,
+    conditionNotes: [],
     location: normalizeLocation(record, {
       address: ["PropertyAddr1", "PropertyAddr2", "PropertyAddr3"],
       city: ["PropertyCity"],

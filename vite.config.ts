@@ -16,7 +16,7 @@ const localBindingConfig = {
   compatibility_flags: ["nodejs_compat"],
   // The documented GSA catalog itself is generated hourly. Run shortly after
   // the hour to avoid claiming a freshness level the upstream feed cannot give.
-  triggers: { crons: ["9 * * * *"] },
+  triggers: { crons: ["9 * * * *", "* * * * *"] },
   d1_databases: d1
     ? [
         {
