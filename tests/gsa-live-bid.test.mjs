@@ -197,6 +197,10 @@ test("serves live snapshots with Pages CORS and no more than ten seconds of edge
   assert.equal(routeResponse.status, 200);
   assert.equal(payload.data.currentBidCents, 251_000);
   assert.equal(
+    routeResponse.headers.get("x-bidai-api-version"),
+    "2026-08-05.2",
+  );
+  assert.equal(
     routeResponse.headers.get("cache-control"),
     "public, max-age=0, s-maxage=10, must-revalidate",
   );
@@ -243,6 +247,10 @@ test("returns only sanitized upstream diagnostics when PPMS rejects a request", 
   );
   const payload = await routeResponse.json();
   assert.equal(routeResponse.status, 502);
+  assert.equal(
+    routeResponse.headers.get("x-bidai-api-version"),
+    "2026-08-05.2",
+  );
   assert.deepEqual(payload.error.diagnostic, {
     sourceCode: "GSA_PPMS_LIVE_HTTP_ERROR",
     upstreamStatus: 403,

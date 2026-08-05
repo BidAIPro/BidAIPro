@@ -12,6 +12,7 @@ export const revalidate = 10;
 export const OPTIONS = publicApiPreflight;
 
 const LIVE_CACHE_CONTROL = "public, max-age=0, s-maxage=10, must-revalidate";
+const API_VERSION = "2026-08-05.2";
 
 interface UpstreamDiagnostic {
   sourceCode: string;
@@ -27,6 +28,7 @@ function errorResponse(
   const headers = publicApiHeaders({
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
+    "X-BidAI-API-Version": API_VERSION,
   });
   if (status === 503 || status === 504) headers.set("Retry-After", "15");
 
@@ -41,6 +43,31 @@ function errorResponse(
     },
     { status, headers },
   );
+}
+
+function upstreamDiagnostic(error: unknown): UpstreamDiagnostic | null {
+  if (error instanceof PpmsLiveBidError) {
+    return {
+      sourceCode: error.code,
+      upstreamStatus: error.upstreamStatus,
+    };
+  }
+  if (error === null || typeof error !== "object") return null;
+  const candidate = error as { code?: unknown; upstreamStatus?: unknown };
+  if (
+    typeof candidate.code !== "string" ||
+    !candidate.code.startsWith("GSA_PPMS_LIVE_")
+  ) {
+    return null;
+  }
+  return {
+    sourceCode: candidate.code,
+    upstreamStatus:
+      typeof candidate.upstreamStatus === "number" &&
+      Number.isInteger(candidate.upstreamStatus)
+        ? candidate.upstreamStatus
+        : null,
+  };
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -62,20 +89,18 @@ export async function GET(request: Request): Promise<Response> {
         headers: publicApiHeaders({
           "Cache-Control": LIVE_CACHE_CONTROL,
           "Content-Type": "application/json; charset=utf-8",
+          "X-BidAI-API-Version": API_VERSION,
           "X-Data-Freshness": "live",
         }),
       },
     );
   } catch (error) {
-    if (error instanceof PpmsLiveBidError) {
-      const diagnostic: UpstreamDiagnostic = {
-        sourceCode: error.code,
-        upstreamStatus: error.upstreamStatus,
-      };
+    const diagnostic = upstreamDiagnostic(error);
+    if (diagnostic) {
       // Log only bounded diagnostic facts. Never serialize the exception,
       // request headers, response body, URL, environment, or credentials.
       console.error("gsa_live_bid_failed", { auctionId: id, ...diagnostic });
-      if (error.code === "GSA_PPMS_LIVE_NOT_FOUND") {
+      if (diagnostic.sourceCode === "GSA_PPMS_LIVE_NOT_FOUND") {
         return errorResponse(
           404,
           "GSA_AUCTION_NOT_FOUND",
@@ -83,7 +108,7 @@ export async function GET(request: Request): Promise<Response> {
           diagnostic,
         );
       }
-      if (error.code === "GSA_PPMS_LIVE_TIMEOUT") {
+      if (diagnostic.sourceCode === "GSA_PPMS_LIVE_TIMEOUT") {
         return errorResponse(
           504,
           "GSA_LIVE_BID_TIMEOUT",
@@ -91,7 +116,10 @@ export async function GET(request: Request): Promise<Response> {
           diagnostic,
         );
       }
-      if (error.upstreamStatus === 429 || error.upstreamStatus === 503) {
+      if (
+        diagnostic.upstreamStatus === 429 ||
+        diagnostic.upstreamStatus === 503
+      ) {
         return errorResponse(
           503,
           "GSA_LIVE_BID_UNAVAILABLE",
@@ -107,10 +135,19 @@ export async function GET(request: Request): Promise<Response> {
       );
     }
 
+    const unexpectedDiagnostic: UpstreamDiagnostic = {
+      sourceCode: "GSA_PPMS_LIVE_UNEXPECTED_ERROR",
+      upstreamStatus: null,
+    };
+    console.error("gsa_live_bid_failed", {
+      auctionId: id,
+      ...unexpectedDiagnostic,
+    });
     return errorResponse(
       502,
       "GSA_LIVE_BID_INVALID_RESPONSE",
       "A verified live bid could not be read from the official GSA response.",
+      unexpectedDiagnostic,
     );
   }
 }
