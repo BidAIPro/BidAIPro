@@ -135,7 +135,7 @@ test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk A
       const fetchRequest = asRequest(input, init);
       const url = new URL(fetchRequest.url);
       fallbackCalls.push({ url, headers: fetchRequest.headers });
-      if (url.hostname === "www.ppms.gov") return new Response(null, { status: 503 });
+      if (url.hostname === "gsaauctions.gov") return new Response(null, { status: 503 });
       if (url.hostname === "api.gsa.gov") {
         return new Response(null, {
           status: 303,

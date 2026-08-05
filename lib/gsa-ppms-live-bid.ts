@@ -2,7 +2,7 @@ import { parsePpmsCentralDate } from "./gsa-ppms-normalizer.ts";
 import type { AuctionStatus } from "./auction-types.ts";
 
 export const GSA_PPMS_LIVE_AUCTION_ENDPOINT =
-  "https://www.ppms.gov/gw/auction/ppms/api/v1/auctions/getAuction";
+  "https://gsaauctions.gov/gw/auction/ppms/api/v1/auctions/getAuction";
 
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;

@@ -6,11 +6,11 @@ import {
 import type { GsaCoverage, GsaVehicleAuction } from "./gsa-normalizer.ts";
 
 export const GSA_PPMS_CATALOG_ENDPOINT =
-  "https://www.ppms.gov/gw/auction/ppms/api/v1/auctions";
+  "https://gsaauctions.gov/gw/auction/ppms/api/v1/auctions";
 export const GSA_PPMS_SALE_PREVIEW_ENDPOINT =
-  "https://www.ppms.gov/gw/sales/ppms/api/v1/sales/preview/auctions";
+  "https://gsaauctions.gov/gw/sales/ppms/api/v1/sales/preview/auctions";
 export const GSA_PPMS_IMAGE_SIGNING_ENDPOINT =
-  "https://www.ppms.gov/gw/common/ppms/api/v1/storage/presigned-urls";
+  "https://gsaauctions.gov/gw/common/ppms/api/v1/storage/presigned-urls";
 
 // This is a server-to-server request, so it must not inherit a browser Origin
 // from the public API caller. PPMS rejects unrecognized browser origins.

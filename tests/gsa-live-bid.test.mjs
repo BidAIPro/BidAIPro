@@ -54,7 +54,7 @@ test("maps the official PPMS live response to a cents-based snapshot", async () 
 
   assert.equal(
     requestedRequest.url,
-    "https://www.ppms.gov/gw/auction/ppms/api/v1/auctions/getAuction/372696",
+    "https://gsaauctions.gov/gw/auction/ppms/api/v1/auctions/getAuction/372696",
   );
   assert.equal(requestedRequest.method, "GET");
   assert.equal(requestedRequest.headers.get("accept"), "application/json");
