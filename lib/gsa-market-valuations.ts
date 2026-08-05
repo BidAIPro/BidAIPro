@@ -8,9 +8,10 @@ import type {
 } from "./gsa-closed-comps.ts";
 import { GSA_PPMS_CATALOG_ENDPOINT } from "./gsa-ppms-client.ts";
 
-const CALCULATION_VERSION = "gsa-weighted-auction-comps-v1";
-const MAX_COMPARABLES = 30;
+const CALCULATION_VERSION = "gsa-weighted-auction-comps-v2";
+const MAX_COMPARABLES = 15;
 const MAX_PUBLISHED_SAMPLES = 12;
+const MIN_BODY_CLASS_COMPARABLES = 3;
 
 export type GsaMarketMatchBasis =
   | "family-year-mileage"
@@ -25,6 +26,7 @@ export interface GsaMarketValuationSubject {
   year: number | null;
   make: string | null;
   modelLabel: string | null;
+  vin?: string | null;
   mileage: number | null;
   bodyType: string | null;
   condition: GsaVehicleCondition;
@@ -38,6 +40,7 @@ export interface GsaComparableAdjustment {
   auctionId: string;
   sourceUrl: string;
   title: string;
+  vin: string | null;
   endedAt: string;
   year: number | null;
   mileage: number | null;
@@ -198,6 +201,7 @@ export function canonicalVehicleFamily(
     ["ford-f450", /F450/],
     ["ford-f550", /F550/],
     ["ford-ranger", /RANGER/],
+    ["ford-transit-connect", /TRANSITCONNECT/],
     ["ford-transit", /TRANSIT/],
     ["ford-e150", /E150/],
     ["ford-e250", /E250/],
@@ -224,6 +228,7 @@ export function canonicalVehicleFamily(
     ["dodge-charger", /CHARGER/],
     ["nissan-titan", /TITAN/],
     ["nissan-pathfinder", /PATHFINDER/],
+    ["jeep-grand-cherokee", /GRANDCHEROKEE/],
     ["jeep-cherokee", /CHEROKEE/],
   ];
 
@@ -271,14 +276,16 @@ export function classifyVehicle(
   if (/PICKUP|CREWCAB|QUADCAB|DOUBLECAB|FLATBED/.test(text)) return "pickup-other";
 
   if (family && /grand-caravan/.test(family)) return "minivan";
-  if (/MINIVAN|GRANDCARAVAN/.test(text)) return "minivan";
+  if (family && /transit-connect/.test(family)) return "compact-van";
   if (family && /(?:transit|express|e150|e250|e350)/.test(family)) return "full-size-van";
+  if (/MINIVAN|GRANDCARAVAN/.test(text)) return "minivan";
   if (/CARGOVAN|PASSENGERVAN|FULLSIZEVAN|\bVAN\b/.test(text)) return "full-size-van";
 
   if (family && /(?:expedition|tahoe|suburban)/.test(family)) return "suv-full-size";
-  if (family && /(?:explorer|durango|pathfinder|cherokee|equinox)/.test(family)) {
+  if (family && /(?:explorer|durango|pathfinder|grand-cherokee)/.test(family)) {
     return "suv-midsize";
   }
+  if (family && /(?:cherokee|equinox)/.test(family)) return "suv-compact";
   if (/SPORTUTILITY|CROSSOVER|\bSUV\b/.test(text)) return "suv-other";
 
   if (/HATCHBACK/.test(text)) return "passenger-hatchback";
@@ -299,8 +306,160 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 function ratioCloseness(left: number | null, right: number | null): number {
-  if (!left || !right || left <= 0 || right <= 0) return 0.55;
+  if (!left || !right || left <= 0 || right <= 0) return 0.4;
   return Math.exp(-Math.abs(Math.log(left / right)) / 0.75);
+}
+
+type MatchMode = "tight-family" | "family" | "body-class";
+type ConditionBand = "normal" | "repairable" | "terminal" | "unknown";
+type OperabilityBand = "mobile" | "non-operational" | "unknown";
+
+const DEFENSIBLE_BODY_CLASS_FALLBACKS = new Set([
+  "compact-van",
+  "full-size-van",
+  "minivan",
+  "passenger-hatchback",
+  "passenger-sedan",
+  "pickup-light-duty",
+  "pickup-one-ton",
+  "pickup-three-quarter-ton",
+  "suv-compact",
+  "suv-full-size",
+  "suv-midsize",
+]);
+
+function conditionBand(value: GsaVehicleCondition): ConditionBand {
+  if (value === "new" || value === "usable") return "normal";
+  if (value === "repairable") return "repairable";
+  if (value === "salvage" || value === "scrap") return "terminal";
+  return "unknown";
+}
+
+function operabilityBand(value: GsaVehicleOperability): OperabilityBand {
+  if (value === "runs" || value === "runs-and-drives") return "mobile";
+  return value === "non-operational" ? "non-operational" : "unknown";
+}
+
+function conditionCompatible(
+  subject: GsaVehicleCondition,
+  comparable: GsaVehicleCondition,
+  mode: MatchMode,
+): boolean {
+  const left = conditionBand(subject);
+  const right = conditionBand(comparable);
+  if (mode === "body-class") return left === right;
+  if (left === "unknown" || right === "unknown") return true;
+  if (mode === "tight-family") return left === right;
+  if (left === "terminal" || right === "terminal") return left === right;
+  return true;
+}
+
+function operabilityCompatible(
+  subject: GsaVehicleOperability,
+  comparable: GsaVehicleOperability,
+  mode: MatchMode,
+): boolean {
+  const left = operabilityBand(subject);
+  const right = operabilityBand(comparable);
+  if (mode === "body-class") return left === right;
+  if (left === "unknown" || right === "unknown") return true;
+  return left === right;
+}
+
+function classCompatible(subjectClass: string | null, comparableClass: string | null): boolean {
+  return subjectClass === null || comparableClass === null || subjectClass === comparableClass;
+}
+
+function yearCompatible(
+  subjectYear: number | null,
+  comparableYear: number | null,
+  referenceYear: number,
+  mode: MatchMode,
+): boolean {
+  if (subjectYear === null) return mode !== "body-class";
+  if (comparableYear === null) return false;
+  const recent = referenceYear - subjectYear <= 4;
+  const maximumDifference = mode === "tight-family"
+    ? recent ? 2 : 3
+    : mode === "family"
+      ? recent ? 3 : 5
+      : recent ? 1 : 2;
+  return Math.abs(subjectYear - comparableYear) <= maximumDifference;
+}
+
+function mileageCompatible(
+  subjectMileage: number | null,
+  comparableMileage: number | null,
+  mode: MatchMode,
+): boolean {
+  if (subjectMileage === null) return mode !== "body-class";
+  if (comparableMileage === null) return false;
+  const difference = Math.abs(subjectMileage - comparableMileage);
+  const maximumDifference = mode === "tight-family"
+    ? Math.max(20_000, subjectMileage * 0.5)
+    : mode === "family"
+      ? Math.max(40_000, subjectMileage * 0.75)
+      : Math.max(15_000, subjectMileage * 0.35);
+  if (difference > maximumDifference) return false;
+
+  // Ratios are unstable around a near-zero odometer. In that case, retain the
+  // strict absolute ceiling instead of rejecting an otherwise close new unit.
+  if (Math.min(subjectMileage, comparableMileage) < 1_000) {
+    const lowMileageCeiling = mode === "body-class" ? 15_000 : mode === "tight-family" ? 25_000 : 40_000;
+    return Math.max(subjectMileage, comparableMileage) <= lowMileageCeiling;
+  }
+  const ratio = Math.max(
+    subjectMileage / comparableMileage,
+    comparableMileage / subjectMileage,
+  );
+  const maximumRatio = subjectMileage < 25_000
+    ? mode === "tight-family" ? 3 : mode === "family" ? 4 : 2.75
+    : mode === "tight-family" ? 1.75 : mode === "family" ? 2.25 : 1.5;
+  return ratio <= maximumRatio;
+}
+
+function eligibleCandidate(
+  subject: GsaMarketValuationSubject,
+  comp: GsaClosedComparable,
+  subjectClass: string | null,
+  comparableClass: string | null,
+  referenceYear: number,
+  mode: MatchMode,
+): boolean {
+  return classCompatible(subjectClass, comparableClass) &&
+    yearCompatible(subject.year, comp.year, referenceYear, mode) &&
+    mileageCompatible(subject.mileage, comp.mileage, mode) &&
+    conditionCompatible(subject.condition, comp.condition, mode) &&
+    operabilityCompatible(subject.operability, comp.operability, mode);
+}
+
+function canonicalVin(value: string | null | undefined): string | null {
+  const vin = value?.trim().toUpperCase() ?? "";
+  return /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null;
+}
+
+function uniqueComparableRows(
+  subject: GsaMarketValuationSubject,
+  comps: readonly GsaClosedComparable[],
+): GsaClosedComparable[] {
+  const subjectExternalId = externalId(subject);
+  const subjectVin = canonicalVin(subject.vin);
+  const withoutVin: GsaClosedComparable[] = [];
+  const byVin = new Map<string, GsaClosedComparable>();
+  for (const comp of comps) {
+    if (comp.auctionId === subjectExternalId || comp.id === subject.id) continue;
+    const vin = canonicalVin(comp.vin);
+    if (subjectVin !== null && vin === subjectVin) continue;
+    if (vin === null) {
+      withoutVin.push(comp);
+      continue;
+    }
+    const previous = byVin.get(vin);
+    if (!previous || Date.parse(comp.endedAt) > Date.parse(previous.endedAt)) {
+      byVin.set(vin, comp);
+    }
+  }
+  return [...withoutVin, ...byVin.values()];
 }
 
 function preliminaryScore(
@@ -316,23 +475,25 @@ function preliminaryScore(
   const condition = Math.exp(
     -Math.abs(conditionScore(subject.condition) - conditionScore(comp.condition)) / 2.5,
   );
-  return (
-    (familyMatch ? 0.42 : classMatch ? 0.16 : 0) +
-    year * 0.22 +
-    mileage * 0.22 +
-    condition * 0.14
+  const operability = Math.exp(
+    -Math.abs(operabilityScore(subject.operability) - operabilityScore(comp.operability)) / 2,
   );
+  const identity = familyMatch ? 1 : classMatch ? 0.58 : 0;
+  return identity *
+    (0.35 + year * 0.65) *
+    (0.35 + mileage * 0.65) *
+    (0.55 + condition * 0.45) *
+    (0.75 + operability * 0.25);
 }
 
 function matchCandidates(
   subject: GsaMarketValuationSubject,
   comps: readonly GsaClosedComparable[],
+  referenceYear: number,
 ) {
   const subjectFamily = canonicalVehicleFamily(subject);
   const subjectClass = classifyVehicle(subject);
-  const subjectExternalId = externalId(subject);
-  const candidates: Candidate[] = comps
-    .filter((comp) => comp.auctionId !== subjectExternalId && comp.id !== subject.id)
+  const candidates: Candidate[] = uniqueComparableRows(subject, comps)
     .map((comp) => {
     const comparableShape = {
       make: comp.make,
@@ -354,30 +515,61 @@ function matchCandidates(
 
   const exact = candidates.filter(({ comp, family }) => {
     if (!subjectFamily || family !== subjectFamily) return false;
-    if (
-      subject.year === null || comp.year === null ||
-      subject.mileage === null || comp.mileage === null
-    ) return false;
-    return (
-      Math.abs(subject.year - comp.year) <= 5 &&
-      ratioCloseness(subject.mileage, comp.mileage) >= 0.34
+    const comparableClass = classifyVehicle({
+      make: comp.make,
+      modelLabel: comp.modelLabel,
+      title: comp.title,
+      bodyType: comp.bodyType,
+    });
+    return eligibleCandidate(
+      subject,
+      comp,
+      subjectClass,
+      comparableClass,
+      referenceYear,
+      "tight-family",
     );
   });
-  if (exact.length >= 3) {
+  // One or two close comps are more useful than a large set of remote rows.
+  // Sample quantity affects confidence below; it must never force widening.
+  if (exact.length > 0) {
     return { basis: "family-year-mileage" as const, candidates: exact, subjectFamily, subjectClass };
   }
 
-  const family = candidates.filter((candidate) =>
-    subjectFamily !== null && candidate.family === subjectFamily
-  );
+  const family = candidates.filter((candidate) => {
+    if (subjectFamily === null || candidate.family !== subjectFamily) return false;
+    return eligibleCandidate(
+      subject,
+      candidate.comp,
+      subjectClass,
+      candidate.vehicleClass,
+      referenceYear,
+      "family",
+    );
+  });
   if (family.length > 0) {
     return { basis: "family" as const, candidates: family, subjectFamily, subjectClass };
   }
 
-  const vehicleClass = candidates.filter((candidate) =>
-    subjectClass !== null && candidate.vehicleClass === subjectClass
+  const vehicleClass = DEFENSIBLE_BODY_CLASS_FALLBACKS.has(subjectClass ?? "")
+    ? candidates.filter((candidate) =>
+        candidate.vehicleClass === subjectClass && eligibleCandidate(
+          subject,
+          candidate.comp,
+          subjectClass,
+          candidate.vehicleClass,
+          referenceYear,
+          "body-class",
+        )
+      )
+    : [];
+  const distinctFamilies = new Set(
+    vehicleClass.map((candidate) => candidate.family).filter((family) => family !== null),
   );
-  if (vehicleClass.length > 0) {
+  if (
+    vehicleClass.length >= MIN_BODY_CLASS_COMPARABLES &&
+    distinctFamilies.size >= 2
+  ) {
     return { basis: "body-class" as const, candidates: vehicleClass, subjectFamily, subjectClass };
   }
   return { basis: null, candidates: [], subjectFamily, subjectClass };
@@ -450,10 +642,33 @@ function confidenceFor(
   basis: GsaMarketMatchBasis,
   samples: readonly GsaComparableAdjustment[],
 ): number {
-  const cap = basis === "family-year-mileage" ? 0.9 : basis === "family" ? 0.72 : 0.45;
-  const sampleFactor = 0.3 + 0.7 * Math.min(1, Math.log1p(samples.length) / Math.log(13));
+  const cap = basis === "family-year-mileage" ? 0.82 : basis === "family" ? 0.58 : 0.25;
+  const weightTotal = samples.reduce((sum, sample) => sum + sample.weight, 0);
+  const squaredWeightTotal = samples.reduce((sum, sample) => sum + sample.weight ** 2, 0);
+  const effectiveSampleSize = squaredWeightTotal > 0
+    ? weightTotal ** 2 / squaredWeightTotal
+    : 0;
+  const sampleFactor = 0.18 + 0.82 * (1 - Math.exp(-effectiveSampleSize / 4));
   const averageMatch = samples.reduce((sum, sample) => sum + sample.matchScore, 0) / samples.length;
-  return Number(Math.min(cap, cap * sampleFactor * (0.6 + averageMatch * 0.4)).toFixed(4));
+  const quantileInput = samples.map((sample) => ({
+    value: sample.adjustedHighBidCents,
+    weight: sample.weight,
+  }));
+  const median = weightedQuantile(quantileInput, 0.5);
+  const interquantileSpread = weightedQuantile(quantileInput, 0.8) -
+    weightedQuantile(quantileInput, 0.2);
+  const relativeSpread = median > 0 ? interquantileSpread / median : Number.POSITIVE_INFINITY;
+  const dispersionFactor = clamp(1 - Math.max(0, relativeSpread - 0.45) * 0.55, 0.35, 1);
+  const sparseCap = effectiveSampleSize < 1.5
+    ? 0.28
+    : effectiveSampleSize < 2.5
+      ? 0.4
+      : cap;
+  return Number(Math.min(
+    cap,
+    sparseCap,
+    cap * sampleFactor * (0.55 + averageMatch * 0.45) * dispersionFactor,
+  ).toFixed(4));
 }
 
 /**
@@ -469,7 +684,7 @@ export function buildGsaMarketValuation(
   const timestamp = typeof asOf === "string" ? new Date(asOf) : asOf;
   if (!Number.isFinite(timestamp.getTime())) throw new TypeError("asOf must be a valid date.");
   const asOfIso = timestamp.toISOString();
-  const match = matchCandidates(subject, comps);
+  const match = matchCandidates(subject, comps, timestamp.getUTCFullYear());
   const detail = adjustmentDetail(subject, match.subjectFamily, match.subjectClass, match.basis);
 
   if (match.basis === null) {
@@ -501,21 +716,6 @@ export function buildGsaMarketValuation(
   const rankedCandidates = [...match.candidates]
     .sort((left, right) => right.preliminaryScore - left.preliminaryScore);
   const selected = rankedCandidates.slice(0, MAX_COMPARABLES);
-  if (subject.mileage !== null) {
-    const nearestMileageCandidate = match.candidates
-      .filter(({ comp }) => comp.mileage !== null)
-      .sort((left, right) =>
-        Math.abs(left.comp.mileage! - subject.mileage!) -
-          Math.abs(right.comp.mileage! - subject.mileage!) ||
-        right.preliminaryScore - left.preliminaryScore
-      )[0];
-    if (
-      nearestMileageCandidate &&
-      !selected.some(({ comp }) => comp.id === nearestMileageCandidate.comp.id)
-    ) {
-      selected[Math.max(0, selected.length - 1)] = nearestMileageCandidate;
-    }
-  }
   const samples = selected.map(({ comp, preliminaryScore }): GsaComparableAdjustment => {
     const yearFactor = subject.year !== null && comp.year !== null
       ? clamp(Math.exp((subject.year - comp.year) * 0.045), 0.7, 1.4)
@@ -550,6 +750,7 @@ export function buildGsaMarketValuation(
       auctionId: comp.auctionId,
       sourceUrl: comp.sourceUrl,
       title: comp.title,
+      vin: canonicalVin(comp.vin),
       endedAt: comp.endedAt,
       year: comp.year,
       mileage: comp.mileage,

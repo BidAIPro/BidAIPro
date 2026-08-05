@@ -89,5 +89,6 @@ test("fetches the complete date-bounded closed PPMS corpus and excludes terminat
   assert.equal(result.comparables.length, 1);
   assert.equal(result.comparables[0].closedHighBidCents, 1_234_500);
   assert.equal(result.comparables[0].mileage, 90_000);
+  assert.equal(result.comparables[0].vin, "1FT7W2BT0JEC12345");
   assert.equal(result.comparables[0].sourceUrl, "https://gsaauctions.gov/auctions/preview/1001");
 });

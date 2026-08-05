@@ -29,6 +29,8 @@ export interface GsaClosedComparable {
   year: number | null;
   make: string | null;
   modelLabel: string | null;
+  /** Present when the official detail record exposes a valid VIN. */
+  vin?: string | null;
   mileage: number | null;
   bodyType: string | null;
   condition: GsaVehicleCondition;
@@ -347,6 +349,7 @@ export async function fetchClosedGsaVehicleComps(
       year: normalized.year,
       make: normalized.make,
       modelLabel: normalized.modelLabel,
+      vin: normalized.vin,
       mileage: normalized.mileage,
       bodyType: normalized.bodyType,
       condition: normalized.condition,

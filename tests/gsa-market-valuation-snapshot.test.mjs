@@ -9,9 +9,12 @@ import {
 test("loads the generated official GSA valuation snapshot by normalized or external id", () => {
   const snapshot = getGsaMarketValuationSnapshot();
   assert.equal(snapshot.coverage.subjectCount, snapshot.valuations.length);
-  assert.equal(snapshot.coverage.valuedCount, snapshot.coverage.subjectCount);
-  assert.equal(snapshot.coverage.unavailableCount, 0);
-  const first = snapshot.valuations[0];
+  assert.equal(
+    snapshot.coverage.valuedCount + snapshot.coverage.unavailableCount,
+    snapshot.coverage.subjectCount,
+  );
+  assert.ok(snapshot.coverage.unavailableCount > 0);
+  const first = snapshot.valuations.find((valuation) => valuation.status === "available");
   assert.ok(first);
   assert.equal(getGsaMarketValuation(first.subjectAuctionId), first);
   assert.equal(getGsaMarketValuation(first.externalId), first);

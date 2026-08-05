@@ -23,6 +23,9 @@ test("live bid refresh updates auction facts and recalculates modeled all-in cos
   assert.equal(updated.endsAt, "2026-08-05T21:15:00.000Z");
   assert.equal(updated.lastCheckedAt, "2026-08-05T21:14:45.000Z");
   assert.equal(updated.vehicle, original.vehicle);
+  assert.equal(updated.forecast.asOf, "2026-08-05T21:14:45.000Z");
+  assert.equal(updated.forecast.currentBidAtForecastCents, 1_250_000);
+  assert.ok(updated.forecast.expectedCents >= 1_250_000);
   assert.equal(
     updated.assessment.allInAtCurrentBidCents,
     updated.assessment.costs.totalAllInCents,

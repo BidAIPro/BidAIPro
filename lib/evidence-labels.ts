@@ -13,8 +13,14 @@ export function valuationEvidenceCountLabel(
 }
 
 export function closeForecastEvidenceLabel(
-  forecast: Pick<ClosingForecast, "sampleSize">,
+  forecast: Pick<ClosingForecast, "sampleSize" | "status" | "provenance">,
 ) {
-  if (forecast.sampleSize === 0) return "Close forecast · no matched comps";
-  return `Close forecast · ${integer.format(forecast.sampleSize)} matched ${forecast.sampleSize === 1 ? "comp" : "comps"}`;
+  if (forecast.status === "insufficient") return "Projected close · evidence pending";
+  if (
+    forecast.sampleSize === 0 &&
+    forecast.provenance === "market-reference-heuristic"
+  ) {
+    return "Projected close · market-value anchor";
+  }
+  return `Projected close · ${integer.format(forecast.sampleSize)} similar closed ${forecast.sampleSize === 1 ? "outcome" : "outcomes"}`;
 }

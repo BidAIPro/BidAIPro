@@ -43,6 +43,17 @@ export function mergeOpportunityFeed(
         alternate.valuation,
         merged.lastCheckedAt,
       );
+    } else if (
+      merged.valuation.status !== "unavailable" &&
+      merged.forecast.status === "insufficient"
+    ) {
+      // A newer catalog observation should update the projected close instead
+      // of erasing the forecast that was attached to the prior enriched row.
+      merged = applyValuationToOpportunity(
+        merged,
+        merged.valuation,
+        merged.lastCheckedAt,
+      );
     }
     return merged;
   });

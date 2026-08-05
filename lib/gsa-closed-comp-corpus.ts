@@ -56,6 +56,7 @@ export function validateGsaClosedCompCorpus(
   for (const value of corpus.comparables) {
     const comp = record(value);
     const sourceUrl = typeof comp?.sourceUrl === "string" ? comp.sourceUrl : "";
+    const vin = comp?.vin;
     let officialSource = false;
     try {
       const parsed = new URL(sourceUrl);
@@ -67,7 +68,10 @@ export function validateGsaClosedCompCorpus(
       !comp || typeof comp.auctionId !== "string" || !comp.auctionId ||
       ids.has(comp.auctionId) || !Number.isSafeInteger(comp.closedHighBidCents) ||
       Number(comp.closedHighBidCents) <= 0 ||
-      !Number.isFinite(Date.parse(String(comp.endedAt))) || !officialSource
+      !Number.isFinite(Date.parse(String(comp.endedAt))) || !officialSource ||
+      (vin !== undefined && vin !== null && (
+        typeof vin !== "string" || !/^[A-HJ-NPR-Z0-9]{17}$/i.test(vin.trim())
+      ))
     ) {
       throw new TypeError("The GSA closed-comp corpus contains an invalid comparable.");
     }

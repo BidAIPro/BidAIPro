@@ -1,5 +1,6 @@
 export type ISODateTime = string;
 export type MoneyCents = number;
+export type AuctionSource = "gsa-auctions" | "gsa-fleet";
 
 export type AuctionStatus =
   | "preview"
@@ -101,8 +102,17 @@ export interface ValuationReference {
 export type ForecastStatus = "available" | "reference-only" | "insufficient";
 export type ForecastProvenance =
   | "historical-gsa"
+  | "market-reference-heuristic"
   | "mock-reference"
   | "insufficient";
+
+export interface ClosingOutcomeAnchor {
+  id: string;
+  adjustedCloseCents: MoneyCents;
+  matchScore?: number;
+  weight?: number;
+  exactModel?: boolean;
+}
 
 /** A closing-price forecast, intentionally separate from vehicle value. */
 export interface ClosingForecast {
@@ -114,10 +124,18 @@ export interface ClosingForecast {
   modelVersion: string;
   method: string;
   confidence: number;
+  /** Seconds from asOf to the then-current scheduled close. */
+  horizonSeconds?: number | null;
+  /** Official bid used to calculate this point-in-time forecast. */
+  currentBidAtForecastCents?: MoneyCents | null;
   sampleSize: number;
   exactModelCount: number;
   curveCount: number;
+  /** Subject-auction observations are not comparable-outcome samples. */
+  subjectObservationCount?: number;
   evidenceIds: readonly string[];
+  /** Bounded adjusted terminal outcomes retained for point-in-time refreshes. */
+  outcomeAnchors?: readonly ClosingOutcomeAnchor[];
   provenance: ForecastProvenance;
   reasonCodes: readonly string[];
 }
@@ -164,7 +182,7 @@ export interface DealAssessment {
 }
 
 export interface AuctionOpportunityProvenance {
-  listing: "Official GSA Auctions";
+  listing: "Official GSA Auctions" | "Official GSA Fleet Marketplace";
   listingObservedAt: ISODateTime;
   valuation: "mock-reference" | "provider" | "unavailable";
 }
@@ -177,13 +195,19 @@ export interface AuctionOpportunity {
   id: string;
   externalId: string;
   saleLotNumber: string;
-  source: "gsa-auctions";
+  source: AuctionSource;
   title: string;
   sourceUrl: string;
   imageUrl: string;
   images: readonly string[];
-  imageSource: "gsa-auctions";
+  imageSource: AuctionSource;
   status: AuctionStatus;
+  /** Scheduled start; useful for coming-soon and in-person sales. */
+  startsAt?: ISODateTime | null;
+  saleNumber?: string | null;
+  /** Upstream sale channel; only Internet rows expose online bid tracking. */
+  saleType?: "internet" | "live" | "unknown";
+  onlineBidding?: boolean;
   currentBidCents: MoneyCents | null;
   bidderCount: number | null;
   endsAt: ISODateTime | null;

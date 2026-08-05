@@ -31,7 +31,7 @@ import { VehicleGallery } from "./vehicle-gallery";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const OPPORTUNITY_REQUEST_TIMEOUT_MS = 8_000;
+const OPPORTUNITY_REQUEST_TIMEOUT_MS = 35_000;
 const MARKET_VALUE_REQUEST_TIMEOUT_MS = 10_000;
 const LIVE_BID_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -87,11 +87,17 @@ export function LiveVehicleDetail() {
         if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
         const payload = await response.json() as {
           data?: AuctionOpportunity[];
-          meta?: { sourceHealth?: { liveBidPolling?: boolean } | null };
+          meta?: { sourceHealth?: {
+            liveBidPolling?: boolean;
+            liveBidPollingBySource?: Partial<Record<"gsa-auctions" | "gsa-fleet", boolean>>;
+          } | null };
         };
         const match = payload.data?.find((item) => item.id === requestedId || item.externalId === requestedId) ?? null;
         setAuction(match);
-        setLiveBidPolling(payload.meta?.sourceHealth?.liveBidPolling === true);
+        setLiveBidPolling(Boolean(match && (
+          payload.meta?.sourceHealth?.liveBidPollingBySource?.[match.source] === true ||
+          (match.source === "gsa-auctions" && payload.meta?.sourceHealth?.liveBidPolling === true)
+        )));
         setStatus(match ? "ready" : "missing");
       } catch {
         if (mounted) setStatus("error");
@@ -107,7 +113,9 @@ export function LiveVehicleDetail() {
     };
   }, [requestedId]);
 
-  const marketValueExternalId = auction?.externalId ?? null;
+  const marketValueExternalId = auction?.source === "gsa-fleet"
+    ? null
+    : auction?.externalId ?? null;
 
   useEffect(() => {
     if (!marketValueExternalId || marketValueAttempted.current === marketValueExternalId) return;
@@ -167,7 +175,12 @@ export function LiveVehicleDetail() {
   }, [marketValueExternalId]);
 
   useEffect(() => {
-    if (!liveBidPolling || !auction?.id.startsWith("live-") || !auction.endsAt || !/^\d+$/.test(auction.externalId)) {
+    const fleetPollable = auction?.source === "gsa-fleet" &&
+      auction.status === "active" && auction.onlineBidding !== false &&
+      Boolean(auction.vehicle.vin && auction.saleNumber);
+    const auctionsPollable = auction?.source === "gsa-auctions" &&
+      auction.id.startsWith("live-") && /^\d+$/.test(auction.externalId);
+    if (!liveBidPolling || !auction?.endsAt || (!fleetPollable && !auctionsPollable)) {
       return;
     }
 
@@ -194,16 +207,28 @@ export function LiveVehicleDetail() {
       );
       void (async () => {
         try {
-          const response = await fetch(
-            publicApiUrl(`/api/live-bid?id=${encodeURIComponent(auction.externalId)}`),
-            { signal: controller.signal },
-          );
+          const params = new URLSearchParams({ source: auction.source });
+          if (auction.source === "gsa-fleet") {
+            params.set("vin", auction.vehicle.vin!);
+            params.set("saleNumber", auction.saleNumber!);
+          } else {
+            params.set("id", auction.externalId);
+          }
+          const response = await fetch(publicApiUrl(`/api/live-bid?${params}`), {
+            signal: controller.signal,
+          });
           if (!response.ok) throw new Error(`Live bid feed returned ${response.status}`);
           const payload = await response.json() as { data?: LiveBidSnapshot };
-          if (!payload.data || payload.data.externalId !== auction.externalId) {
+          if (!payload.data) {
             throw new Error("Live bid feed returned the wrong auction");
           }
-          setAuction((current) => current ? applyLiveBidSnapshot(current, payload.data!) : current);
+          const snapshot = auction.source === "gsa-fleet" && payload.data.externalId !== auction.externalId
+            ? { ...payload.data, externalId: auction.externalId }
+            : payload.data;
+          if (snapshot.externalId !== auction.externalId) {
+            throw new Error("Live bid feed returned the wrong auction");
+          }
+          setAuction((current) => current ? applyLiveBidSnapshot(current, snapshot) : current);
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError") return;
         } finally {
@@ -255,7 +280,7 @@ export function LiveVehicleDetail() {
 
         <section className="detail-hero">
           <div className="detail-photo">
-            <VehicleGallery images={[auction.imageUrl, ...(auction.images ?? [])]} title={auction.title} fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make} ${auction.vehicle.model}`} fallbackCopy="Official photo unavailable here. Open the GSA record to view its complete gallery." variant="detail" priority />
+            <VehicleGallery images={[auction.imageUrl, ...(auction.images ?? [])]} title={auction.title} fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make} ${auction.vehicle.model}`} fallbackCopy="Official photo unavailable here. Open the GSA record to view its complete gallery." variant="detail" priority lazyGalleryUrl={auction.source === "gsa-fleet" && auction.vehicle.vin && auction.saleNumber ? publicApiUrl(`/api/gsa/fleet/vehicle?vin=${encodeURIComponent(auction.vehicle.vin)}&saleNumber=${encodeURIComponent(auction.saleNumber)}`) : undefined} />
             <div className="detail-photo-overlay" />
             <span className="official-image-label"><BadgeCheck size={13} /> Official listing media</span>
             <div className="detail-photo-meta"><span><MapPin size={13} /> {auction.location.city}, {auction.location.state}</span><span><Gauge size={13} /> {mileage(auction)} · {odometerStatusLabel(auction.vehicle.odometerStatus)}</span></div>

@@ -24,6 +24,8 @@ export type VehicleGalleryProps = {
   priority?: boolean;
   className?: string;
   initialIndex?: number;
+  /** Optional first-party endpoint used to load the complete official gallery on demand. */
+  lazyGalleryUrl?: string;
 };
 
 const focusableSelector = [
@@ -54,8 +56,15 @@ export function VehicleGallery({
   priority = false,
   className,
   initialIndex = 0,
+  lazyGalleryUrl,
 }: VehicleGalleryProps) {
-  const galleryImages = useMemo(() => normalizedImages(images), [images]);
+  const [lazyImages, setLazyImages] = useState<string[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const galleryAttemptedRef = useRef(false);
+  const galleryImages = useMemo(
+    () => normalizedImages([...images, ...lazyImages]),
+    [images, lazyImages],
+  );
   const boundedInitialIndex = Math.max(0, Math.min(initialIndex, galleryImages.length - 1));
   const [activeIndex, setActiveIndex] = useState(boundedInitialIndex);
   const [isOpen, setIsOpen] = useState(false);
@@ -107,6 +116,26 @@ export function VehicleGallery({
       trigger?.focus();
     };
   }, [dialogOpen]);
+
+  const loadLazyGallery = useCallback(() => {
+    if (!lazyGalleryUrl || galleryAttemptedRef.current) return;
+    galleryAttemptedRef.current = true;
+    const controller = new AbortController();
+    setGalleryLoading(true);
+    void fetch(lazyGalleryUrl, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Gallery returned ${response.status}`);
+        return response.json() as Promise<{ data?: { images?: unknown } }>;
+      })
+      .then((payload) => {
+        if (!Array.isArray(payload.data?.images)) return;
+        setLazyImages(payload.data.images.filter(
+          (value): value is string => typeof value === "string" && /^https?:\/\//i.test(value),
+        ));
+      })
+      .catch(() => undefined)
+      .finally(() => setGalleryLoading(false));
+  }, [lazyGalleryUrl]);
 
   function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
@@ -188,7 +217,7 @@ export function VehicleGallery({
             <p id={descriptionId}>Official GSA listing photos. Use the arrow keys to move between photos.</p>
           </div>
           <span className="vehicle-gallery__position" aria-live="polite" aria-atomic="true">
-            Photo {displayedIndex + 1} of {imageCount}
+            {galleryLoading ? "Loading official gallery…" : `Photo ${displayedIndex + 1} of ${imageCount}`}
           </span>
           <button
             ref={closeButtonRef}
@@ -280,7 +309,10 @@ export function VehicleGallery({
         ref={triggerRef}
         className="vehicle-gallery__trigger"
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={() => {
+          setIsOpen(true);
+          loadLazyGallery();
+        }}
         aria-haspopup="dialog"
         aria-label={`Open ${title} photo gallery${imageCount > 1 ? ` with ${imageCount} photos` : ""}`}
       >

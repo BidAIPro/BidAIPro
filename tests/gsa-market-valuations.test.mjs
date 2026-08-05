@@ -41,6 +41,7 @@ function comp(id, overrides = {}) {
     year: 2017,
     make: "FORD MOTOR CO",
     modelLabel: "F250",
+    vin: null,
     mileage: 110_000,
     bodyType: "pickup",
     condition: "usable",
@@ -70,6 +71,27 @@ test("canonicalizes common noisy model families and defensible vehicle classes",
     title: "2019 Chevrolet Express Passenger Van",
     bodyType: "van",
   })), "full-size-van");
+  assert.equal(canonicalVehicleFamily(subject({
+    title: "2021 Ford Transit Connect Cargo Van",
+    modelLabel: "Transit Connect",
+  })), "ford-transit-connect");
+  assert.equal(canonicalVehicleFamily(subject({
+    make: "Jeep",
+    title: "2020 Jeep Grand Cherokee",
+    modelLabel: "Grand Cherokee",
+  })), "jeep-grand-cherokee");
+  assert.notEqual(
+    canonicalVehicleFamily(subject({
+      make: "Jeep",
+      title: "2020 Jeep Grand Cherokee",
+      modelLabel: "Grand Cherokee",
+    })),
+    canonicalVehicleFamily(subject({
+      make: "Jeep",
+      title: "2020 Jeep Cherokee",
+      modelLabel: "Cherokee",
+    })),
+  );
 });
 test("produces weighted ranges from family/year/mileage comps without using the subject bid", () => {
   const comps = [
@@ -95,15 +117,13 @@ test("produces weighted ranges from family/year/mileage comps without using the 
 test("excludes the subject auction and publishes the closest available mileage first", () => {
   const valuation = buildGsaMarketValuation(subject(), [
     comp(9001, { closedHighBidCents: 99_000_000, mileage: 100_000 }),
-    ...Array.from({ length: 31 }, (_, index) =>
-      comp(2_000 + index, { mileage: 150_000 + index * 1_000 })),
-    // Its older year and poor condition would place it outside the top 30 by
-    // overall score, but it is still the nearest available odometer match.
-    comp(1002, { year: 2013, mileage: 104_000, condition: "scrap" }),
+    ...Array.from({ length: 20 }, (_, index) =>
+      comp(2_000 + index, { mileage: 120_000 + index * 1_000 })),
+    comp(1002, { year: 2017, mileage: 104_000 }),
   ], asOf);
 
   assert.equal(valuation.status, "available");
-  assert.equal(valuation.sampleSize, 30);
+  assert.equal(valuation.sampleSize, 15);
   assert.equal(valuation.comparables[0].auctionId, "1002");
   assert.equal(valuation.comparables[0].mileageDifference, 4_000);
   assert.ok(valuation.comparables[0].mileageCloseness > valuation.comparables[1].mileageCloseness);
@@ -122,22 +142,148 @@ test("uses a visibly low-confidence same-class fallback rather than calling it a
       mileage: 60_000,
       bodyType: "van",
     }),
-    [comp(2001, {
-      title: "2019 Chevrolet Express Cargo Van",
-      year: 2019,
-      make: "Chevrolet",
-      modelLabel: "Express",
-      mileage: 80_000,
-      bodyType: "van",
-    })],
+    [
+      comp(2001, {
+        title: "2020 Chevrolet Express Cargo Van",
+        year: 2020,
+        make: "Chevrolet",
+        modelLabel: "Express",
+        mileage: 65_000,
+        bodyType: "van",
+      }),
+      comp(2002, {
+        title: "2021 Ford E-350 Cargo Van",
+        year: 2021,
+        make: "Ford",
+        modelLabel: "E350",
+        mileage: 70_000,
+        bodyType: "van",
+      }),
+      comp(2003, {
+        title: "2020 GMC Savana Cargo Van",
+        year: 2020,
+        make: "GMC",
+        modelLabel: "Savana",
+        mileage: 72_000,
+        bodyType: "van",
+      }),
+    ],
     asOf,
   );
 
   assert.equal(valuation.status, "available");
   assert.equal(valuation.matchBasis, "body-class");
-  assert.ok(valuation.confidence <= 0.45);
+  assert.ok(valuation.confidence <= 0.25);
   assert.match(valuation.matchLabel, /Same vehicle class only/);
   assert.match(valuation.provenanceNote, /not an exact-model/i);
+});
+
+test("keeps one close newer-vehicle comp instead of widening to remote family rows", () => {
+  const valuation = buildGsaMarketValuation(subject({
+    id: "gsa:ppms:new-ram",
+    externalId: "new-ram",
+    title: "2023 Ram 2500",
+    year: 2023,
+    make: "Ram",
+    modelLabel: "2500",
+    mileage: 10_790,
+  }), [
+    comp(3001, {
+      title: "2023 Ram 2500 Tradesman",
+      year: 2023,
+      make: "Ram",
+      modelLabel: "2500",
+      mileage: 22_595,
+    }),
+    ...Array.from({ length: 20 }, (_, index) => comp(3_100 + index, {
+      title: "2015 Ram 2500",
+      year: 2015,
+      make: "Ram",
+      modelLabel: "2500",
+      mileage: 100_000 + index * 2_000,
+    })),
+  ], asOf);
+
+  assert.equal(valuation.status, "available");
+  assert.equal(valuation.matchBasis, "family-year-mileage");
+  assert.equal(valuation.sampleSize, 1);
+  assert.equal(valuation.comparables[0].auctionId, "3001");
+  assert.ok(valuation.confidence <= 0.28);
+});
+
+test("rejects family rows with remote years, mileage, condition, or a conflicting class", () => {
+  const remote = buildGsaMarketValuation(subject({
+    id: "gsa:ppms:remote-ram",
+    externalId: "remote-ram",
+    title: "2023 Ram 2500",
+    year: 2023,
+    make: "Ram",
+    modelLabel: "2500",
+    mileage: 10_790,
+  }), [
+    comp(4001, {
+      title: "2015 Ram 2500",
+      year: 2015,
+      make: "Ram",
+      modelLabel: "2500",
+      mileage: 120_000,
+    }),
+    comp(4002, {
+      title: "2023 Ram 2500 Salvage",
+      year: 2023,
+      make: "Ram",
+      modelLabel: "2500",
+      mileage: 12_000,
+      condition: "salvage",
+    }),
+  ], asOf);
+  const transit = buildGsaMarketValuation(subject({
+    id: "gsa:ppms:transit",
+    externalId: "transit",
+    title: "2021 Ford Transit Cargo Van",
+    year: 2021,
+    make: "Ford",
+    modelLabel: "Transit",
+    mileage: 11_081,
+    bodyType: "van",
+  }), [comp(4003, {
+    title: "2021 Ford Transit Connect Cargo Van",
+    year: 2021,
+    make: "Ford",
+    modelLabel: "Transit Connect",
+    mileage: 12_500,
+    bodyType: "van",
+  })], asOf);
+
+  assert.equal(remote.status, "unavailable");
+  assert.equal(transit.status, "unavailable");
+});
+
+test("counts repeated VIN observations once and keeps the latest terminal result", () => {
+  const repeatedVin = "1FT7W2BT0JEC12345";
+  const valuation = buildGsaMarketValuation(subject(), [
+    comp(5001, { vin: repeatedVin, endedAt: "2026-07-01T15:00:00.000Z" }),
+    comp(5002, { vin: repeatedVin, endedAt: "2026-07-20T15:00:00.000Z" }),
+    comp(5003, { vin: "1FT7W2BT0JEC54321", endedAt: "2026-07-10T15:00:00.000Z" }),
+  ], asOf);
+
+  assert.equal(valuation.status, "available");
+  assert.equal(valuation.sampleSize, 2);
+  assert.equal(valuation.comparables.some((sample) => sample.auctionId === "5001"), false);
+  assert.equal(valuation.comparables.some((sample) => sample.auctionId === "5002"), true);
+});
+
+test("penalizes dispersed adjusted outcomes in confidence", () => {
+  const clustered = buildGsaMarketValuation(subject(), [
+    1_000_000, 1_050_000, 1_100_000, 1_150_000, 1_200_000,
+  ].map((closedHighBidCents, index) => comp(6_000 + index, { closedHighBidCents })), asOf);
+  const dispersed = buildGsaMarketValuation(subject(), [
+    100_000, 200_000, 1_000_000, 3_000_000, 5_000_000,
+  ].map((closedHighBidCents, index) => comp(6_100 + index, { closedHighBidCents })), asOf);
+
+  assert.equal(clustered.status, "available");
+  assert.equal(dispersed.status, "available");
+  assert.ok(clustered.confidence > dispersed.confidence);
 });
 
 test("builds and validates a complete snapshot and rejects subject-bid leakage", () => {

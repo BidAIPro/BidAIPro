@@ -12,8 +12,12 @@ test("keeps valuation and close-forecast evidence counts explicitly separate", (
     "30 valuation comps used",
   );
   assert.equal(
-    closeForecastEvidenceLabel({ sampleSize: 0 }),
-    "Close forecast · no matched comps",
+    closeForecastEvidenceLabel({
+      sampleSize: 0,
+      status: "reference-only",
+      provenance: "market-reference-heuristic",
+    }),
+    "Projected close · market-value anchor",
   );
 });
 
@@ -23,7 +27,11 @@ test("uses provider-neutral wording for non-auction market evidence", () => {
     "1 market observation",
   );
   assert.equal(
-    closeForecastEvidenceLabel({ sampleSize: 4 }),
-    "Close forecast · 4 matched comps",
+    closeForecastEvidenceLabel({
+      sampleSize: 4,
+      status: "reference-only",
+      provenance: "market-reference-heuristic",
+    }),
+    "Projected close · 4 similar closed outcomes",
   );
 });

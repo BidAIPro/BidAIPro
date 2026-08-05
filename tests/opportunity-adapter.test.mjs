@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { discoveryToOpportunity } from "../lib/opportunity-adapter.ts";
+import {
+  applyValuationToOpportunity,
+  discoveryToOpportunity,
+} from "../lib/opportunity-adapter.ts";
 
 const observedAt = "2026-08-05T04:00:00.000Z";
 
@@ -91,4 +94,29 @@ test("missing source facts remain unavailable instead of becoming zero-valued de
   assert.equal(opportunity.endsAt, null);
   assert.equal(opportunity.assessment.status, "insufficient");
   assert.equal(opportunity.assessment.safeMaxBidCents, null);
+});
+
+test("attaching a numeric valuation immediately creates a reference projected close", () => {
+  const opportunity = discoveryToOpportunity(
+    discovery({ endsAt: "2026-08-07T04:00:00.000Z" }),
+    observedAt,
+  );
+  const valued = applyValuationToOpportunity(opportunity, {
+    status: "reference-only",
+    provider: "Official similar sale outcomes",
+    providerKind: "market-comps",
+    valuationType: "auction-comp",
+    lowCents: 1_500_000,
+    medianCents: 1_800_000,
+    highCents: 2_100_000,
+    asOf: observedAt,
+    confidence: 0.7,
+    sampleSize: 12,
+    provenanceNote: "Test-only valuation evidence.",
+  });
+
+  assert.equal(valued.forecast.status, "reference-only");
+  assert.equal(valued.forecast.sampleSize, 0);
+  assert.ok(valued.forecast.expectedCents >= valued.currentBidCents);
+  assert.equal(valued.assessment.expectedCloseCents, valued.forecast.expectedCents);
 });

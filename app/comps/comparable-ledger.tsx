@@ -7,6 +7,7 @@ import { publicApiUrl } from "../../lib/public-api";
 
 interface ComparableRow {
   id: string;
+  source_key: "gsa-auctions" | "gsa-fleet";
   canonical_url: string | null;
   year: number;
   make: string;
@@ -17,6 +18,8 @@ interface ComparableRow {
   state: string | null;
   closed_high_bid_cents: number;
   awarded_price_cents: number | null;
+  comparable_price_cents: number;
+  price_basis: "official-awarded-price" | "terminal-high-bid";
   award_status: string;
   outcome_status: string;
   ended_at: string;
@@ -75,8 +78,8 @@ export function ComparableLedger() {
         <section className="ledger-hero">
           <p className="eyebrow"><span /> Outcome evidence</p>
           <h1>Comparable ledger</h1>
-          <p>Closed GSA observations collected by this installation, with high bids kept separate from authoritative awarded prices.</p>
-          <div className="ledger-guardrail"><ShieldCheck size={18} /><span><strong>Semantics matter</strong> A closed high bid is not proof that the reserve was met, payment cleared, or an award occurred.</span></div>
+          <p>Closed GSA Auctions high bids and confirmed GSA Fleet Sold/Awarded outcomes, with the two price meanings kept explicit.</p>
+          <div className="ledger-guardrail"><ShieldCheck size={18} /><span><strong>Semantics matter</strong> GSA Auctions high bids are not proof of award. GSA Fleet rows enter the awarded-price column only when the official outcome is Sold or Awarded.</span></div>
         </section>
 
         <section className="ledger-panel">
@@ -84,15 +87,16 @@ export function ComparableLedger() {
           {rows.length > 0 ? (
             <div className="ledger-table-wrap">
               <table className="ledger-table">
-                <thead><tr><th>Vehicle</th><th>Mileage</th><th>Location</th><th>Closed high bid</th><th>Awarded price</th><th>Outcome</th><th>Ended</th><th /></tr></thead>
+                <thead><tr><th>Vehicle</th><th>Source</th><th>Mileage</th><th>Location</th><th>Closed high bid</th><th>Awarded price</th><th>Outcome</th><th>Ended</th><th /></tr></thead>
                 <tbody>{rows.map((row) => (
                   <tr key={row.id}>
                     <td><strong>{row.year} {row.make} {row.model}</strong><span>{row.trim ?? row.condition ?? "Details pending"}</span></td>
+                    <td><span className="ledger-status">{row.source_key === "gsa-fleet" ? "GSA Fleet" : "GSA Auctions"}</span></td>
                     <td><span className="ledger-icon-value"><Gauge size={13} />{row.mileage === null ? "Unknown" : `${integer.format(row.mileage)} mi`}</span></td>
                     <td><span className="ledger-icon-value"><MapPin size={13} />{row.state ?? "Unknown"}</span></td>
-                    <td><strong>{money.format(row.closed_high_bid_cents / 100)}</strong></td>
+                    <td>{row.closed_high_bid_cents > 0 ? <strong>{money.format(row.closed_high_bid_cents / 100)}</strong> : <em>Not published</em>}</td>
                     <td>{row.awarded_price_cents === null ? <em>Unconfirmed</em> : <strong>{money.format(row.awarded_price_cents / 100)}</strong>}</td>
-                    <td><span className="ledger-status">{row.outcome_status.replaceAll("-", " ")}</span></td>
+                    <td><span className="ledger-status">{row.price_basis === "official-awarded-price" ? "confirmed award" : "terminal high bid"}</span></td>
                     <td>{new Date(row.ended_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
                     <td>{row.canonical_url ? <a href={row.canonical_url} target="_blank" rel="noreferrer" aria-label="Open official record"><ExternalLink size={15} /></a> : null}</td>
                   </tr>

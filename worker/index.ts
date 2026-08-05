@@ -2,7 +2,15 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { runClosingWindowRefresh } from "../lib/gsa-closing-refresh";
+import { runGsaFleetClosingWindowRefresh } from "../lib/gsa-fleet-closing-refresh";
 import { syncClosedGsaVehicleComps } from "../lib/gsa-closed-comp-sync";
+import { fetchGsaFleetActiveListings } from "../lib/gsa-fleet-client";
+import {
+  GSA_FLEET_ACTIVE_SOURCE_CHECK_SCOPE,
+  persistGsaFleetActiveListings,
+  recordGsaFleetSourceFailure,
+  syncClosedGsaFleetOutcomes,
+} from "../lib/gsa-fleet-persistence";
 import { getGsaVehicleAuctions } from "../lib/gsa-client";
 import { persistGsaDiscovery, recordGsaSourceFailure } from "../lib/gsa-persistence";
 
@@ -45,9 +53,20 @@ const worker = {
 
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     if (controller.cron === "* * * * *") {
-      await runClosingWindowRefresh(env.DB, {
-        sleep: (delayMs) => scheduler.wait(delayMs),
-      });
+      const refreshes = await Promise.allSettled([
+        runClosingWindowRefresh(env.DB, {
+          sleep: (delayMs) => scheduler.wait(delayMs),
+        }),
+        runGsaFleetClosingWindowRefresh(env.DB, {
+          sleep: (delayMs) => scheduler.wait(delayMs),
+        }),
+      ]);
+      const failures = refreshes
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "One or more closing-window refreshes failed.");
+      }
       return;
     }
 
@@ -63,6 +82,42 @@ const worker = {
       } catch {
         // The sync records its own failed source check. It runs on a separate
         // cron and must never interrupt active-catalog or closing-bid refreshes.
+      }
+      return;
+    }
+
+    if (controller.cron === "19 * * * *") {
+      const checkedAt = new Date();
+      const startedMs = Date.now();
+      try {
+        const snapshot = await fetchGsaFleetActiveListings({
+          forceRefresh: true,
+          now: checkedAt,
+          signal: AbortSignal.timeout(45_000),
+        });
+        await persistGsaFleetActiveListings(env.DB, snapshot, {
+          latencyMs: Date.now() - startedMs,
+        });
+      } catch (error) {
+        await recordGsaFleetSourceFailure(env.DB, error, {
+          scope: GSA_FLEET_ACTIVE_SOURCE_CHECK_SCOPE,
+          checkedAt: checkedAt.toISOString(),
+          latencyMs: Date.now() - startedMs,
+        });
+      }
+      return;
+    }
+
+    if (controller.cron === "49 * * * *") {
+      try {
+        await syncClosedGsaFleetOutcomes(env.DB, {
+          bootstrapDays: 7,
+          overlapDays: 2,
+          signal: AbortSignal.timeout(45_000),
+        });
+      } catch {
+        // The Fleet sync records its own failed source check. Keep this source
+        // independent from both active catalogs and closing-window refreshes.
       }
       return;
     }

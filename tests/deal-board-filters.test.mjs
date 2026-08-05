@@ -8,16 +8,18 @@ import {
   normalizeAuctionState,
 } from "../app/components/deal-board-filters.ts";
 
-test("builds a counted state menu from active auctions only", () => {
+test("builds a counted state menu from active and coming-soon auctions", () => {
   const auctions = [
     { status: "active", location: { state: "tx" } },
     { status: "active", location: { state: "TX" } },
     { status: "active", location: { state: "OK" } },
+    { status: "preview", location: { state: "FL" } },
     { status: "active", location: { state: "\u2014" } },
     { status: "closed", location: { state: "FL" } },
   ];
 
   assert.deepEqual(buildStateFilterOptions(auctions), [
+    { value: "FL", count: 1 },
     { value: "OK", count: 1 },
     { value: "TX", count: 2 },
   ]);

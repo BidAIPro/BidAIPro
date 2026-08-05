@@ -175,6 +175,10 @@ img { display: block; max-width: 100%; }
 .result-line span { color: #87948e; font-size: 8px; }
 
 .opportunity-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.show-more-opportunities { display: flex; grid-column: 1 / -1; align-items: center; justify-content: center; gap: 12px; padding: 18px; color: #718079; background: #f6f9f7; border: 1px dashed #cddad5; border-radius: 11px; font-size: 12px; }
+.show-more-opportunities button { min-height: 38px; padding: 0 15px; color: #fff; background: #173f32; border: 0; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.show-more-opportunities button:hover { background: #0f5c47; }
+.show-more-opportunities button:focus-visible { outline: 3px solid #8bd5be; outline-offset: 2px; }
 .opportunity-card { min-width: 0; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; box-shadow: var(--shadow-sm); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
 .opportunity-card:hover { border-color: #c8d4cf; box-shadow: 0 12px 34px rgba(19,40,31,.08); transform: translateY(-1px); }
 .vehicle-media { position: relative; height: 188px; overflow: hidden; background: #dfe5e2; }
@@ -572,6 +576,7 @@ img { display: block; max-width: 100%; }
   .metric-grid article strong { font-size: 18px; }
   .board-toolbar { gap: 5px; }
   .quick-filters { width: calc(100vw - 96px); }
+  .show-more-opportunities { flex-direction: column; text-align: center; }
   .vehicle-media { height: 190px !important; }
   .vehicle-content { padding: 14px 13px 12px; }
   .vehicle-heading h2 { font-size: 14px; }

@@ -16,7 +16,7 @@ export function buildStateFilterOptions(
 ): StateFilterOption[] {
   const counts = new Map<string, number>();
   for (const auction of auctions) {
-    if (auction.status !== "active") continue;
+    if (auction.status !== "active" && auction.status !== "preview") continue;
     const state = normalizeAuctionState(auction.location.state);
     if (!state) continue;
     counts.set(state, (counts.get(state) ?? 0) + 1);

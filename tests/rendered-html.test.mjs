@@ -64,7 +64,7 @@ test("server-renders a complete vehicle underwriting dossier", async () => {
   assert.match(html, /KBB/i);
   assert.match(html, /Comparable outcome ledger/i);
   assert.match(html, /Forecast evidence/i);
-  assert.match(html, /Close forecast/i);
+  assert.match(html, /Projected close/i);
   assert.match(html, /Open official auction/i);
 });
 
@@ -73,8 +73,8 @@ test("server-renders the comparable outcome ledger with explicit award semantics
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Comparable ledger/i);
-  assert.match(html, /closed high bid is not proof/i);
-  assert.match(html, /hourly official closed-catalog sync adds terminal high bids/i);
+  assert.match(html, /high bids are not proof of award/i);
+  assert.match(html, /GSA Fleet rows enter the awarded-price column only when the official outcome is Sold or Awarded/i);
 });
 
 test("keeps social metadata and database capability wired", async () => {
@@ -109,10 +109,10 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /OPPORTUNITY_REQUEST_TIMEOUT_MS/);
   assert.match(board, /LIVE_BID_REQUEST_TIMEOUT_MS/);
   assert.match(board, /controller\.abort\(\)/);
-  assert.match(board, /Vehicle catalog temporarily unavailable/);
+  assert.match(board, /Vehicle catalogs temporarily unavailable/);
   assert.match(board, /className={`state-select/);
-  assert.match(board, /All states \(\{activeAuctionCount\}\)/);
-  assert.match(board, /market values continue filling in after vehicles appear/);
+  assert.match(board, /All states \(\{boardAuctionCount\}\)/);
+  assert.match(board, /Source and confidence remain visible beside every value/);
   assert.match(board, /Official closed-catalog results are imported hourly/);
   assert.match(liveDetail, /OPPORTUNITY_REQUEST_TIMEOUT_MS/);
   assert.match(liveDetail, /MARKET_VALUE_REQUEST_TIMEOUT_MS/);
@@ -122,12 +122,13 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /PHOTOS_RETRY_INTERVAL_MS/);
   assert.match(board, /visibilitychange/);
   assert.match(board, /Photos temporarily refreshing/);
-  assert.match(board, /photosRefreshing=\{photosNeedRefresh\}/);
+  assert.match(board, /photosRefreshing=\{photosNeedRefresh && boardSource\(auction\) === "gsa-auctions"\}/);
   assert.match(board, /setAuctions\(\(current\) =>/);
-  assert.match(board, /\/api\/live-bid\?id=\$\{encodeURIComponent\(auction\.externalId\)\}/);
+  assert.match(board, /params\.set\("id", auction\.externalId\)/);
+  assert.match(board, /\/api\/live-bid\?\$\{params\.toString\(\)\}/);
   assert.match(board, /getRefreshDecision/);
   assert.match(board, /remainingMs > 30 \* 60_000/);
-  assert.match(board, /if \(!sourceMeta\.liveBidPolling\) return/);
+  assert.match(board, /livePollingForAuction\(auction, sourceMeta\.liveBidPollingBySource\)/);
   assert.match(board, /Snapshot only · verify bid/);
   assert.match(board, /MarketValueEvidence/);
   assert.match(board, /\/api\/market-values\?ids=/);
@@ -136,7 +137,7 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /value: "confidence", label: "Highest confidence"/);
   assert.match(board, /sort === "confidence"[^\n]+assessment\.confidence/);
   assert.match(board, /selectedSort\.orderCopy/);
-  assert.match(evidenceLabels, /Close forecast · no matched comps/);
+  assert.match(evidenceLabels, /Projected close · evidence pending/);
   assert.match(evidenceLabels, /valuation .*comps.* used/);
   assert.doesNotMatch(board, /forecast\.sampleSize\} GSA comps/);
   assert.match(styles, /\.state-select select, \.sort-select select \{ position: absolute; inset: 0;[^}]+opacity: 0;/);
@@ -147,7 +148,9 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
   assert.match(opportunityRoute, /status: "stale"/);
   assert.doesNotMatch(opportunityRoute, /imageUrl: null, images: \[\]/);
-  assert.match(opportunityRoute, /liveBidPolling: false/);
+  assert.match(opportunityRoute, /liveBidPollingBySource/);
+  assert.match(opportunityRoute, /"gsa-auctions": gsaLiveBidPolling/);
+  assert.match(opportunityRoute, /"gsa-fleet": fleetLive/);
   assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
   assert.match(gallery, /aria-modal="true"/);

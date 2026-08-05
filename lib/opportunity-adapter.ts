@@ -1,6 +1,7 @@
 import type {
   AuctionOpportunity,
   ClosingForecast,
+  DealAssessment,
   ValuationReference,
   VehicleCondition,
 } from "./auction-types";
@@ -9,6 +10,10 @@ import {
   DEFAULT_DEAL_COSTS,
   DEFAULT_PROFIT_TARGET,
 } from "./deal-model.ts";
+import {
+  buildReferenceClosingForecast,
+  type ReferenceClosingOutcome,
+} from "./closing-forecast.ts";
 import type { GsaVehicleAuction } from "./gsa-normalizer.ts";
 
 function externalId(auction: GsaVehicleAuction) {
@@ -49,6 +54,30 @@ function insufficientForecast(observedAt: string): ClosingForecast {
     evidenceIds: [],
     provenance: "insufficient",
     reasonCodes: ["VERIFIED_GSA_OUTCOMES_REQUIRED"],
+  };
+}
+
+function requireObservedBid(
+  assessment: DealAssessment,
+  currentBidCents: number | null,
+): DealAssessment {
+  if (currentBidCents !== null) return assessment;
+  return {
+    ...assessment,
+    status: "insufficient",
+    score: 0,
+    tier: 4,
+    expectedCloseCents: null,
+    allInAtExpectedCloseCents: null,
+    projectedProfitCents: null,
+    downsideProfitCents: null,
+    roi: null,
+    discountToValue: null,
+    probabilityProfitable: null,
+    probabilityWinUnderCeiling: null,
+    confidence: 0,
+    warnings: [...assessment.warnings, "A current auction bid is not available."],
+    reasonCodes: [...assessment.reasonCodes, "CURRENT_BID_UNAVAILABLE"],
   };
 }
 
@@ -99,22 +128,32 @@ export function applyValuationToOpportunity(
   opportunity: AuctionOpportunity,
   valuation: ValuationReference,
   calculatedAt = valuation.asOf,
+  terminalOutcomes: readonly ReferenceClosingOutcome[] = opportunity.forecast.outcomeAnchors ?? [],
 ): AuctionOpportunity {
   const listingConfidence = opportunity.vehicle.vin && opportunity.vehicle.mileage !== undefined
     ? 0.65
     : 0.45;
+  const forecast = buildReferenceClosingForecast({
+    currentBidCents: opportunity.currentBidCents,
+    bidderCount: opportunity.bidderCount,
+    endsAt: opportunity.endsAt,
+    asOf: calculatedAt,
+    valuation,
+    terminalOutcomes,
+  });
   return {
     ...opportunity,
     valuation,
-    assessment: assessDeal({
+    forecast,
+    assessment: requireObservedBid(assessDeal({
       currentBidCents: opportunity.currentBidCents ?? 0,
       valuation,
-      forecast: opportunity.forecast,
+      forecast,
       costs: DEFAULT_DEAL_COSTS,
       target: DEFAULT_PROFIT_TARGET,
       calculatedAt,
       dataConfidence: listingConfidence,
-    }),
+    }), opportunity.currentBidCents),
     provenance: {
       ...opportunity.provenance,
       valuation: valuation.status === "unavailable" ? "unavailable" : "provider",
@@ -154,6 +193,10 @@ export function discoveryToOpportunity(
     images,
     imageSource: "gsa-auctions",
     status: auction.status === "active" ? "active" : "preview",
+    startsAt: auction.startsAt,
+    saleNumber: auction.saleNumber,
+    saleType: "internet",
+    onlineBidding: true,
     currentBidCents,
     bidderCount: auction.bidderCount,
     endsAt: auction.endsAt,
@@ -182,7 +225,7 @@ export function discoveryToOpportunity(
     },
     valuation,
     forecast,
-    assessment: assessDeal({
+    assessment: requireObservedBid(assessDeal({
       // The model requires a numeric purchase basis, but the assessment is
       // deliberately insufficient and never actionable when the feed omits it.
       currentBidCents: currentBidCents ?? 0,
@@ -192,7 +235,7 @@ export function discoveryToOpportunity(
       target: DEFAULT_PROFIT_TARGET,
       calculatedAt: observedAt,
       dataConfidence: 0.25,
-    }),
+    }), currentBidCents),
     provenance: {
       listing: "Official GSA Auctions",
       listingObservedAt: observedAt,
