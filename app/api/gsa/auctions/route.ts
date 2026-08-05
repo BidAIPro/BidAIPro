@@ -5,8 +5,11 @@ import {
   GsaClientError,
   getGsaVehicleAuctions,
 } from "../../../../lib/gsa-client";
+import { publicApiHeaders, publicApiPreflight } from "../../../../lib/public-api-cors";
 
 export const revalidate = 3600;
+
+export const OPTIONS = publicApiPreflight;
 
 const SUCCESS_CACHE_CONTROL =
   "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400";
@@ -14,7 +17,7 @@ const SUCCESS_CACHE_CONTROL =
 export async function GET(): Promise<Response> {
   try {
     const result = await getGsaVehicleAuctions({ apiKey: env.GSA_API_KEY });
-    const headers = new Headers({
+    const headers = publicApiHeaders({
       "Cache-Control": SUCCESS_CACHE_CONTROL,
       "Content-Type": "application/json; charset=utf-8",
       "X-Data-Freshness": result.sourceHealth.status,
@@ -60,12 +63,12 @@ export async function GET(): Promise<Response> {
       },
       {
         status: 503,
-        headers: {
+        headers: publicApiHeaders({
           "Cache-Control": "no-store",
           "Content-Type": "application/json; charset=utf-8",
           "Retry-After": "300",
           "X-GSA-Source-Status": "unavailable",
-        },
+        }),
       },
     );
   }

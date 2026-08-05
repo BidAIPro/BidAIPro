@@ -2,6 +2,22 @@
 
 BidAI Pro is a vehicle-only government auction intelligence application. It discovers official GSA vehicle listings, preserves auction and bid history, separates market valuation from closing-price forecasts, and calculates a conservative bid ceiling after acquisition, resale, and risk costs.
 
+## Public website
+
+The production frontend is published at [bidaipro.github.io/BidAIPro](https://bidaipro.github.io/BidAIPro/). GitHub Pages builds the static interface from the `main` branch, while the live GSA endpoints, D1 database, and scheduled collection remain on the server-side Sites deployment. The browser is given only the public backend origin; provider credentials and database bindings are never included in the Pages bundle.
+
+Every push to `main` runs `.github/workflows/deploy-pages.yml` and publishes `out` after a successful static export.
+
+## GitHub Desktop
+
+Add this exact folder as the local repository:
+
+```text
+C:\Users\zk861\OneDrive\Documents\Bid Projector
+```
+
+It is configured to push `main` to `https://github.com/BidAIPro/BidAIPro.git`. The previous application history is preserved as a merge parent, and the former `BidAIPro/Bid-Projector` remote is retained locally as `bid-projector-backup`. In GitHub Desktop, confirm the current branch is `main`, then use **Push origin**. Do not select the older clone at `C:\Users\zk861\OneDrive\Documents\GitHub\BidAIPro` when working on this replacement.
+
 ## Source policy
 
 - The official source is [`gsaauctions.gov`](https://gsaauctions.gov/), not `gsaauctions.com`.

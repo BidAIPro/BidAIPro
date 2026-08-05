@@ -3,6 +3,7 @@
 import { ArrowLeft, Database, ExternalLink, Gauge, MapPin, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { publicApiUrl } from "../../lib/public-api";
 
 interface ComparableRow {
   id: string;
@@ -34,7 +35,7 @@ export function ComparableLedger() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/comps", { cache: "no-store", signal: controller.signal })
+    void fetch(publicApiUrl("/api/comps"), { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Comparable ledger request failed");
         return response.json() as Promise<{ data?: ComparableRow[]; meta?: { status?: string } }>;

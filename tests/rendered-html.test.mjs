@@ -74,7 +74,7 @@ test("keeps social metadata and database capability wired", async () => {
   ]);
 
   assert.match(layout, /\/og\.png/);
-  assert.match(layout, /x-forwarded-host/);
+  assert.match(layout, /bidaipro\.github\.io\/BidAIPro/);
   assert.match(hosting, /"d1"\s*:\s*"DB"/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await readFile(new URL("../public/og.png", import.meta.url));
@@ -87,9 +87,10 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
     readFile(new URL("../app/api/opportunities/route.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(board, /fetch\("\/api\/opportunities"/);
+  assert.match(board, /fetch\(publicApiUrl\("\/api\/opportunities"\)/);
   assert.match(board, /setInterval\(\(\) => void loadOpportunities\(\), 60 \* 60_000\)/);
   assert.match(board, /setAuctions\(payload\.data\)/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
+  assert.match(opportunityRoute, /publicApiHeaders/);
 });

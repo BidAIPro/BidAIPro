@@ -1,9 +1,12 @@
 import { env } from "cloudflare:workers";
 import { getGsaVehicleAuctions, GsaClientError } from "../../../lib/gsa-client";
 import { discoveryToOpportunity } from "../../../lib/opportunity-adapter";
+import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
 
 export const revalidate = 3600;
+
+export const OPTIONS = publicApiPreflight;
 
 const CACHE_CONTROL =
   "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400, stale-if-error=86400";
@@ -25,7 +28,7 @@ export async function GET() {
           sourceHealth: discovery.sourceHealth,
         },
       },
-      { headers: { "Cache-Control": CACHE_CONTROL } },
+      { headers: publicApiHeaders({ "Cache-Control": CACHE_CONTROL }) },
     );
   } catch (error) {
     const errorCode = error instanceof GsaClientError ? error.code : "GSA_UNKNOWN_ERROR";
@@ -46,7 +49,12 @@ export async function GET() {
           },
         },
       },
-      { headers: { "Cache-Control": "no-store", Warning: '110 - "Official GSA feed unavailable"' } },
+      {
+        headers: publicApiHeaders({
+          "Cache-Control": "no-store",
+          Warning: '110 - "Official GSA feed unavailable"',
+        }),
+      },
     );
   }
 }

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { ComparableLedger } from "./comparable-ledger";
 
+export const dynamic = "force-static";
+
 export const metadata: Metadata = {
   title: "Comparable Ledger",
   description: "Observed GSA vehicle closed-high-bid evidence with award status kept explicit.",

@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
+import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 
 export const revalidate = 300;
+
+export const OPTIONS = publicApiPreflight;
 
 const CACHE_CONTROL = "public, max-age=0, s-maxage=300, stale-while-revalidate=3600";
 
@@ -41,7 +44,7 @@ export async function GET() {
           semantics: "Closed high bids are not awarded sale prices unless award_status is confirmed.",
         },
       },
-      { headers: { "Cache-Control": CACHE_CONTROL } },
+      { headers: publicApiHeaders({ "Cache-Control": CACHE_CONTROL }) },
     );
   } catch {
     return Response.json(
@@ -53,7 +56,7 @@ export async function GET() {
           semantics: "The comparable ledger is initializing or temporarily unavailable.",
         },
       },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers: publicApiHeaders({ "Cache-Control": "no-store" }) },
     );
   }
 }

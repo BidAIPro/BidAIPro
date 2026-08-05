@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { DealBoard } from "./components/deal-board";
 
+export const dynamic = "force-static";
+
 export const metadata: Metadata = {
   title: "Deal Board",
   description:

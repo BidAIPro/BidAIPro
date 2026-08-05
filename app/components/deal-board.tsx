@@ -33,6 +33,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuctionOpportunity } from "../../lib/auction-types";
+import { publicApiUrl } from "../../lib/public-api";
 
 type SortKey = "deal" | "ending" | "profit" | "bid";
 type QuickFilter = "all" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
@@ -277,7 +278,7 @@ export function DealBoard() {
     setRefreshing(true);
 
     try {
-      const response = await fetch("/api/opportunities", {
+      const response = await fetch(publicApiUrl("/api/opportunities"), {
         cache: "no-store",
         signal: controller.signal,
       });
