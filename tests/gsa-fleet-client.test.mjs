@@ -160,7 +160,9 @@ test("fetches a bounded complete active/coming snapshot and normalizes source cl
 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].input, GSA_FLEET_PUBLIC_GRAPHQL_ENDPOINT);
-  assert.equal(calls[0].init.credentials, "omit");
+  assert.equal("credentials" in calls[0].init, false);
+  assert.equal("cache" in calls[0].init, false);
+  assert.equal("referrerPolicy" in calls[0].init, false);
   assert.equal(new Headers(calls[0].init.headers).get("authorization"), null);
   assert.deepEqual(calls[0].body.variables.filters[0].conditions[0].value, [
     "Coming soon",
