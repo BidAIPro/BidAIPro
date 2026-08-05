@@ -98,8 +98,9 @@ test("prefers structured mileage but preserves conflicts, condition evidence, da
 test("rejects a catalog snapshot when every lot detail request fails", async () => {
   const requestOrigins = [];
   const fetchImpl = async (input, init) => {
-    requestOrigins.push(new Headers(init?.headers).get("origin"));
-    const url = new URL(String(input));
+    const request = input instanceof Request ? input : new Request(input, init);
+    requestOrigins.push(request.headers.get("origin"));
+    const url = new URL(request.url);
     if (url.pathname.endsWith("/api/v1/auctions")) {
       return Response.json({
         totalPages: 1,

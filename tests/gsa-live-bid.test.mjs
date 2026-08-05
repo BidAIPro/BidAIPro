@@ -37,12 +37,10 @@ test("validates PPMS auction ids before making a request", async () => {
 });
 
 test("maps the official PPMS live response to a cents-based snapshot", async () => {
-  let requestedUrl = "";
-  let requestedInit;
+  let requestedRequest;
   const snapshot = await fetchPpmsLiveBid("372696", {
-    fetchImpl: async (url, init) => {
-      requestedUrl = String(url);
-      requestedInit = init;
+    fetchImpl: async (input, init) => {
+      requestedRequest = input instanceof Request ? input : new Request(input, init);
       return response({
         auctionId: 372696,
         currentBid: 2510.5,
@@ -55,13 +53,13 @@ test("maps the official PPMS live response to a cents-based snapshot", async () 
   });
 
   assert.equal(
-    requestedUrl,
+    requestedRequest.url,
     "https://www.ppms.gov/gw/auction/ppms/api/v1/auctions/getAuction/372696",
   );
-  assert.equal(requestedInit.method, "GET");
-  assert.equal(requestedInit.headers.Accept, "application/json");
-  assert.equal(requestedInit.headers.Origin, "https://www.ppms.gov");
-  assert.ok(requestedInit.signal instanceof AbortSignal);
+  assert.equal(requestedRequest.method, "GET");
+  assert.equal(requestedRequest.headers.get("accept"), "application/json");
+  assert.equal(requestedRequest.headers.get("origin"), "https://www.ppms.gov");
+  assert.ok(requestedRequest.signal instanceof AbortSignal);
   assert.deepEqual(snapshot, {
     externalId: "372696",
     currentBidCents: 251_050,
@@ -162,9 +160,10 @@ test("bounds an unresponsive PPMS request with an abortable timeout", async () =
   await assert.rejects(
     fetchPpmsLiveBid("372696", {
       timeoutMs: 10,
-      fetchImpl: async (_url, init) =>
+      fetchImpl: async (input, init) =>
         new Promise((_resolve, reject) => {
-          init.signal.addEventListener(
+          const request = input instanceof Request ? input : new Request(input, init);
+          request.signal.addEventListener(
             "abort",
             () => reject(new DOMException("aborted", "AbortError")),
             { once: true },
@@ -226,4 +225,27 @@ test("rejects a non-numeric route id without contacting PPMS", async (t) => {
   assert.equal(routeResponse.status, 400);
   assert.equal(routeResponse.headers.get("cache-control"), "no-store");
   assert.equal((await routeResponse.json()).error.code, "INVALID_AUCTION_ID");
+});
+
+test("returns only sanitized upstream diagnostics when PPMS rejects a request", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+  });
+  globalThis.fetch = async () =>
+    new Response("Invalid CORS request", { status: 403 });
+  console.error = () => {};
+
+  const routeResponse = await liveBidRoute(
+    new Request("https://example.test/api/live-bid?id=372696"),
+  );
+  const payload = await routeResponse.json();
+  assert.equal(routeResponse.status, 502);
+  assert.deepEqual(payload.error.diagnostic, {
+    sourceCode: "GSA_PPMS_LIVE_HTTP_ERROR",
+    upstreamStatus: 403,
+  });
+  assert.equal(JSON.stringify(payload).includes("Invalid CORS request"), false);
 });

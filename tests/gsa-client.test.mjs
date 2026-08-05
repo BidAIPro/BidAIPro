@@ -10,6 +10,10 @@ function json(value, status = 200) {
   });
 }
 
+function asRequest(input, init = {}) {
+  return input instanceof Request ? input : new Request(input, init);
+}
+
 test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk API, and serves stale good data", async () => {
   const previousKey = process.env.GSA_API_KEY;
   const secret = "test-secret-that-must-not-leak";
@@ -18,10 +22,11 @@ test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk A
   try {
     const primaryCalls = [];
     const primaryFetch = async (input, init = {}) => {
-      const url = new URL(String(input));
-      primaryCalls.push({ url, init, headers: new Headers(init.headers) });
+      const fetchRequest = asRequest(input, init);
+      const url = new URL(fetchRequest.url);
+      primaryCalls.push({ url, headers: fetchRequest.headers });
       if (url.pathname.endsWith("/api/v1/auctions")) {
-        const request = JSON.parse(init.body);
+        const request = await fetchRequest.clone().json();
         assert.deepEqual(request.categoryCodeList, ["300"]);
         assert.equal(request.auctionStatus, "active");
         assert.equal(url.searchParams.get("size"), "200");
@@ -94,6 +99,12 @@ test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk A
 
     assert.equal(primaryCalls.length, 3);
     assert.equal(primaryCalls.some((call) => call.url.searchParams.has("api_key")), false);
+    assert.equal(
+      primaryCalls.every(
+        (call) => call.headers.get("origin") === "https://www.ppms.gov",
+      ),
+      true,
+    );
     assert.equal(fresh.auctions.length, 1);
     assert.equal(fresh.auctions[0].mileage, 20_631);
     assert.equal(fresh.auctions[0].images.length, 1);
@@ -105,7 +116,7 @@ test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk A
     const staleCalls = [];
     const stale = await getGsaVehicleAuctions({
       fetchImpl: async (input) => {
-        staleCalls.push(String(input));
+        staleCalls.push(asRequest(input).url);
         return new Response(null, { status: 429 });
       },
       forceRefresh: true,
@@ -121,8 +132,9 @@ test("prefers the complete PPMS vehicle catalog, safely falls back to the bulk A
 
     const fallbackCalls = [];
     const legacyFetch = async (input, init = {}) => {
-      const url = new URL(String(input));
-      fallbackCalls.push({ url, headers: new Headers(init.headers) });
+      const fetchRequest = asRequest(input, init);
+      const url = new URL(fetchRequest.url);
+      fallbackCalls.push({ url, headers: fetchRequest.headers });
       if (url.hostname === "www.ppms.gov") return new Response(null, { status: 503 });
       if (url.hostname === "api.gsa.gov") {
         return new Response(null, {

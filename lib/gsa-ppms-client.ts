@@ -15,15 +15,16 @@ export const GSA_PPMS_IMAGE_SIGNING_ENDPOINT =
 // PPMS applies an Origin allowlist to edge-originated requests as well as
 // browser requests. Sites edge subrequests receive 403 unless they use the
 // target service's own origin.
-const PPMS_SERVICE_ORIGIN = "https://www.ppms.gov";
-
-function ppmsHeaders(jsonBody = false): Headers {
-  const headers = new Headers({
-    Accept: "application/json",
-    Origin: PPMS_SERVICE_ORIGIN,
-  });
-  if (jsonBody) headers.set("Content-Type", "application/json");
-  return headers;
+function ppmsRequest(
+  input: string | URL,
+  init: RequestInit = {},
+  jsonBody = false,
+): Request {
+  const request = new Request(input, init);
+  request.headers.set("Accept", "application/json");
+  request.headers.set("Origin", new URL(request.url).origin);
+  if (jsonBody) request.headers.set("Content-Type", "application/json");
+  return request;
 }
 
 const CATALOG_PAGE_SIZE = 200;
@@ -149,12 +150,17 @@ async function fetchCatalogPage(
   url.searchParams.set("page", String(page));
   url.searchParams.set("size", String(CATALOG_PAGE_SIZE));
   url.searchParams.set("sort", "AUCTION_END_DATE_TIME_ASC,ASC");
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: ppmsHeaders(true),
-    body: catalogBody(),
-    signal,
-  });
+  const response = await fetchImpl(
+    ppmsRequest(
+      url,
+      {
+        method: "POST",
+        body: catalogBody(),
+        signal,
+      },
+      true,
+    ),
+  );
   const payload = await jsonResponse(response, "CATALOG");
   if (!isRecord(payload) || !Array.isArray(payload.auctionDTOList)) {
     throw new PpmsClientError(
@@ -233,10 +239,12 @@ async function fetchDetail(
   const lotId = text(row.lotId);
   if (!lotId) return null;
   try {
-    const response = await fetchImpl(`${GSA_PPMS_SALE_PREVIEW_ENDPOINT}/${encodeURIComponent(lotId)}`, {
-      headers: ppmsHeaders(),
-      signal,
-    });
+    const response = await fetchImpl(
+      ppmsRequest(
+        `${GSA_PPMS_SALE_PREVIEW_ENDPOINT}/${encodeURIComponent(lotId)}`,
+        { signal },
+      ),
+    );
     const payload = await jsonResponse(response, "DETAIL");
     return isRecord(payload) ? payload : null;
   } catch (error) {
@@ -268,12 +276,17 @@ async function signImages(
     const batch = attachments.slice(offset, offset + IMAGE_SIGNING_BATCH_SIZE);
     let payload: unknown;
     try {
-      const response = await fetchImpl(GSA_PPMS_IMAGE_SIGNING_ENDPOINT, {
-        method: "POST",
-        headers: ppmsHeaders(true),
-        body: JSON.stringify(batch),
-        signal,
-      });
+      const response = await fetchImpl(
+        ppmsRequest(
+          GSA_PPMS_IMAGE_SIGNING_ENDPOINT,
+          {
+            method: "POST",
+            body: JSON.stringify(batch),
+            signal,
+          },
+          true,
+        ),
+      );
       payload = await jsonResponse(response, "IMAGE_SIGNING");
     } catch (error) {
       if (signal.aborted) throw error;

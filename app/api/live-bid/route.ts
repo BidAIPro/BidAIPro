@@ -13,7 +13,17 @@ export const OPTIONS = publicApiPreflight;
 
 const LIVE_CACHE_CONTROL = "public, max-age=0, s-maxage=10, must-revalidate";
 
-function errorResponse(status: number, code: string, message: string): Response {
+interface UpstreamDiagnostic {
+  sourceCode: string;
+  upstreamStatus: number | null;
+}
+
+function errorResponse(
+  status: number,
+  code: string,
+  message: string,
+  diagnostic?: UpstreamDiagnostic,
+): Response {
   const headers = publicApiHeaders({
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
@@ -21,7 +31,14 @@ function errorResponse(status: number, code: string, message: string): Response 
   if (status === 503 || status === 504) headers.set("Retry-After", "15");
 
   return Response.json(
-    { data: null, error: { code, message } },
+    {
+      data: null,
+      error: {
+        code,
+        message,
+        ...(diagnostic ? { diagnostic } : {}),
+      },
+    },
     { status, headers },
   );
 }
@@ -51,11 +68,19 @@ export async function GET(request: Request): Promise<Response> {
     );
   } catch (error) {
     if (error instanceof PpmsLiveBidError) {
+      const diagnostic: UpstreamDiagnostic = {
+        sourceCode: error.code,
+        upstreamStatus: error.upstreamStatus,
+      };
+      // Log only bounded diagnostic facts. Never serialize the exception,
+      // request headers, response body, URL, environment, or credentials.
+      console.error("gsa_live_bid_failed", { auctionId: id, ...diagnostic });
       if (error.code === "GSA_PPMS_LIVE_NOT_FOUND") {
         return errorResponse(
           404,
           "GSA_AUCTION_NOT_FOUND",
           "The requested GSA auction was not found.",
+          diagnostic,
         );
       }
       if (error.code === "GSA_PPMS_LIVE_TIMEOUT") {
@@ -63,6 +88,7 @@ export async function GET(request: Request): Promise<Response> {
           504,
           "GSA_LIVE_BID_TIMEOUT",
           "The official GSA live bid service did not respond in time.",
+          diagnostic,
         );
       }
       if (error.upstreamStatus === 429 || error.upstreamStatus === 503) {
@@ -70,8 +96,15 @@ export async function GET(request: Request): Promise<Response> {
           503,
           "GSA_LIVE_BID_UNAVAILABLE",
           "The official GSA live bid service is temporarily unavailable.",
+          diagnostic,
         );
       }
+      return errorResponse(
+        502,
+        "GSA_LIVE_BID_INVALID_RESPONSE",
+        "A verified live bid could not be read from the official GSA response.",
+        diagnostic,
+      );
     }
 
     return errorResponse(

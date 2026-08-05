@@ -4,8 +4,6 @@ import type { AuctionStatus } from "./auction-types.ts";
 export const GSA_PPMS_LIVE_AUCTION_ENDPOINT =
   "https://www.ppms.gov/gw/auction/ppms/api/v1/auctions/getAuction";
 
-const PPMS_SERVICE_ORIGIN = "https://www.ppms.gov";
-
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const AUCTION_ID_PATTERN = /^[1-9]\d{0,11}$/;
@@ -283,16 +281,18 @@ export async function fetchPpmsLiveBid(
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    const request = fetchImpl(`${GSA_PPMS_LIVE_AUCTION_ENDPOINT}/${auctionId}`, {
-      method: "GET",
-      // Sites edge subrequests receive 403 unless they use the target
-      // service's own origin.
-      headers: {
-        Accept: "application/json",
-        Origin: PPMS_SERVICE_ORIGIN,
+    const upstreamRequest = new Request(
+      `${GSA_PPMS_LIVE_AUCTION_ENDPOINT}/${auctionId}`,
+      {
+        method: "GET",
+        signal: controller.signal,
       },
-      signal: controller.signal,
-    });
+    );
+    upstreamRequest.headers.set("Accept", "application/json");
+    // Rewriting a mutable Request and setting the target origin follows the
+    // Cloudflare Workers CORS-proxy pattern and prevents PPMS's 403 response.
+    upstreamRequest.headers.set("Origin", new URL(upstreamRequest.url).origin);
+    const request = fetchImpl(upstreamRequest);
     const timedRequest = new Promise<Response>((_, reject) => {
       timeout = setTimeout(() => {
         controller.abort();
