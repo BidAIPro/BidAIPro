@@ -101,11 +101,11 @@ export async function GET() {
       const now = Date.now();
       const observedAt = snapshot.sourceHealth.observedAt;
       const imagesFresh = Date.parse(snapshot.imageExpiresAt) > now;
+      // Preserve any still-cached photo instead of blanking every card at the
+      // safety cutoff. VehicleImage degrades cleanly when a signature truly
+      // expires, while imagesFresh makes the client retry the renewed feed.
       const responseAuctions = snapshot.auctions
-        .filter((auction) => isActiveAt(auction, now))
-        .map((auction) =>
-          imagesFresh ? auction : { ...auction, imageUrl: null, images: [] },
-        );
+        .filter((auction) => isActiveAt(auction, now));
       const opportunities = responseAuctions.map((auction) =>
         discoveryToOpportunity(auction, observedAt),
       );

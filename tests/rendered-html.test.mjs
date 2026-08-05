@@ -115,6 +115,10 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(liveDetail, /LIVE_BID_REQUEST_TIMEOUT_MS/);
   assert.match(comparableLedger, /LEDGER_REQUEST_TIMEOUT_MS/);
   assert.match(board, /setInterval\(\(\) => void loadOpportunities\(\), 60 \* 60_000\)/);
+  assert.match(board, /PHOTOS_RETRY_INTERVAL_MS/);
+  assert.match(board, /visibilitychange/);
+  assert.match(board, /Photos temporarily refreshing/);
+  assert.match(board, /photosRefreshing=\{photosNeedRefresh\}/);
   assert.match(board, /setAuctions\(\(current\) =>/);
   assert.match(board, /\/api\/live-bid\?id=\$\{encodeURIComponent\(auction\.externalId\)\}/);
   assert.match(board, /getRefreshDecision/);
@@ -131,6 +135,7 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   }
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
   assert.match(opportunityRoute, /status: "stale"/);
+  assert.doesNotMatch(opportunityRoute, /imageUrl: null, images: \[\]/);
   assert.match(opportunityRoute, /liveBidPolling: false/);
   assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
