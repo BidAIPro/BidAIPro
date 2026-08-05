@@ -4,6 +4,8 @@ import type { AuctionStatus } from "./auction-types.ts";
 export const GSA_PPMS_LIVE_AUCTION_ENDPOINT =
   "https://www.ppms.gov/gw/auction/ppms/api/v1/auctions/getAuction";
 
+const PPMS_PUBLIC_SITE_ORIGIN = "https://gsaauctions.gov";
+
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const AUCTION_ID_PATTERN = /^[1-9]\d{0,11}$/;
@@ -283,7 +285,12 @@ export async function fetchPpmsLiveBid(
   try {
     const request = fetchImpl(`${GSA_PPMS_LIVE_AUCTION_ENDPOINT}/${auctionId}`, {
       method: "GET",
-      headers: { Accept: "application/json" },
+      // Sites edge subrequests receive 403 unless they use the public GSA
+      // Auctions origin expected by this first-party JSON service.
+      headers: {
+        Accept: "application/json",
+        Origin: PPMS_PUBLIC_SITE_ORIGIN,
+      },
       signal: controller.signal,
     });
     const timedRequest = new Promise<Response>((_, reject) => {

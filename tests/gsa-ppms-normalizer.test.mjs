@@ -96,7 +96,9 @@ test("prefers structured mileage but preserves conflicts, condition evidence, da
 });
 
 test("rejects a catalog snapshot when every lot detail request fails", async () => {
-  const fetchImpl = async (input) => {
+  const requestOrigins = [];
+  const fetchImpl = async (input, init) => {
+    requestOrigins.push(new Headers(init?.headers).get("origin"));
     const url = new URL(String(input));
     if (url.pathname.endsWith("/api/v1/auctions")) {
       return Response.json({
@@ -124,4 +126,8 @@ test("rejects a catalog snapshot when every lot detail request fails", async () 
     ),
     (error) => error instanceof PpmsClientError && error.code === "GSA_PPMS_DETAILS_UNAVAILABLE",
   );
+  assert.deepEqual(requestOrigins, [
+    "https://gsaauctions.gov",
+    "https://gsaauctions.gov",
+  ]);
 });

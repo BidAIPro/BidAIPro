@@ -12,6 +12,20 @@ export const GSA_PPMS_SALE_PREVIEW_ENDPOINT =
 export const GSA_PPMS_IMAGE_SIGNING_ENDPOINT =
   "https://www.ppms.gov/gw/common/ppms/api/v1/storage/presigned-urls";
 
+// PPMS applies its public-site Origin allowlist to edge-originated requests as
+// well as browser requests. Sites edge subrequests receive 403 unless they use
+// the public GSA Auctions origin expected by these first-party JSON services.
+const PPMS_PUBLIC_SITE_ORIGIN = "https://gsaauctions.gov";
+
+function ppmsHeaders(jsonBody = false): Headers {
+  const headers = new Headers({
+    Accept: "application/json",
+    Origin: PPMS_PUBLIC_SITE_ORIGIN,
+  });
+  if (jsonBody) headers.set("Content-Type", "application/json");
+  return headers;
+}
+
 const CATALOG_PAGE_SIZE = 200;
 const MAX_CATALOG_PAGES = 25;
 const DETAIL_CONCURRENCY = 8;
@@ -135,7 +149,7 @@ async function fetchCatalogPage(
   url.searchParams.set("sort", "AUCTION_END_DATE_TIME_ASC,ASC");
   const response = await fetchImpl(url, {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: ppmsHeaders(true),
     body: catalogBody(),
     signal,
   });
@@ -218,7 +232,7 @@ async function fetchDetail(
   if (!lotId) return null;
   try {
     const response = await fetchImpl(`${GSA_PPMS_SALE_PREVIEW_ENDPOINT}/${encodeURIComponent(lotId)}`, {
-      headers: { Accept: "application/json" },
+      headers: ppmsHeaders(),
       signal,
     });
     const payload = await jsonResponse(response, "DETAIL");
@@ -254,7 +268,7 @@ async function signImages(
     try {
       const response = await fetchImpl(GSA_PPMS_IMAGE_SIGNING_ENDPOINT, {
         method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        headers: ppmsHeaders(true),
         body: JSON.stringify(batch),
         signal,
       });
