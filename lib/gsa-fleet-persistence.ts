@@ -10,10 +10,12 @@ import { canonicalVehicleFamily } from "./gsa-market-valuations.ts";
 
 export const GSA_FLEET_ACTIVE_SOURCE_CHECK_SCOPE = "hourly-internet-catalog";
 export const GSA_FLEET_CLOSED_SOURCE_CHECK_SCOPE = "closed-outcome-incremental";
+export const GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE = "closed-outcome-history-backfill";
 
 const DAY_MS = 86_400_000;
 const DEFAULT_BOOTSTRAP_DAYS = 7;
 const DEFAULT_OVERLAP_DAYS = 2;
+const DEFAULT_HISTORY_WINDOW_DAYS = 14;
 
 interface ExistingFleetAuctionState {
   current_bid_cents: number | null;
@@ -23,6 +25,16 @@ interface ExistingFleetAuctionState {
 
 interface LatestFleetClosedCheck {
   checked_at: string | null;
+}
+
+interface FleetHistoryCursor {
+  checked_at: string | null;
+  result_count: number | null;
+  coverage_status: string | null;
+}
+
+interface EarliestFleetComparable {
+  ended_at: string | null;
 }
 
 export interface GsaFleetActivePersistenceSummary {
@@ -62,12 +74,99 @@ export interface GsaFleetClosedSyncSummary {
   excludedWithoutConfirmedPrice: number;
 }
 
+export interface GsaFleetHistoryBackfillSummary {
+  status: "backfilled" | "complete" | "not-ready";
+  since: string | null;
+  through: string | null;
+  closedRows: number;
+  confirmedAwardedOutcomes: number;
+}
+
 function chunks<T>(values: readonly T[], size = 30): T[][] {
   const result: T[][] = [];
   for (let index = 0; index < values.length; index += size) {
     result.push(values.slice(index, index + size));
   }
   return result;
+}
+
+function comparableOutcomeRows(rows: readonly GsaFleetVehicleRecord[]) {
+  return rows.filter((vehicle) =>
+    vehicle.isComparableOutcome &&
+    vehicle.finalPriceCents !== null &&
+    vehicle.finalPriceCents > 0 &&
+    vehicle.year !== null &&
+    vehicle.make !== null &&
+    vehicle.model !== null &&
+    vehicle.effectiveEndsAt !== null
+  );
+}
+
+async function upsertFleetComparableRows(
+  db: D1Database,
+  rows: readonly GsaFleetVehicleRecord[],
+  observedAt: string,
+): Promise<number> {
+  const comparableRows = comparableOutcomeRows(rows);
+  const upsert = db.prepare(
+    `INSERT INTO comparable_sales (
+       id, source_key, external_id, source_auction_id, canonical_url,
+       normalized_vehicle_key, vin, year, make, model, trim, drivetrain,
+       mileage, condition, title_status, operability, city, state,
+       closed_high_bid_cents, awarded_price_cents, award_status,
+       reserve_status, currency, outcome_status, ended_at,
+       outcome_observed_at, created_at
+     ) VALUES (
+       ?1, 'gsa-fleet', ?2,
+       (SELECT id FROM auctions WHERE source_key = 'gsa-fleet' AND external_id = ?2 LIMIT 1),
+       ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, ?10, NULL, 'unknown',
+       ?11, ?12, ?13, ?14, 'confirmed', ?15, 'USD',
+       'awarded-price-official-gsa-fleet', ?16, ?17, ?17
+     ) ON CONFLICT(source_key, external_id) DO UPDATE SET
+       source_auction_id = COALESCE(excluded.source_auction_id, comparable_sales.source_auction_id),
+       canonical_url = excluded.canonical_url,
+       normalized_vehicle_key = excluded.normalized_vehicle_key,
+       vin = COALESCE(excluded.vin, comparable_sales.vin),
+       year = excluded.year,
+       make = excluded.make,
+       model = excluded.model,
+       mileage = COALESCE(excluded.mileage, comparable_sales.mileage),
+       condition = excluded.condition,
+       city = excluded.city,
+       state = excluded.state,
+       closed_high_bid_cents = excluded.closed_high_bid_cents,
+       awarded_price_cents = excluded.awarded_price_cents,
+       award_status = 'confirmed',
+       reserve_status = excluded.reserve_status,
+       outcome_status = 'awarded-price-official-gsa-fleet',
+       ended_at = excluded.ended_at,
+       outcome_observed_at = excluded.outcome_observed_at
+     WHERE excluded.outcome_observed_at >= comparable_sales.outcome_observed_at`,
+  );
+  for (const group of chunks(comparableRows, 30)) {
+    await db.batch(group.map((vehicle) => upsert.bind(
+      `comp:gsa-fleet:${vehicle.sourceId}`,
+      vehicle.sourceId,
+      vehicle.sourceUrl,
+      normalizedVehicleKey(vehicle),
+      vehicle.vin,
+      vehicle.year,
+      vehicle.make,
+      vehicle.model,
+      vehicle.mileage,
+      gsaFleetValuationCondition(vehicle.conditionCode),
+      vehicle.location.city,
+      vehicle.location.state,
+      vehicle.highBidCents !== null && vehicle.highBidCents > 0
+        ? vehicle.highBidCents
+        : 0,
+      vehicle.finalPriceCents,
+      vehicle.floorPriceCents === null ? null : "floor-price-exposed",
+      vehicle.effectiveEndsAt,
+      observedAt,
+    )));
+  }
+  return comparableRows.length;
 }
 
 function validDate(value: Date, name: string): Date {
@@ -139,7 +238,8 @@ function assertSnapshot(
     snapshot.kind !== expectedKind ||
     snapshot.complete !== true ||
     !Number.isSafeInteger(snapshot.advertisedCount) ||
-    snapshot.advertisedCount <= 0 ||
+    snapshot.advertisedCount < 0 ||
+    (expectedKind === "active-and-coming" && snapshot.advertisedCount === 0) ||
     snapshot.advertisedCount !== snapshot.rows.length ||
     !Number.isFinite(Date.parse(snapshot.observedAt))
   ) {
@@ -503,75 +603,11 @@ export async function syncClosedGsaFleetOutcomes(
       signal: options.signal,
     });
     assertSnapshot(snapshot, "closed-results");
-    const comparableRows = snapshot.rows.filter((vehicle) =>
-      vehicle.isComparableOutcome &&
-      vehicle.finalPriceCents !== null &&
-      vehicle.finalPriceCents > 0 &&
-      vehicle.year !== null &&
-      vehicle.make !== null &&
-      vehicle.model !== null &&
-      vehicle.effectiveEndsAt !== null
+    const comparableRowCount = await upsertFleetComparableRows(
+      db,
+      snapshot.rows,
+      snapshot.observedAt,
     );
-
-    const upsert = db.prepare(
-      `INSERT INTO comparable_sales (
-         id, source_key, external_id, source_auction_id, canonical_url,
-         normalized_vehicle_key, vin, year, make, model, trim, drivetrain,
-         mileage, condition, title_status, operability, city, state,
-         closed_high_bid_cents, awarded_price_cents, award_status,
-         reserve_status, currency, outcome_status, ended_at,
-         outcome_observed_at, created_at
-       ) VALUES (
-         ?1, 'gsa-fleet', ?2,
-         (SELECT id FROM auctions WHERE source_key = 'gsa-fleet' AND external_id = ?2 LIMIT 1),
-         ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, ?10, NULL, 'unknown',
-         ?11, ?12, ?13, ?14, 'confirmed', ?15, 'USD',
-         'awarded-price-official-gsa-fleet', ?16, ?17, ?17
-       ) ON CONFLICT(source_key, external_id) DO UPDATE SET
-         source_auction_id = COALESCE(excluded.source_auction_id, comparable_sales.source_auction_id),
-         canonical_url = excluded.canonical_url,
-         normalized_vehicle_key = excluded.normalized_vehicle_key,
-         vin = COALESCE(excluded.vin, comparable_sales.vin),
-         year = excluded.year,
-         make = excluded.make,
-         model = excluded.model,
-         mileage = COALESCE(excluded.mileage, comparable_sales.mileage),
-         condition = excluded.condition,
-         city = excluded.city,
-         state = excluded.state,
-         closed_high_bid_cents = excluded.closed_high_bid_cents,
-         awarded_price_cents = excluded.awarded_price_cents,
-         award_status = 'confirmed',
-         reserve_status = excluded.reserve_status,
-         outcome_status = 'awarded-price-official-gsa-fleet',
-         ended_at = excluded.ended_at,
-         outcome_observed_at = excluded.outcome_observed_at
-       WHERE excluded.outcome_observed_at >= comparable_sales.outcome_observed_at`,
-    );
-
-    for (const group of chunks(comparableRows, 30)) {
-      await db.batch(group.map((vehicle) => upsert.bind(
-        `comp:gsa-fleet:${vehicle.sourceId}`,
-        vehicle.sourceId,
-        vehicle.sourceUrl,
-        normalizedVehicleKey(vehicle),
-        vehicle.vin,
-        vehicle.year,
-        vehicle.make,
-        vehicle.model,
-        vehicle.mileage,
-        gsaFleetValuationCondition(vehicle.conditionCode),
-        vehicle.location.city,
-        vehicle.location.state,
-        vehicle.highBidCents !== null && vehicle.highBidCents > 0
-          ? vehicle.highBidCents
-          : 0,
-        vehicle.finalPriceCents,
-        vehicle.floorPriceCents === null ? null : "floor-price-exposed",
-        vehicle.effectiveEndsAt,
-        snapshot.observedAt,
-      )));
-    }
 
     await db.prepare(
       `UPDATE source_checks SET
@@ -582,7 +618,7 @@ export async function syncClosedGsaFleetOutcomes(
     ).bind(
       sourceCheckId,
       Math.max(0, Date.now() - startedAt),
-      comparableRows.length,
+      comparableRowCount,
       snapshot.advertisedCount,
     ).run();
 
@@ -593,9 +629,9 @@ export async function syncClosedGsaFleetOutcomes(
       through: window.through.toISOString(),
       advertised: snapshot.advertisedCount,
       closedRows: snapshot.rows.length,
-      confirmedAwardedOutcomes: comparableRows.length,
-      insertedOrUpdated: comparableRows.length,
-      excludedWithoutConfirmedPrice: snapshot.rows.length - comparableRows.length,
+      confirmedAwardedOutcomes: comparableRowCount,
+      insertedOrUpdated: comparableRowCount,
+      excludedWithoutConfirmedPrice: snapshot.rows.length - comparableRowCount,
     };
   } catch (error) {
     const detail = fleetErrorDetails(error);
@@ -611,6 +647,132 @@ export async function syncClosedGsaFleetOutcomes(
       detail.code,
       detail.message,
     ).run();
+    throw error;
+  }
+}
+
+/**
+ * Walks one bounded window backward from the durable corpus on each hourly
+ * Fleet cycle. Incremental sync remains fast while older awarded outcomes are
+ * accumulated without ever loading the full public history in one Worker.
+ */
+export async function backfillClosedGsaFleetOutcomes(
+  db: D1Database,
+  options: SyncClosedGsaFleetOutcomesOptions & { historyWindowDays?: number } = {},
+): Promise<GsaFleetHistoryBackfillSummary> {
+  const now = validDate(options.now ?? new Date(), "now");
+  const windowDays = boundedInteger(
+    options.historyWindowDays ?? DEFAULT_HISTORY_WINDOW_DAYS,
+    "historyWindowDays",
+    1,
+    30,
+  );
+  const cursor = await db.prepare(
+    `SELECT checked_at, result_count, coverage_status
+     FROM source_checks
+     WHERE source_key = 'gsa-fleet'
+       AND scope = ?1
+       AND success = 1
+     ORDER BY created_at DESC
+     LIMIT 1`,
+  ).bind(GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE).first<FleetHistoryCursor>();
+  if (cursor?.coverage_status === "complete") {
+    return {
+      status: "complete",
+      since: cursor.checked_at,
+      through: cursor.checked_at,
+      closedRows: 0,
+      confirmedAwardedOutcomes: 0,
+    };
+  }
+
+  let throughValue = cursor?.checked_at ?? null;
+  if (!throughValue) {
+    const earliest = await db.prepare(
+      `SELECT MIN(ended_at) AS ended_at
+       FROM comparable_sales
+       WHERE source_key = 'gsa-fleet'
+         AND award_status = 'confirmed'
+         AND outcome_status = 'awarded-price-official-gsa-fleet'`,
+    ).first<EarliestFleetComparable>();
+    throughValue = earliest?.ended_at ?? null;
+  }
+  const throughMs = throughValue ? Date.parse(throughValue) : Number.NaN;
+  if (!Number.isFinite(throughMs)) {
+    return {
+      status: "not-ready",
+      since: null,
+      through: null,
+      closedRows: 0,
+      confirmedAwardedOutcomes: 0,
+    };
+  }
+  const through = new Date(throughMs);
+  const since = new Date(throughMs - windowDays * DAY_MS);
+
+  try {
+    const snapshot = await fetchGsaFleetClosedResults({
+      fetchImpl: options.fetchImpl,
+      now,
+      since,
+      through,
+      pageSize: options.pageSize ?? 1_000,
+      maxRows: options.maxRows ?? GSA_FLEET_MAX_CLOSED_ROWS,
+      forceRefresh: true,
+      cacheResult: false,
+      signal: options.signal,
+    });
+    if (
+      snapshot.source !== GSA_FLEET_SOURCE ||
+      snapshot.kind !== "closed-results" ||
+      snapshot.complete !== true ||
+      !Number.isSafeInteger(snapshot.advertisedCount) ||
+      snapshot.advertisedCount < 0 ||
+      snapshot.advertisedCount !== snapshot.rows.length
+    ) {
+      const error = new Error(
+        "The historical GSA Fleet window failed the completeness guard.",
+      ) as Error & { code: string };
+      error.code = "GSA_FLEET_HISTORY_IMPLAUSIBLE_COVERAGE";
+      throw error;
+    }
+    const comparableRowCount = await upsertFleetComparableRows(
+      db,
+      snapshot.rows,
+      snapshot.observedAt,
+    );
+    const empty = snapshot.rows.length === 0;
+    // A single empty window may be a seasonal gap. Stop only after two
+    // consecutive 14-day windows contain no closed records.
+    const complete = empty && cursor?.result_count === 0;
+    await db.prepare(
+      `INSERT INTO source_checks (
+         id, source_key, scope, checked_at, success, status_code, latency_ms,
+         result_count, expected_result_count, coverage_status, error_code,
+         error_message, response_hash, created_at
+       ) VALUES (?1, 'gsa-fleet', ?2, ?3, 1, 200, NULL, ?4, ?5, ?6,
+         NULL, NULL, NULL, ?7)`,
+    ).bind(
+      crypto.randomUUID(),
+      GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE,
+      since.toISOString(),
+      comparableRowCount,
+      snapshot.advertisedCount,
+      complete ? "complete" : empty ? "empty-window" : "partial",
+      now.toISOString(),
+    ).run();
+    return {
+      status: complete ? "complete" : "backfilled",
+      since: since.toISOString(),
+      through: through.toISOString(),
+      closedRows: snapshot.rows.length,
+      confirmedAwardedOutcomes: comparableRowCount,
+    };
+  } catch (error) {
+    await recordGsaFleetSourceFailure(db, error, {
+      scope: GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE,
+      checkedAt: now.toISOString(),
+    });
     throw error;
   }
 }

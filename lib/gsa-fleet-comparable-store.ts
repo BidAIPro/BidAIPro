@@ -1,9 +1,14 @@
 import {
   buildGsaFleetComparableIndexFromComparables,
+  buildGsaFleetComparableIndex,
   normalizeGsaFleetModel,
   type GsaFleetComparableIndex,
 } from "./gsa-fleet-adapter.ts";
-import { GSA_FLEET_BROWSE_URL } from "./gsa-fleet-client.ts";
+import {
+  fetchGsaFleetClosedResults,
+  GSA_FLEET_BROWSE_URL,
+  type GsaFleetClosedResultsOptions,
+} from "./gsa-fleet-client.ts";
 import type { GsaClosedComparable } from "./gsa-closed-comps.ts";
 import type {
   GsaVehicleCondition,
@@ -12,6 +17,7 @@ import type {
 
 const PAGE_SIZE = 5_000;
 const MAX_COMPARABLES = 25_000;
+const MIN_DURABLE_COMPARABLES = 100;
 
 interface StoredFleetComparable {
   external_id: string;
@@ -30,10 +36,27 @@ interface StoredFleetComparable {
   outcome_observed_at: string;
 }
 
+interface CompletedFleetComparableSync {
+  checked_at: string;
+}
+
 export interface DurableGsaFleetComparableIndex {
   index: GsaFleetComparableIndex;
   observedAt: string | null;
   rowCount: number;
+}
+
+export interface ResolvedGsaFleetComparableIndex extends DurableGsaFleetComparableIndex {
+  mode: "durable" | "recent-official-fallback";
+}
+
+type FleetClosedFetcher = typeof fetchGsaFleetClosedResults;
+
+export interface ResolveGsaFleetComparableIndexOptions {
+  now?: Date;
+  signal?: AbortSignal;
+  fallbackDays?: number;
+  getFleetClosed?: FleetClosedFetcher;
 }
 
 function condition(value: string | null): GsaVehicleCondition {
@@ -153,5 +176,80 @@ export async function readDurableGsaFleetComparableIndex(
     index: buildGsaFleetComparableIndexFromComparables(comparables),
     observedAt,
     rowCount: comparables.length,
+  };
+}
+
+/**
+ * Uses durable awarded outcomes when available and falls back to a bounded
+ * recent official window during a new deployment or delayed first cron run.
+ * This keeps the public board valued while D1 warms without materializing the
+ * full Fleet history inside a memory-limited Worker.
+ */
+export async function resolveGsaFleetComparableIndex(
+  db: D1Database,
+  options: ResolveGsaFleetComparableIndexOptions = {},
+): Promise<ResolvedGsaFleetComparableIndex> {
+  const durable = await readDurableGsaFleetComparableIndex(db);
+  const completedSync = durable.rowCount >= MIN_DURABLE_COMPARABLES
+    ? await db.prepare(
+        `SELECT checked_at
+         FROM source_checks
+         WHERE source_key = 'gsa-fleet'
+           AND scope = 'closed-outcome-incremental'
+           AND success = 1
+           AND coverage_status = 'complete'
+         ORDER BY checked_at DESC
+         LIMIT 1`,
+      ).first<CompletedFleetComparableSync>()
+    : null;
+  if (
+    durable.rowCount >= MIN_DURABLE_COMPARABLES &&
+    completedSync &&
+    Number.isFinite(Date.parse(completedSync.checked_at))
+  ) {
+    return { ...durable, mode: "durable" };
+  }
+
+  const now = options.now ?? new Date();
+  if (!Number.isFinite(now.getTime())) throw new TypeError("now must be a valid Date.");
+  const fallbackDays = options.fallbackDays ?? 7;
+  if (!Number.isSafeInteger(fallbackDays) || fallbackDays < 1 || fallbackDays > 30) {
+    throw new RangeError("fallbackDays must be between 1 and 30.");
+  }
+  const fetcher = options.getFleetClosed ?? fetchGsaFleetClosedResults;
+  const fetchOptions: GsaFleetClosedResultsOptions = {
+    now,
+    since: new Date(now.getTime() - fallbackDays * 86_400_000),
+    pageSize: 1_000,
+    maxRows: 25_000,
+    forceRefresh: true,
+    cacheResult: false,
+    signal: options.signal ?? AbortSignal.timeout(20_000),
+  };
+  const snapshot = await fetcher(fetchOptions);
+  if (
+    !snapshot.complete ||
+    snapshot.rows.length === 0 ||
+    snapshot.rows.length !== snapshot.advertisedCount
+  ) {
+    const error = new Error(
+      "The recent official GSA Fleet comparable fallback was empty or incomplete.",
+    ) as Error & { code: string };
+    error.code = "GSA_FLEET_COMPARABLE_FALLBACK_INCOMPLETE";
+    throw error;
+  }
+  const index = buildGsaFleetComparableIndex(snapshot.rows);
+  if (index.all.length === 0) {
+    const error = new Error(
+      "The recent official GSA Fleet window contained no confirmed awarded outcomes.",
+    ) as Error & { code: string };
+    error.code = "GSA_FLEET_COMPARABLE_FALLBACK_EMPTY";
+    throw error;
+  }
+  return {
+    index,
+    observedAt: snapshot.observedAt,
+    rowCount: index.all.length,
+    mode: "recent-official-fallback",
   };
 }

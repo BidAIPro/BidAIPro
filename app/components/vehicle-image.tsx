@@ -10,6 +10,7 @@ type VehicleImageProps = {
   fallbackCopy: string;
   variant: "card" | "detail";
   priority?: boolean;
+  onSourceError?: (source: string) => void;
 };
 
 export function VehicleImage({
@@ -19,6 +20,7 @@ export function VehicleImage({
   fallbackCopy,
   variant,
   priority = false,
+  onSourceError,
 }: VehicleImageProps) {
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const hasUsableSource = Boolean(src) && failedSource !== src;
@@ -34,7 +36,10 @@ export function VehicleImage({
         fetchPriority={priority ? "high" : "auto"}
         decoding="async"
         referrerPolicy="no-referrer"
-        onError={() => setFailedSource(src)}
+        onError={() => {
+          setFailedSource(src);
+          onSourceError?.(src);
+        }}
       />
     );
   }

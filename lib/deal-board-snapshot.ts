@@ -13,7 +13,7 @@ import {
   fetchGsaFleetClosedResults,
   type GsaFleetVehicleDetail,
 } from "./gsa-fleet-client.ts";
-import { readDurableGsaFleetComparableIndex } from "./gsa-fleet-comparable-store.ts";
+import { resolveGsaFleetComparableIndex } from "./gsa-fleet-comparable-store.ts";
 import { getGsaVehicleAuctions, type GsaDiscoveryResult } from "./gsa-client.ts";
 import type { GsaCoverage, GsaVehicleAuction } from "./gsa-normalizer.ts";
 import {
@@ -913,14 +913,10 @@ export async function rebuildDealBoardSnapshot(
   try {
     let buildOptions = { ...options, now };
     if (!options.fleetComparableIndex && !options.getFleetClosed) {
-      const durable = await readDurableGsaFleetComparableIndex(db);
-      if (durable.rowCount === 0) {
-        const error = new Error(
-          "No durable GSA Fleet awarded outcomes are available for the deal-board rebuild.",
-        ) as Error & { code: string };
-        error.code = "DEAL_BOARD_FLEET_COMPARABLE_STORE_EMPTY";
-        throw error;
-      }
+      const durable = await resolveGsaFleetComparableIndex(db, {
+        now,
+        signal: options.signal,
+      });
       buildOptions = {
         ...buildOptions,
         fleetComparableIndex: durable.index,

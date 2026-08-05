@@ -7,6 +7,7 @@ import { syncClosedGsaVehicleComps } from "../lib/gsa-closed-comp-sync";
 import { fetchGsaFleetActiveListings } from "../lib/gsa-fleet-client";
 import {
   GSA_FLEET_ACTIVE_SOURCE_CHECK_SCOPE,
+  backfillClosedGsaFleetOutcomes,
   persistGsaFleetActiveListings,
   recordGsaFleetSourceFailure,
   syncClosedGsaFleetOutcomes,
@@ -125,6 +126,10 @@ const worker = {
         await syncClosedGsaFleetOutcomes(env.DB, {
           bootstrapDays: 7,
           overlapDays: 2,
+          signal: AbortSignal.timeout(45_000),
+        });
+        await backfillClosedGsaFleetOutcomes(env.DB, {
+          historyWindowDays: 14,
           signal: AbortSignal.timeout(45_000),
         });
       } catch {

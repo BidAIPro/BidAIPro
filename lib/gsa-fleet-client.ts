@@ -213,6 +213,8 @@ export interface GsaFleetListingOptions extends GsaFleetClientOptions {
 export interface GsaFleetClosedResultsOptions extends GsaFleetListingOptions {
   /** Inclusive lower bound applied to the upstream saleEndDate filter. */
   since?: Date | string;
+  /** Exclusive upper bound used to fetch a bounded historical backfill window. */
+  through?: Date | string;
 }
 
 export interface GsaFleetDetailBatchOptions extends GsaFleetClientOptions {
@@ -967,20 +969,25 @@ function cacheSet<T>(
   }
 }
 
-function sinceDate(value: Date | string | undefined): string | null {
+function filterDate(value: Date | string | undefined, name: string): string | null {
   if (value === undefined) return null;
   const parsed = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) throw new TypeError("since must be a valid date.");
+  if (Number.isNaN(parsed.getTime())) throw new TypeError(`${name} must be a valid date.`);
   return parsed.toISOString().slice(0, 10);
 }
 
-function listingFilters(kind: GsaFleetSnapshotKind, since: string | null): JsonRecord[] {
+function listingFilters(
+  kind: GsaFleetSnapshotKind,
+  since: string | null,
+  through: string | null,
+): JsonRecord[] {
   const statuses =
     kind === "active-and-coming" ? ["Coming soon", "Active"] : ["Closed", "Sale Complete"];
   const conditions: JsonRecord[] = [
     { operator: "$in", key: "saleStatus", value: statuses },
   ];
   if (since) conditions.push({ operator: "$gte", key: "saleEndDate", value: since });
+  if (through) conditions.push({ operator: "$lt", key: "saleEndDate", value: through });
   return [{ operator: "$and", conditions }];
 }
 
@@ -1001,8 +1008,12 @@ async function fetchListingSnapshot(
     Math.min(MAX_PAGE_SIZE, maxRows),
     "pageSize",
   );
-  const since = kind === "closed-results" ? sinceDate(options.since) : null;
-  const cacheKey = `${kind}|${since ?? "all"}|${pageSize}|${maxRows}`;
+  const since = kind === "closed-results" ? filterDate(options.since, "since") : null;
+  const through = kind === "closed-results" ? filterDate(options.through, "through") : null;
+  if (since && through && since >= through) {
+    throw new RangeError("since must be earlier than through.");
+  }
+  const cacheKey = `${kind}|${since ?? "all"}|${through ?? "open"}|${pageSize}|${maxRows}`;
   const cache = cacheFor(listingCaches, fetchImpl);
   const cached = cache.get(cacheKey);
   if (!options.forceRefresh && cached && cached.expiresAt > now.getTime()) {
@@ -1013,7 +1024,7 @@ async function fetchListingSnapshot(
     };
   }
 
-  const filters = listingFilters(kind, since);
+  const filters = listingFilters(kind, since, through);
   const byId = new Map<string, GsaFleetVehicleRecord>();
   let offset = 0;
   let advertisedCount = 0;

@@ -1,0 +1,70 @@
+name: Refresh official GSA Auctions snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-gsa-auction-data.yml
+      - scripts/export-gsa-snapshot.mjs
+      - lib/gsa-client.ts
+      - lib/gsa-ppms-client.ts
+      - lib/gsa-ppms-normalizer.ts
+  schedule:
+    # GSA photo signatures last one hour. Refresh twice hourly so a delayed
+    # runner does not normally leave the public board with expired images.
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gsa-auction-data-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out application source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export a complete official vehicle snapshot
+        run: node scripts/export-gsa-snapshot.mjs work/gsa-vehicles.json
+
+      - name: Publish the validated snapshot data branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          snapshot_dir="${RUNNER_TEMP}/gsa-auction-data"
+          git fetch origin gsa-auction-data
+          git worktree add --detach "${snapshot_dir}" origin/gsa-auction-data
+          cp work/gsa-vehicles.json "${snapshot_dir}/gsa-vehicles.json"
+          cd "${snapshot_dir}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gsa-vehicles.json
+          if git diff --cached --quiet; then
+            echo "The official snapshot has not changed."
+            exit 0
+          fi
+          git commit -m "chore(data): refresh official GSA auction snapshot"
+          git push origin HEAD:gsa-auction-data

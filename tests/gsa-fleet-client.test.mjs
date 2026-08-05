@@ -238,6 +238,7 @@ test("imports closed outcomes without treating an unawarded high bid as a final 
     forceRefresh: true,
     now: new Date("2026-08-05T18:00:00.000Z"),
     since: "2026-08-01",
+    through: "2026-08-06",
     pageSize: 10,
     maxRows: 10,
   });
@@ -248,6 +249,11 @@ test("imports closed outcomes without treating an unawarded high bid as a final 
     operator: "$gte",
     key: "saleEndDate",
     value: "2026-08-01",
+  });
+  assert.deepEqual(conditions[2], {
+    operator: "$lt",
+    key: "saleEndDate",
+    value: "2026-08-06",
   });
   assert.equal(snapshot.rows[0].finalPriceCents, 1_382_500);
   assert.equal(snapshot.rows[0].finalPriceBasis, "winning-bid");

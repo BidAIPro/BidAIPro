@@ -34,7 +34,7 @@ import {
   type GsaFleetVehicleDetail,
   type GsaFleetVehicleRecord,
 } from "../../../lib/gsa-fleet-client";
-import { readDurableGsaFleetComparableIndex } from "../../../lib/gsa-fleet-comparable-store";
+import { resolveGsaFleetComparableIndex } from "../../../lib/gsa-fleet-comparable-store";
 import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 
 export const revalidate = 300;
@@ -57,6 +57,7 @@ interface FleetBoardSnapshot {
   observedAt: string;
   detailSucceeded: number;
   closedOutcomeErrorCode: string | null;
+  comparableMode: "durable" | "recent-official-fallback" | "unavailable";
   activeInventoryErrorCode: string | null;
   cacheStatus: "refresh" | "stale-fallback";
   comparableIndex: GsaFleetComparableIndex;
@@ -93,7 +94,10 @@ async function buildFleetBoard(db: D1Database, now: Date): Promise<FleetBoardSna
   fleetBoardRequest = (async () => {
     // Load compact D1 outcomes before the public inventory fetch so their raw
     // response pages are never resident at the same time in a 128 MB Worker.
-    const closedResult = await readDurableGsaFleetComparableIndex(db)
+    const closedResult = await resolveGsaFleetComparableIndex(db, {
+      now,
+      signal: AbortSignal.timeout(20_000),
+    })
       .then((data) => ({ data, errorCode: null as string | null }))
       .catch((error) => ({
         data: null,
@@ -166,6 +170,7 @@ async function buildFleetBoard(db: D1Database, now: Date): Promise<FleetBoardSna
       observedAt: active.observedAt,
       detailSucceeded,
       closedOutcomeErrorCode,
+      comparableMode: closedResult.data?.mode ?? "unavailable",
       activeInventoryErrorCode: null,
       cacheStatus: "refresh" as const,
       comparableIndex: index,
@@ -367,6 +372,7 @@ function combinedSourceHealth(
     },
     fleetObservedAt: fleet?.observedAt ?? null,
     fleetClosedOutcomeErrorCode: fleet?.closedOutcomeErrorCode ?? null,
+    fleetComparableMode: fleet?.comparableMode ?? "unavailable",
     fleetActiveInventoryErrorCode: fleet?.activeInventoryErrorCode ?? null,
     fleetCache: fleet?.cacheStatus ?? "unavailable",
   };

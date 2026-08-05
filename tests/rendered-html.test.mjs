@@ -185,6 +185,11 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(opportunityRoute, /fetchGsaFleetVehicleDetail/);
   assert.match(gallery, /aria-modal="true"/);
   assert.match(gallery, /Load \$\{title\} official photo gallery/);
+  assert.match(gallery, /MAX_CONCURRENT_GALLERY_REQUESTS = 4/);
+  assert.match(gallery, /new IntersectionObserver/);
+  assert.match(gallery, /rootMargin: "360px 0px"/);
+  assert.match(gallery, /requestOfficialGallery\(lazyGalleryUrl\)/);
+  assert.match(gallery, /onSourceError=\{handleHeroImageError\}/);
   assert.match(gallery, /ArrowLeft/);
   assert.match(gallery, /ArrowRight/);
   assert.match(gallery, /Escape/);

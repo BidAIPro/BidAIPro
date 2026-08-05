@@ -144,6 +144,35 @@ test("keeps scrap outcomes out of usable Fleet valuation and forecast evidence",
   assert.ok(opportunity.valuation.lowCents > 1_000_000);
 });
 
+test("values Chevrolet K3500 listings from equivalent Silverado 3500 outcomes", () => {
+  const subject = row({
+    vin: "1GC4KZCG0HF100001",
+    year: 2017,
+    make: "CHEVROLET",
+    model: "K3500",
+    mileage: 31_976,
+  });
+  const equivalent = sold({
+    sourceId: "silverado-3500-award",
+    vin: "1GC4KZCG0JF100002",
+    year: 2018,
+    make: "CHEVROLET",
+    model: "Silverado 3500",
+    mileage: 35_000,
+    saleProceedsCents: 3_700_000,
+    finalPriceCents: 3_700_000,
+  });
+  const index = buildGsaFleetComparableIndex([equivalent]);
+  const opportunity = gsaFleetListingToOpportunity(
+    subject,
+    gsaFleetComparableCandidates(subject, index),
+  );
+
+  assert.equal(opportunity.valuation.sampleSize, 1);
+  assert.ok(opportunity.valuation.medianCents > 3_000_000);
+  assert.equal(opportunity.forecast.sampleSize, 1);
+});
+
 test("scheduled live Fleet sales stay preview-only and never invent an online bid", () => {
   const subject = row({
     saleType: "Live",

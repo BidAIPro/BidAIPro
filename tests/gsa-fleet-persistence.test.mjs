@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   GSA_FLEET_ACTIVE_SOURCE_CHECK_SCOPE,
   GSA_FLEET_CLOSED_SOURCE_CHECK_SCOPE,
+  GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE,
+  backfillClosedGsaFleetOutcomes,
   gsaFleetClosedSyncWindow,
   persistGsaFleetActiveListings,
   syncClosedGsaFleetOutcomes,
@@ -24,6 +26,12 @@ class FakeStatement {
 
   async first() {
     this.database.operations.push({ kind: "first", sql: this.sql, args: this.args });
+    if (this.sql.includes("MIN(ended_at)")) {
+      return { ended_at: this.database.earliestEndedAt ?? null };
+    }
+    if (this.sql.includes("SELECT checked_at, result_count, coverage_status")) {
+      return this.database.historyCursor ?? null;
+    }
     return { checked_at: this.database.coveredThrough };
   }
 
@@ -271,4 +279,81 @@ test("upserts confirmed Fleet awards while excluding an unawarded displayed high
   assert.equal(cursor.args[0], GSA_FLEET_CLOSED_SOURCE_CHECK_SCOPE);
   const completion = database.operations.filter((operation) => operation.kind === "run").at(-1);
   assert.match(completion.sql, /coverage_status = 'complete'/);
+});
+
+test("backfills one bounded older Fleet outcome window without loading full history", async () => {
+  const database = new FakeD1();
+  database.earliestEndedAt = "2026-07-29T18:00:00.000Z";
+  let requestBody;
+  const fetchImpl = async (_input, init) => {
+    requestBody = JSON.parse(init.body);
+    return json({
+      data: {
+        getVehicleListingDetails: {
+          count: 1,
+          hasMore: false,
+          rows: [closedListing({
+            id: "fleet-history-award",
+            saleEndDate: "2026-07-20T19:00:00.000Z",
+          })],
+        },
+      },
+    });
+  };
+
+  const summary = await backfillClosedGsaFleetOutcomes(database, {
+    now: NOW,
+    fetchImpl,
+    historyWindowDays: 14,
+    pageSize: 10,
+    maxRows: 10,
+  });
+
+  assert.equal(summary.status, "backfilled");
+  assert.equal(summary.since, "2026-07-15T18:00:00.000Z");
+  assert.equal(summary.through, "2026-07-29T18:00:00.000Z");
+  assert.equal(summary.confirmedAwardedOutcomes, 1);
+  const conditions = requestBody.variables.filters[0].conditions;
+  assert.deepEqual(conditions[1], {
+    operator: "$gte",
+    key: "saleEndDate",
+    value: "2026-07-15",
+  });
+  assert.deepEqual(conditions[2], {
+    operator: "$lt",
+    key: "saleEndDate",
+    value: "2026-07-29",
+  });
+  const historyCheck = database.operations
+    .filter((operation) => operation.kind === "run")
+    .find((operation) => operation.args[1] === GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE);
+  assert.equal(historyCheck.args[2], "2026-07-15T18:00:00.000Z");
+  assert.equal(historyCheck.args[5], "partial");
+});
+
+test("requires two consecutive empty history windows before declaring backfill complete", async () => {
+  const database = new FakeD1();
+  database.historyCursor = {
+    checked_at: "2026-07-15T18:00:00.000Z",
+    result_count: 0,
+    coverage_status: "empty-window",
+  };
+  const summary = await backfillClosedGsaFleetOutcomes(database, {
+    now: NOW,
+    historyWindowDays: 14,
+    fetchImpl: async () => json({
+      data: {
+        getVehicleListingDetails: { count: 0, hasMore: false, rows: [] },
+      },
+    }),
+    pageSize: 10,
+    maxRows: 10,
+  });
+
+  assert.equal(summary.status, "complete");
+  assert.equal(summary.since, "2026-07-01T18:00:00.000Z");
+  const historyCheck = database.operations
+    .filter((operation) => operation.kind === "run")
+    .find((operation) => operation.args[1] === GSA_FLEET_HISTORY_SOURCE_CHECK_SCOPE);
+  assert.equal(historyCheck.args[5], "complete");
 });

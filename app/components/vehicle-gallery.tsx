@@ -47,6 +47,66 @@ function normalizedImages(images: VehicleGalleryProps["images"]) {
   });
 }
 
+const MAX_CONCURRENT_GALLERY_REQUESTS = 4;
+
+type QueuedGalleryRequest = {
+  url: string;
+  resolve: (images: string[]) => void;
+  reject: (error: unknown) => void;
+};
+
+const galleryRequestCache = new Map<string, Promise<string[]>>();
+const galleryRequestQueue: QueuedGalleryRequest[] = [];
+let activeGalleryRequests = 0;
+
+function officialImagesFromPayload(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object" || !("data" in payload)) return [];
+  const data = payload.data;
+  if (!data || typeof data !== "object" || !("images" in data) || !Array.isArray(data.images)) {
+    return [];
+  }
+  return normalizedImages(data.images.filter(
+    (value): value is string => typeof value === "string" && /^https:\/\//i.test(value),
+  ));
+}
+
+function drainGalleryRequestQueue() {
+  while (
+    activeGalleryRequests < MAX_CONCURRENT_GALLERY_REQUESTS &&
+    galleryRequestQueue.length > 0
+  ) {
+    const request = galleryRequestQueue.shift();
+    if (!request) return;
+    activeGalleryRequests += 1;
+    void fetch(request.url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Gallery returned ${response.status}`);
+        return response.json() as Promise<unknown>;
+      })
+      .then((payload) => request.resolve(officialImagesFromPayload(payload)))
+      .catch(request.reject)
+      .finally(() => {
+        activeGalleryRequests -= 1;
+        drainGalleryRequestQueue();
+      });
+  }
+}
+
+function requestOfficialGallery(url: string): Promise<string[]> {
+  const cached = galleryRequestCache.get(url);
+  if (cached) return cached;
+
+  const request = new Promise<string[]>((resolve, reject) => {
+    galleryRequestQueue.push({ url, resolve, reject });
+    drainGalleryRequestQueue();
+  });
+  galleryRequestCache.set(url, request);
+  void request.catch(() => {
+    if (galleryRequestCache.get(url) === request) galleryRequestCache.delete(url);
+  });
+  return request;
+}
+
 export function VehicleGallery({
   images,
   title,
@@ -60,10 +120,15 @@ export function VehicleGallery({
 }: VehicleGalleryProps) {
   const [lazyImages, setLazyImages] = useState<string[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(false);
+  const [failedHeroImages, setFailedHeroImages] = useState<Set<string>>(() => new Set());
   const galleryAttemptedRef = useRef(false);
+  const galleryRootRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(true);
   const galleryImages = useMemo(
-    () => normalizedImages([...images, ...lazyImages]),
-    [images, lazyImages],
+    () => normalizedImages([...images, ...lazyImages]).filter(
+      (source) => !failedHeroImages.has(source),
+    ),
+    [failedHeroImages, images, lazyImages],
   );
   const boundedInitialIndex = Math.max(0, Math.min(initialIndex, galleryImages.length - 1));
   const [activeIndex, setActiveIndex] = useState(boundedInitialIndex);
@@ -81,6 +146,13 @@ export function VehicleGallery({
   const dialogOpen = isOpen && imageCount > 0;
 
   const closeGallery = useCallback(() => setIsOpen(false), []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const previousImage = useCallback(() => {
     if (imageCount < 2) return;
@@ -120,22 +192,46 @@ export function VehicleGallery({
   const loadLazyGallery = useCallback(() => {
     if (!lazyGalleryUrl || galleryAttemptedRef.current) return;
     galleryAttemptedRef.current = true;
-    const controller = new AbortController();
     setGalleryLoading(true);
-    void fetch(lazyGalleryUrl, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Gallery returned ${response.status}`);
-        return response.json() as Promise<{ data?: { images?: unknown } }>;
+    void requestOfficialGallery(lazyGalleryUrl)
+      .then((officialImages) => {
+        if (mountedRef.current) setLazyImages(officialImages);
       })
-      .then((payload) => {
-        if (!Array.isArray(payload.data?.images)) return;
-        setLazyImages(payload.data.images.filter(
-          (value): value is string => typeof value === "string" && /^https?:\/\//i.test(value),
-        ));
+      .catch(() => {
+        // A later click can retry a transient source failure.
+        galleryAttemptedRef.current = false;
       })
-      .catch(() => undefined)
-      .finally(() => setGalleryLoading(false));
+      .finally(() => {
+        if (mountedRef.current) setGalleryLoading(false);
+      });
   }, [lazyGalleryUrl]);
+
+  useEffect(() => {
+    if (!lazyGalleryUrl || imageCount > 0 || galleryAttemptedRef.current) return;
+    if (variant === "detail") {
+      loadLazyGallery();
+      return;
+    }
+    const root = galleryRootRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      loadLazyGallery();
+    }, { rootMargin: "360px 0px" });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [imageCount, lazyGalleryUrl, loadLazyGallery, variant]);
+
+  const handleHeroImageError = useCallback((source: string) => {
+    setFailedHeroImages((current) => {
+      if (current.has(source)) return current;
+      const next = new Set(current);
+      next.add(source);
+      return next;
+    });
+    loadLazyGallery();
+  }, [loadLazyGallery]);
 
   function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
@@ -182,7 +278,7 @@ export function VehicleGallery({
   if (imageCount === 0) {
     if (lazyGalleryUrl) {
       return (
-        <div className={`${rootClassName} vehicle-gallery--empty`}>
+        <div ref={galleryRootRef} className={`${rootClassName} vehicle-gallery--empty`}>
           <button
             ref={triggerRef}
             className="vehicle-gallery__trigger"
@@ -208,7 +304,7 @@ export function VehicleGallery({
       );
     }
     return (
-      <div className={`${rootClassName} vehicle-gallery--empty`}>
+      <div ref={galleryRootRef} className={`${rootClassName} vehicle-gallery--empty`}>
         <VehicleImage
           src={null}
           alt={`${title}. No official listing image is available.`}
@@ -277,6 +373,7 @@ export function VehicleGallery({
               fallbackCopy="This official image is no longer available. Try another photo or open the GSA listing."
               variant="detail"
               priority
+              onSourceError={handleHeroImageError}
             />
             <figcaption>Official GSA listing photo {displayedIndex + 1} of {imageCount}</figcaption>
           </figure>
@@ -331,7 +428,7 @@ export function VehicleGallery({
   );
 
   return (
-    <div className={rootClassName}>
+    <div ref={galleryRootRef} className={rootClassName}>
       <button
         ref={triggerRef}
         className="vehicle-gallery__trigger"
@@ -350,6 +447,7 @@ export function VehicleGallery({
           fallbackCopy={fallbackCopy}
           variant={variant}
           priority={priority}
+          onSourceError={handleHeroImageError}
         />
         <span className="vehicle-gallery__expand" aria-hidden="true"><Maximize2 /></span>
         {imageCount > 1 && (

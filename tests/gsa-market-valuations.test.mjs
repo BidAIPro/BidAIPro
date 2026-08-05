@@ -80,6 +80,17 @@ test("canonicalizes common noisy model families and defensible vehicle classes",
     title: "2020 Jeep Grand Cherokee",
     modelLabel: "Grand Cherokee",
   })), "jeep-grand-cherokee");
+  assert.equal(canonicalVehicleFamily(subject({
+    make: "Chevrolet",
+    title: "2017 Chevrolet K3500",
+    modelLabel: "K3500",
+  })), "chevrolet-silverado-3500");
+  assert.equal(classifyVehicle(subject({
+    make: "Chevrolet",
+    title: "2017 Chevrolet K3500",
+    modelLabel: "K3500",
+    bodyType: null,
+  })), "pickup-one-ton");
   assert.notEqual(
     canonicalVehicleFamily(subject({
       make: "Jeep",
