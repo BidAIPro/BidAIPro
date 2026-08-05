@@ -12,15 +12,15 @@ export const GSA_PPMS_SALE_PREVIEW_ENDPOINT =
 export const GSA_PPMS_IMAGE_SIGNING_ENDPOINT =
   "https://www.ppms.gov/gw/common/ppms/api/v1/storage/presigned-urls";
 
-// PPMS applies its public-site Origin allowlist to edge-originated requests as
-// well as browser requests. Sites edge subrequests receive 403 unless they use
-// the public GSA Auctions origin expected by these first-party JSON services.
-const PPMS_PUBLIC_SITE_ORIGIN = "https://gsaauctions.gov";
+// PPMS applies an Origin allowlist to edge-originated requests as well as
+// browser requests. Sites edge subrequests receive 403 unless they use the
+// target service's own origin.
+const PPMS_SERVICE_ORIGIN = "https://www.ppms.gov";
 
 function ppmsHeaders(jsonBody = false): Headers {
   const headers = new Headers({
     Accept: "application/json",
-    Origin: PPMS_PUBLIC_SITE_ORIGIN,
+    Origin: PPMS_SERVICE_ORIGIN,
   });
   if (jsonBody) headers.set("Content-Type", "application/json");
   return headers;
@@ -28,7 +28,9 @@ function ppmsHeaders(jsonBody = false): Headers {
 
 const CATALOG_PAGE_SIZE = 200;
 const MAX_CATALOG_PAGES = 25;
-const DETAIL_CONCURRENCY = 8;
+// Cloudflare Workers permit six simultaneous outbound connections per
+// invocation; keeping the pool at that limit avoids queued detail requests.
+const DETAIL_CONCURRENCY = 6;
 // Six photos is enough for the board/detail experience without returning a
 // multi-megabyte response full of expiring storage signatures.
 const MAX_IMAGES_PER_VEHICLE = 6;

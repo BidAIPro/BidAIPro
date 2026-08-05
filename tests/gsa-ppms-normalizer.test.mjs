@@ -127,7 +127,7 @@ test("rejects a catalog snapshot when every lot detail request fails", async () 
     (error) => error instanceof PpmsClientError && error.code === "GSA_PPMS_DETAILS_UNAVAILABLE",
   );
   assert.deepEqual(requestOrigins, [
-    "https://gsaauctions.gov",
-    "https://gsaauctions.gov",
+    "https://www.ppms.gov",
+    "https://www.ppms.gov",
   ]);
 });

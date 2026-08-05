@@ -60,7 +60,7 @@ test("maps the official PPMS live response to a cents-based snapshot", async () 
   );
   assert.equal(requestedInit.method, "GET");
   assert.equal(requestedInit.headers.Accept, "application/json");
-  assert.equal(requestedInit.headers.Origin, "https://gsaauctions.gov");
+  assert.equal(requestedInit.headers.Origin, "https://www.ppms.gov");
   assert.ok(requestedInit.signal instanceof AbortSignal);
   assert.deepEqual(snapshot, {
     externalId: "372696",
