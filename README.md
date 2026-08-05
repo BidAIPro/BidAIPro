@@ -4,7 +4,7 @@ BidAI Pro is a vehicle-only government auction intelligence application. It disc
 
 ## Public website
 
-The production frontend is published at [bidaipro.github.io/BidAIPro](https://bidaipro.github.io/BidAIPro/). GitHub Pages builds the static interface from the `main` branch, while the live GSA endpoints, D1 database, and scheduled collection remain on the server-side Sites deployment. The browser is given only the public backend origin; provider credentials and database bindings are never included in the Pages bundle.
+The production frontend is published at [bidaipro.github.io/BidAIPro](https://bidaipro.github.io/BidAIPro/). GitHub Pages builds the static interface from the `main` branch, while the public API and D1 database remain on the server-side Sites deployment. The browser is given only the public backend origin; provider credentials and database bindings are never included in the Pages bundle.
 
 Every push to `main` runs `.github/workflows/deploy-pages.yml` and publishes `out` after a successful static export.
 
@@ -29,6 +29,12 @@ It is configured to push `main` to `https://github.com/BidAIPro/BidAIPro.git`. T
 - A closed GSA high bid is not called a sale until an authoritative award source confirms the outcome.
 - The comparable ledger currently accrues outcomes for lots observed by this installation. Historical bulk backfill is intentionally not active without an authorized, dependable closed-record source.
 
+## Current hosted-source limitation
+
+GSA currently returns HTTP 403 to both the Sites/Cloudflare runtime and GitHub-hosted Actions runners. The deployed site therefore uses a strictly validated, manually published PPMS snapshot when direct discovery fails. Snapshot responses are visibly labeled, never presented as live polling, and never replaced with demo vehicles. Vehicle facts expire after 24 hours; short-lived GSA image links are removed after 55 minutes.
+
+The current snapshot can seed D1 once while it is inside the source freshness window, but it cannot create continuing bid history by itself. Automatic catalog refresh and auction-specific closing checks require either an allowed-network collector or a configured supported GSA feed credential. Do not represent the cadence below as operational until production source health reports `liveBidPolling: true`.
+
 ## Local development
 
 ```powershell
@@ -48,7 +54,7 @@ pnpm exec drizzle-kit generate
 
 The test suite covers PPMS catalog/detail/image normalization, the legacy credential-safe fallback, mileage conflicts, damage and issue extraction, nullable source facts, valuation/forecast separation, cost and safe-ceiling math, live-bid refresh boundaries, server-rendered pages, and social metadata.
 
-## Monitoring cadence
+## Target monitoring cadence
 
 | Time remaining | Auction-specific check cadence |
 | --- | ---: |
@@ -58,7 +64,7 @@ The test suite covers PPMS catalog/detail/image normalization, the legacy creden
 | Final minute | 15 seconds |
 | Scheduled close, outcome unconfirmed | 15-second grace, then reconciliation |
 
-The server stores the complete catalog hourly, then a minute trigger switches only closing-window vehicles to the first-party per-auction live endpoint. It performs 30-second and 15-second sub-passes inside the scheduled invocation and persists changed bids, extensions, and terminal high bids even when no browser is open. The browser mirrors the same cadence while a user is viewing the board.
+The scheduler and browser policy implement these boundaries, but checks run only when the upstream live adapter is reachable. The current hosted deployment is permission-gated by GSA and explicitly displays snapshot warnings instead of claiming that these checks succeeded. Once an allowed collector is connected, changed bids, extensions, and terminal high bids can be persisted without requiring an open browser.
 
 ## Important disclaimer
 
