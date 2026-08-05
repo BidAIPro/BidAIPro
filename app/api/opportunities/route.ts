@@ -1,9 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getGsaVehicleAuctions, GsaClientError } from "../../../lib/gsa-client";
-import {
-  discoveryToOpportunity,
-  mergeEnrichedSeeds,
-} from "../../../lib/opportunity-adapter";
+import { discoveryToOpportunity } from "../../../lib/opportunity-adapter";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
 
 export const revalidate = 3600;
@@ -17,7 +14,7 @@ export async function GET() {
     const active = discovery.auctions
       .filter((auction) => auction.status === "active")
       .map((auction) => discoveryToOpportunity(auction, discovery.sourceHealth.observedAt));
-    const opportunities = mergeEnrichedSeeds(active, SEED_AUCTIONS);
+    const opportunities = active;
 
     return Response.json(
       {
@@ -32,9 +29,13 @@ export async function GET() {
     );
   } catch (error) {
     const errorCode = error instanceof GsaClientError ? error.code : "GSA_UNKNOWN_ERROR";
+    const now = Date.now();
+    const activeReferenceSnapshot = SEED_AUCTIONS.filter(
+      (auction) => auction.endsAt !== null && Date.parse(auction.endsAt) > now,
+    );
     return Response.json(
       {
-        data: SEED_AUCTIONS,
+        data: activeReferenceSnapshot,
         meta: {
           mode: "last-known-demo-snapshot",
           coverage: null,

@@ -6,9 +6,11 @@ BidAI Pro is a vehicle-only government auction intelligence application. It disc
 
 - The official source is [`gsaauctions.gov`](https://gsaauctions.gov/), not `gsaauctions.com`.
 - Hourly discovery uses the documented [GSA Auctions API](https://gsa.github.io/auctions_api/).
+- A personal `GSA_API_KEY` is required for dependable production discovery. The shared `DEMO_KEY` fallback is development-only and can be rate limited.
 - The public bulk feed can lag the interactive auction page. The sub-minute live-detail adapter remains disabled until GSA authorizes that access or supplies a higher-freshness feed.
 - KBB is not scraped. `KBB_API_KEY` is reserved for a licensed commercial integration. Demo market references are labeled as reference-only throughout the product.
 - A closed GSA high bid is not called a sale until an authoritative award source confirms the outcome.
+- The comparable ledger currently accrues outcomes for lots observed by this installation. Historical bulk backfill is intentionally not active without an authorized, dependable closed-record source.
 
 ## Local development
 
@@ -27,7 +29,7 @@ pnpm lint
 pnpm exec drizzle-kit generate
 ```
 
-The test suite covers the official-feed normalizer and credential-safe client, valuation/forecast separation, cost and safe-ceiling math, auction refresh boundaries, server-rendered pages, and social metadata.
+The test suite covers the official-feed normalizer and credential-safe client, nullable source facts, valuation/forecast separation, cost and safe-ceiling math, auction refresh boundaries, server-rendered pages, and social metadata.
 
 ## Monitoring cadence
 

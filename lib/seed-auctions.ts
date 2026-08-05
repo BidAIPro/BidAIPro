@@ -14,7 +14,7 @@ interface SeedDefinition {
   saleLotNumber: string;
   title: string;
   currentBidCents: number;
-  bidCount: number;
+  bidderCount: number;
   endsAt: string;
   location: AuctionOpportunity["location"];
   vehicle: VehicleSnapshot;
@@ -95,7 +95,7 @@ function seedAuction(definition: SeedDefinition): AuctionOpportunity {
     imageSource: "gsa-auctions",
     status: "active",
     currentBidCents: definition.currentBidCents,
-    bidCount: definition.bidCount,
+    bidderCount: definition.bidderCount,
     endsAt: definition.endsAt,
     lastCheckedAt: OBSERVED_AT,
     location: definition.location,
@@ -130,7 +130,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "4-1-QSC-V-26-005-001",
     title: "2018 Dodge Durango SXT",
     currentBidCents: 251_000,
-    bidCount: 3,
+    bidderCount: 3,
     endsAt: "2026-08-07T17:00:00.000Z",
     location: { city: "Fontana", state: "CA", postalCode: "92335" },
     vehicle: {
@@ -170,7 +170,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "4-1-QSC-V-26-005-002",
     title: "2020 Nissan Pathfinder",
     currentBidCents: 351_000,
-    bidCount: 4,
+    bidderCount: 4,
     endsAt: "2026-08-07T17:10:00.000Z",
     location: { city: "Fontana", state: "CA", postalCode: "92335" },
     vehicle: {
@@ -192,7 +192,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "4-1-QSC-V-26-005-003",
     title: "2019 RAM 1500",
     currentBidCents: 303_000,
-    bidCount: 4,
+    bidderCount: 4,
     endsAt: "2026-08-07T17:20:00.000Z",
     location: { city: "Fontana", state: "CA", postalCode: "92335" },
     vehicle: {
@@ -214,7 +214,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "4-1-QSC-V-26-005-004",
     title: "2009 Ford Explorer XLT",
     currentBidCents: 246_500,
-    bidCount: 5,
+    bidderCount: 5,
     endsAt: "2026-08-07T17:30:00.000Z",
     location: { city: "Tucson", state: "AZ", postalCode: "85714" },
     vehicle: {
@@ -238,7 +238,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "4-1-QSC-V-26-005-005",
     title: "2016 Ford Explorer",
     currentBidCents: 151_000,
-    bidCount: 2,
+    bidderCount: 2,
     endsAt: "2026-08-07T17:40:00.000Z",
     location: { city: "Fontana", state: "CA", postalCode: "92335" },
     vehicle: {
@@ -260,7 +260,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "4-1-QSC-V-26-005-006",
     title: "2020 Nissan Pathfinder",
     currentBidCents: 509_700,
-    bidCount: 7,
+    bidderCount: 7,
     endsAt: "2026-08-07T17:50:00.000Z",
     location: { city: "Fontana", state: "CA", postalCode: "92335" },
     vehicle: {
@@ -282,7 +282,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "3-1-QSC-I-26-506-009",
     title: "2024 Nissan Titan 4x4 Crew Cab SV",
     currentBidCents: 3_000_000,
-    bidCount: 6,
+    bidderCount: 6,
     endsAt: "2026-08-05T17:53:00.000Z",
     location: { city: "Salina", state: "KS", postalCode: "67401" },
     vehicle: {
@@ -307,7 +307,7 @@ export const SEED_AUCTIONS: readonly AuctionOpportunity[] = [
     saleLotNumber: "3-1-QSC-I-26-506-008",
     title: "2020 Jeep Cherokee Latitude Plus FWD",
     currentBidCents: 888_500,
-    bidCount: 6,
+    bidderCount: 6,
     endsAt: "2026-08-05T17:43:00.000Z",
     location: { city: "Springfield", state: "MO", postalCode: "65802" },
     vehicle: {

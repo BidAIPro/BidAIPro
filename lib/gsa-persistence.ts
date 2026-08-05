@@ -2,10 +2,15 @@ import type { GsaDiscoveryResult } from "./gsa-client";
 import type { GsaVehicleAuction } from "./gsa-normalizer";
 
 interface ExistingAuctionState {
-  current_bid_cents: number;
-  bid_count: number;
+  current_bid_cents: number | null;
+  bidder_count: number | null;
   status: string;
-  ends_at: string;
+  ends_at: string | null;
+}
+
+interface PreviousCoverage {
+  result_count: number | null;
+  expected_result_count: number | null;
 }
 
 export interface PersistenceSummary {
@@ -43,11 +48,46 @@ function normalizedVehicleKey(auction: GsaVehicleAuction) {
 function changed(existing: ExistingAuctionState | null, auction: GsaVehicleAuction) {
   if (!existing) return true;
   return (
-    existing.current_bid_cents !== (cents(auction.currentBid) ?? 0) ||
-    existing.bid_count !== (auction.bidderCount ?? 0) ||
+    existing.current_bid_cents !== cents(auction.currentBid) ||
+    existing.bidder_count !== auction.bidderCount ||
     existing.status !== auction.status ||
-    existing.ends_at !== (auction.endsAt ?? existing.ends_at)
+    existing.ends_at !== auction.endsAt
   );
+}
+
+async function readPreviousCoverage(db: D1Database): Promise<PreviousCoverage | null> {
+  return db.prepare(
+    `SELECT result_count, expected_result_count
+     FROM source_checks
+     WHERE source_key = 'gsa-auctions'
+       AND scope = 'hourly-catalog'
+       AND success = 1
+       AND coverage_status = 'complete'
+     ORDER BY checked_at DESC
+     LIMIT 1`,
+  ).first<PreviousCoverage>();
+}
+
+function assertPlausibleCoverage(
+  discovery: GsaDiscoveryResult,
+  activeCount: number,
+  previous: PreviousCoverage | null,
+) {
+  const { totalLots, vehicleLots } = discovery.coverage;
+  const internallyConsistent =
+    totalLots > 0 && vehicleLots > 0 && activeCount > 0 && vehicleLots <= totalLots;
+  const totalNotCollapsed =
+    !previous?.expected_result_count || totalLots >= Math.ceil(previous.expected_result_count * 0.5);
+  const activeNotCollapsed =
+    !previous?.result_count || activeCount >= Math.ceil(previous.result_count * 0.5);
+
+  if (internallyConsistent && totalNotCollapsed && activeNotCollapsed) return;
+
+  const error = new Error(
+    "The official GSA catalog failed the completeness guard and was not persisted.",
+  ) as Error & { code: string };
+  error.code = "GSA_IMPLAUSIBLE_COVERAGE";
+  throw error;
 }
 
 async function readExisting(
@@ -56,7 +96,7 @@ async function readExisting(
 ): Promise<Map<string, ExistingAuctionState>> {
   const existing = new Map<string, ExistingAuctionState>();
   const statement = db.prepare(
-    `SELECT current_bid_cents, bid_count, status, ends_at
+    `SELECT current_bid_cents, bidder_count, status, ends_at
      FROM auctions WHERE id = ?1`,
   );
 
@@ -93,6 +133,8 @@ export async function persistGsaDiscovery(
   const activeAuctions = discovery.auctions.filter(
     (auction) => auction.status === "active" || auction.status === "preview",
   );
+  const previousCoverage = await readPreviousCoverage(db);
+  assertPlausibleCoverage(discovery, activeAuctions.length, previousCoverage);
 
   // Create the source check before any observations so their foreign key is
   // always valid. It remains explicitly incomplete if a later D1 batch fails.
@@ -113,7 +155,7 @@ export async function persistGsaDiscovery(
 
   const upsertAuctionSql = `INSERT INTO auctions (
       id, source_key, external_id, sale_lot_number, title, canonical_url,
-      status, currency, current_bid_cents, bid_count, bid_increment_cents,
+      status, currency, current_bid_cents, bidder_count, bid_increment_cents,
       reserve_status, starts_at, ends_at, seller_agency, city, state,
       postal_code, address, primary_image_url, first_seen_at, last_seen_at,
       last_checked_at, price_changed_at, created_at, updated_at
@@ -126,7 +168,7 @@ export async function persistGsaDiscovery(
       canonical_url = excluded.canonical_url,
       status = excluded.status,
       current_bid_cents = excluded.current_bid_cents,
-      bid_count = excluded.bid_count,
+      bidder_count = excluded.bidder_count,
       bid_increment_cents = excluded.bid_increment_cents,
       reserve_status = excluded.reserve_status,
       starts_at = excluded.starts_at,
@@ -140,8 +182,8 @@ export async function persistGsaDiscovery(
       last_seen_at = excluded.last_seen_at,
       last_checked_at = excluded.last_checked_at,
       price_changed_at = CASE
-        WHEN auctions.current_bid_cents <> excluded.current_bid_cents
-          OR auctions.bid_count <> excluded.bid_count
+        WHEN auctions.current_bid_cents IS NOT excluded.current_bid_cents
+          OR auctions.bidder_count IS NOT excluded.bidder_count
         THEN excluded.last_checked_at ELSE auctions.price_changed_at END,
       updated_at = excluded.updated_at`;
 
@@ -166,7 +208,7 @@ export async function persistGsaDiscovery(
 
   const insertObservationSql = `INSERT INTO bid_observations (
       id, auction_id, source_check_id, observed_at, current_bid_cents,
-      bid_count, status, ends_at, extension_count, created_at
+      bidder_count, status, ends_at, extension_count, created_at
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?4)`;
 
   const auctionStatement = db.prepare(upsertAuctionSql);
@@ -181,7 +223,7 @@ export async function persistGsaDiscovery(
       const saleLotNumber = [auction.saleNumber, auction.lotNumber]
         .filter(Boolean)
         .join(" · Lot ") || auction.id;
-      const endsAt = auction.endsAt ?? observedAt;
+      const endsAt = auction.endsAt;
       const address = auction.location.addressLines.join(", ") || null;
       const previous = existing.get(auction.id) ?? null;
       const didChange = changed(previous, auction);
@@ -194,8 +236,8 @@ export async function persistGsaDiscovery(
           auction.title,
           auction.url,
           auction.status,
-          cents(auction.currentBid) ?? 0,
-          auction.bidderCount ?? 0,
+          cents(auction.currentBid),
+          auction.bidderCount,
           cents(auction.bidIncrement),
           auction.reserve === null ? null : "reserve-value-exposed",
           auction.startsAt,
@@ -233,8 +275,8 @@ export async function persistGsaDiscovery(
             auction.id,
             sourceCheckId,
             observedAt,
-            cents(auction.currentBid) ?? 0,
-            auction.bidderCount ?? 0,
+            cents(auction.currentBid),
+            auction.bidderCount,
             auction.status,
             endsAt,
           ),
@@ -245,7 +287,16 @@ export async function persistGsaDiscovery(
   }
 
   const archiveMissing = db.prepare(
-    `UPDATE auctions SET
+    `WITH previous_complete AS (
+       SELECT MAX(checked_at) AS checked_at
+       FROM source_checks
+       WHERE source_key = 'gsa-auctions'
+         AND scope = 'hourly-catalog'
+         AND success = 1
+         AND coverage_status = 'complete'
+         AND checked_at < ?1
+     )
+     UPDATE auctions SET
        status = 'ended',
        ended_at = ?1,
        final_bid_cents = current_bid_cents,
@@ -253,7 +304,8 @@ export async function persistGsaDiscovery(
        updated_at = ?1
      WHERE source_key = 'gsa-auctions'
        AND status IN ('active', 'preview', 'closing')
-       AND last_seen_at < ?1`,
+       AND (SELECT checked_at FROM previous_complete) IS NOT NULL
+       AND last_seen_at < (SELECT checked_at FROM previous_complete)`,
   ).bind(observedAt);
 
   const completeSourceCheck = db.prepare(
@@ -262,7 +314,7 @@ export async function persistGsaDiscovery(
      WHERE id = ?1`,
   ).bind(sourceCheckId);
 
-  const [archiveResult] = await db.batch([archiveMissing, completeSourceCheck]);
+  const archiveResult = await archiveMissing.run();
   const archived = archiveResult?.meta.changes ?? 0;
 
   await db.prepare(
@@ -279,14 +331,23 @@ export async function persistGsaDiscovery(
       v.drivetrain, v.mileage, v.condition, v.title_status, v.operability,
       a.city, a.state, a.current_bid_cents, NULL, 'unknown', a.reserve_status,
       a.currency,
-      CASE WHEN a.current_bid_cents > 0 THEN 'closed-high-bid' ELSE 'no-bid' END,
+      CASE
+        WHEN a.current_bid_cents > 0 THEN 'closed-high-bid'
+        WHEN a.current_bid_cents = 0 AND a.bidder_count = 0 THEN 'no-bid'
+        ELSE 'closed-outcome-unknown'
+      END,
       a.ended_at, ?1, ?1
     FROM auctions a
     JOIN vehicles v ON v.auction_id = a.id
     WHERE a.source_key = 'gsa-auctions'
       AND a.status = 'ended'
-      AND a.ended_at = ?1`,
+      AND a.ended_at = ?1
+      AND a.current_bid_cents IS NOT NULL`,
   ).bind(observedAt).run();
+
+  // Mark the check complete only after the catalog, archive, and comparable
+  // writes have all succeeded.
+  await completeSourceCheck.run();
 
   return {
     discovered: discovery.coverage.totalLots,

@@ -41,7 +41,7 @@ test("server-renders the production Deal Board", async () => {
   assert.match(html, /The deal board/i);
   assert.match(html, /Official GSA vehicle intelligence/i);
   assert.match(html, /Safe bid ceiling/i);
-  assert.match(html, /Reference only|not KBB/i);
+  assert.match(html, /demo references|licensed KBB|not KBB/i);
   assert.match(html, /Not affiliated with or endorsed by/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
@@ -57,6 +57,15 @@ test("server-renders a complete vehicle underwriting dossier", async () => {
   assert.match(html, /Open official auction/i);
 });
 
+test("server-renders the comparable outcome ledger with explicit award semantics", async () => {
+  const response = await render("/comps");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Comparable ledger/i);
+  assert.match(html, /closed high bid is not proof/i);
+  assert.match(html, /Historical bulk backfill is not active/i);
+});
+
 test("keeps social metadata and database capability wired", async () => {
   const [layout, hosting, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -70,4 +79,17 @@ test("keeps social metadata and database capability wired", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await readFile(new URL("../public/og.png", import.meta.url));
   assert.ok(templateRoot);
+});
+
+test("keeps the open deal board fresh and expires reference snapshots", async () => {
+  const [board, opportunityRoute] = await Promise.all([
+    readFile(new URL("../app/components/deal-board.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/opportunities/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(board, /fetch\("\/api\/opportunities"/);
+  assert.match(board, /setInterval\(\(\) => void loadOpportunities\(\), 60 \* 60_000\)/);
+  assert.match(board, /setAuctions\(payload\.data\)/);
+  assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
+  assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
 });

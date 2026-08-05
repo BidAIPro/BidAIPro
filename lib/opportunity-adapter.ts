@@ -62,7 +62,7 @@ export function discoveryToOpportunity(
 ): AuctionOpportunity {
   const valuation = unavailableValuation(observedAt);
   const forecast = insufficientForecast(observedAt);
-  const currentBidCents = Math.round((auction.currentBid ?? 0) * 100);
+  const currentBidCents = auction.currentBid === null ? null : Math.round(auction.currentBid * 100);
   const title = auction.title || "Untitled GSA vehicle";
   const year = auction.year ?? Number(title.match(/\b(19|20)\d{2}\b/)?.[0] ?? 0);
   const make = auction.make ?? "Make pending";
@@ -82,8 +82,8 @@ export function discoveryToOpportunity(
     imageSource: "gsa-auctions",
     status: auction.status === "active" ? "active" : "preview",
     currentBidCents,
-    bidCount: auction.bidderCount ?? 0,
-    endsAt: auction.endsAt ?? new Date(Date.parse(observedAt) + 24 * 60 * 60_000).toISOString(),
+    bidderCount: auction.bidderCount,
+    endsAt: auction.endsAt,
     lastCheckedAt: observedAt,
     location: {
       city: auction.location.city ?? "Location pending",
@@ -110,7 +110,9 @@ export function discoveryToOpportunity(
     valuation,
     forecast,
     assessment: assessDeal({
-      currentBidCents,
+      // The model requires a numeric purchase basis, but the assessment is
+      // deliberately insufficient and never actionable when the feed omits it.
+      currentBidCents: currentBidCents ?? 0,
       valuation,
       forecast,
       costs: DEFAULT_DEAL_COSTS,
@@ -124,28 +126,4 @@ export function discoveryToOpportunity(
       valuation: "unavailable",
     },
   };
-}
-
-export function mergeEnrichedSeeds(
-  discovered: readonly AuctionOpportunity[],
-  enriched: readonly AuctionOpportunity[],
-): AuctionOpportunity[] {
-  const byExternalId = new Map(enriched.map((auction) => [auction.externalId, auction]));
-  const merged = discovered.map((auction) => {
-    const seed = byExternalId.get(auction.externalId);
-    if (!seed) return auction;
-    byExternalId.delete(auction.externalId);
-    return {
-      ...seed,
-      currentBidCents: auction.currentBidCents,
-      bidCount: auction.bidCount,
-      endsAt: auction.endsAt,
-      lastCheckedAt: auction.lastCheckedAt,
-      status: auction.status,
-    };
-  });
-  // Never make unmatched reference snapshots look like currently active lots
-  // when the official feed is healthy. The API route uses the complete seed
-  // set only in its explicitly labeled fallback response.
-  return merged;
 }

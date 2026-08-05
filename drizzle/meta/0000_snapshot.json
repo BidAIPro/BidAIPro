@@ -218,17 +218,15 @@
           "name": "current_bid_cents",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
+          "notNull": false,
+          "autoincrement": false
         },
-        "bid_count": {
-          "name": "bid_count",
+        "bidder_count": {
+          "name": "bidder_count",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
+          "notNull": false,
+          "autoincrement": false
         },
         "bid_increment_cents": {
           "name": "bid_increment_cents",
@@ -255,7 +253,7 @@
           "name": "ends_at",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "ended_at": {
@@ -468,14 +466,14 @@
           "name": "current_bid_cents",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
-        "bid_count": {
-          "name": "bid_count",
+        "bidder_count": {
+          "name": "bidder_count",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "status": {
@@ -489,7 +487,7 @@
           "name": "ends_at",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "extension_count": {

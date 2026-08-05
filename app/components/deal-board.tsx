@@ -31,9 +31,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuctionOpportunity } from "../../lib/auction-types";
-import { SEED_AUCTIONS } from "../../lib/seed-auctions";
 
 type SortKey = "deal" | "ending" | "profit" | "bid";
 type QuickFilter = "all" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
@@ -54,7 +53,10 @@ function formatMileage(value: number | null | undefined) {
   return value === null || value === undefined ? "Mileage unknown" : `${integer.format(value)} mi`;
 }
 
-function timeLeft(endsAt: string, now: number) {
+function timeLeft(endsAt: string | null, now: number) {
+  if (!endsAt) {
+    return { label: "Time unavailable", urgent: false, seconds: Number.POSITIVE_INFINITY };
+  }
   const distance = new Date(endsAt).getTime() - now;
   if (distance <= 0) return { label: "Closing confirmation", urgent: true, seconds: 0 };
   const seconds = Math.floor(distance / 1000);
@@ -81,7 +83,8 @@ function relativeTime(iso: string, now: number) {
   return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-function scoreLabel(score: number) {
+function scoreLabel(score: number, status: AuctionOpportunity["assessment"]["status"]) {
+  if (status === "insufficient") return "Unscored";
   if (score >= 75) return "Strong deal";
   if (score >= 55) return "Worth watching";
   if (score >= 35) return "Needs diligence";
@@ -95,27 +98,26 @@ function statusTone(status: AuctionOpportunity["assessment"]["status"]) {
   return "neutral";
 }
 
-function DealScore({ score }: { score: number }) {
+function DealScore({ score, status }: { score: number; status: AuctionOpportunity["assessment"]["status"] }) {
   const bounded = Math.max(0, Math.min(100, score));
+  const unscored = status === "insufficient";
   return (
     <div className="deal-score" style={{ "--score": `${bounded * 3.6}deg` } as CSSProperties}>
       <div>
-        <strong>{bounded}</strong>
-        <span>/100</span>
+        <strong>{unscored ? "—" : bounded}</strong>
+        <span>{unscored ? "pending" : "/100"}</span>
       </div>
     </div>
   );
 }
 
-function PollingLabel({ auction, now }: { auction: AuctionOpportunity; now: number }) {
+function PollingLabel({ auction }: { auction: AuctionOpportunity }) {
   if (auction.id.startsWith("live-")) {
     return <span className="poll-label"><Activity size={13} /> 1 hr catalog</span>;
   }
-  const remaining = timeLeft(auction.endsAt, now).seconds;
-  const interval = remaining <= 60 ? "15 sec" : remaining <= 300 ? "30 sec" : remaining <= 1_800 ? "5 min" : "1 hr";
   return (
     <span className="poll-label">
-      <Activity size={13} /> {interval} watch
+      <Activity size={13} /> Reference snapshot
     </span>
   );
 }
@@ -187,8 +189,8 @@ function OpportunityCard({
             </div>
           </div>
           <div className="score-lockup">
-            <DealScore score={auction.assessment.score} />
-            <div><strong>{scoreLabel(auction.assessment.score)}</strong><span>{Math.round(auction.assessment.confidence * 100)}% confidence</span></div>
+            <DealScore score={auction.assessment.score} status={auction.assessment.status} />
+            <div><strong>{scoreLabel(auction.assessment.score, auction.assessment.status)}</strong><span>{Math.round(auction.assessment.confidence * 100)}% confidence</span></div>
           </div>
         </div>
 
@@ -196,7 +198,7 @@ function OpportunityCard({
           <div>
             <span>Current bid</span>
             <strong>{dollars(currentBid)}</strong>
-            <small>{auction.bidCount ?? 0} bids</small>
+            <small>{auction.bidderCount === null ? "Bidder count unavailable" : `${auction.bidderCount} bidders`}</small>
           </div>
           <div>
             <span>Projected close</span>
@@ -230,7 +232,7 @@ function OpportunityCard({
           <div>
             <span className="evidence-chip"><Database size={13} /> {auction.forecast.sampleSize} GSA comps</span>
             <span className="evidence-chip"><ShieldCheck size={13} /> VIN {auction.vehicle.vin ? "captured" : "pending"}</span>
-            <PollingLabel auction={auction} now={now} />
+            <PollingLabel auction={auction} />
           </div>
           <div className="card-actions">
             <span className="freshness">Checked {relativeTime(auction.lastCheckedAt, now)}</span>
@@ -249,11 +251,11 @@ function OpportunityCard({
 
 export function DealBoard() {
   const [now, setNow] = useState(() => Date.now());
-  const [auctions, setAuctions] = useState<AuctionOpportunity[]>(() => [...SEED_AUCTIONS]);
+  const [auctions, setAuctions] = useState<AuctionOpportunity[]>([]);
   const [sourceMeta, setSourceMeta] = useState({
     mode: "loading",
     status: "checking",
-    vehicleLots: SEED_AUCTIONS.length,
+    vehicleLots: 0,
   });
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("deal");
@@ -266,6 +268,47 @@ export function DealBoard() {
   const [maxBid, setMaxBid] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const opportunityRequest = useRef<AbortController | null>(null);
+
+  const loadOpportunities = useCallback(async () => {
+    opportunityRequest.current?.abort();
+    const controller = new AbortController();
+    opportunityRequest.current = controller;
+    setRefreshing(true);
+
+    try {
+      const response = await fetch("/api/opportunities", {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
+      const payload = await response.json() as {
+        data?: AuctionOpportunity[];
+        meta?: {
+          mode?: string;
+          coverage?: { vehicleLots?: number } | null;
+          sourceHealth?: { status?: string } | null;
+        };
+      };
+      if (!Array.isArray(payload.data)) throw new Error("Opportunity feed omitted its data array");
+
+      setAuctions(payload.data);
+      setSourceMeta({
+        mode: payload.meta?.mode ?? "unknown",
+        status: payload.meta?.sourceHealth?.status ?? "unknown",
+        vehicleLots: payload.meta?.coverage?.vehicleLots ?? payload.data.length,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      setSourceMeta((current) => ({
+        ...current,
+        mode: "last-known-client-snapshot",
+        status: "unavailable",
+      }));
+    } finally {
+      if (opportunityRequest.current === controller) setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -273,33 +316,14 @@ export function DealBoard() {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/opportunities", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
-        return response.json() as Promise<{
-          data?: AuctionOpportunity[];
-          meta?: {
-            mode?: string;
-            coverage?: { vehicleLots?: number } | null;
-            sourceHealth?: { status?: string } | null;
-          };
-        }>;
-      })
-      .then((payload) => {
-        if (Array.isArray(payload.data) && payload.data.length) setAuctions(payload.data);
-        setSourceMeta({
-          mode: payload.meta?.mode ?? "unknown",
-          status: payload.meta?.sourceHealth?.status ?? "unknown",
-          vehicleLots: payload.meta?.coverage?.vehicleLots ?? payload.data?.length ?? SEED_AUCTIONS.length,
-        });
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setSourceMeta({ mode: "last-known-demo-snapshot", status: "unavailable", vehicleLots: SEED_AUCTIONS.length });
-      });
-    return () => controller.abort();
-  }, []);
+    const initialLoad = window.setTimeout(() => void loadOpportunities(), 0);
+    const timer = window.setInterval(() => void loadOpportunities(), 60 * 60_000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+      opportunityRequest.current?.abort();
+    };
+  }, [loadOpportunities]);
 
   const states = useMemo(() => Array.from(new Set(auctions.map((item) => item.location.state))).sort(), [auctions]);
   const conditions = useMemo(() => Array.from(new Set(auctions.map((item) => item.vehicle.condition))).sort(), [auctions]);
@@ -312,28 +336,30 @@ export function DealBoard() {
       if (normalizedQuery && !haystack.includes(normalizedQuery)) return false;
       if (stateFilter !== "all" && auction.location.state !== stateFilter) return false;
       if (conditionFilter !== "all" && auction.vehicle.condition !== conditionFilter) return false;
-      if (maxBidCents !== null && auction.currentBidCents > maxBidCents) return false;
+      if (maxBidCents !== null && (auction.currentBidCents === null || auction.currentBidCents > maxBidCents)) return false;
       if (quickFilter === "closing") {
+        if (auction.id.startsWith("live-") || !auction.endsAt) return false;
         const remaining = new Date(auction.endsAt).getTime() - now;
-        if (auction.id.startsWith("live-") || remaining < 0 || remaining > 30 * 60_000) return false;
+        if (remaining < 0 || remaining > 30 * 60_000) return false;
       }
       if (quickFilter === "trucks" && !`${auction.vehicle.bodyStyle ?? ""} ${auction.title}`.toLowerCase().match(/truck|pickup|silverado|ram|f-?2/)) return false;
       if (quickFilter === "high-confidence" && auction.assessment.confidence < 0.7) return false;
-      if (quickFilter === "under-10k" && auction.currentBidCents > 1_000_000) return false;
+      if (quickFilter === "under-10k" && (auction.currentBidCents === null || auction.currentBidCents > 1_000_000)) return false;
       if (quickFilter === "saved" && !saved.has(auction.id)) return false;
       return auction.status === "active";
     });
 
     return result.sort((a, b) => {
-      if (sort === "ending") return new Date(a.endsAt).getTime() - new Date(b.endsAt).getTime();
+      if (sort === "ending") return (a.endsAt ? new Date(a.endsAt).getTime() : Number.POSITIVE_INFINITY) - (b.endsAt ? new Date(b.endsAt).getTime() : Number.POSITIVE_INFINITY);
       if (sort === "profit") return (b.assessment.projectedProfitCents ?? -Infinity) - (a.assessment.projectedProfitCents ?? -Infinity);
-      if (sort === "bid") return a.currentBidCents - b.currentBidCents;
+      if (sort === "bid") return (a.currentBidCents ?? Number.POSITIVE_INFINITY) - (b.currentBidCents ?? Number.POSITIVE_INFINITY);
       return b.assessment.score - a.assessment.score;
     });
   }, [auctions, conditionFilter, maxBid, now, query, quickFilter, saved, sort, stateFilter]);
 
   const totalHeadroom = auctions.reduce((sum, item) => sum + Math.max(0, item.assessment.projectedProfitCents ?? 0), 0);
   const closingCount = auctions.filter((item) => {
+    if (!item.endsAt) return false;
     const remaining = new Date(item.endsAt).getTime() - now;
     return !item.id.startsWith("live-") && remaining >= 0 && remaining <= 30 * 60_000;
   }).length;
@@ -351,11 +377,8 @@ export function DealBoard() {
   }
 
   function refreshSnapshot() {
-    setRefreshing(true);
-    window.setTimeout(() => {
-      setNow(Date.now());
-      setRefreshing(false);
-    }, 650);
+    setNow(Date.now());
+    void loadOpportunities();
   }
 
   return (
@@ -374,14 +397,14 @@ export function DealBoard() {
           <a className={quickFilter === "saved" ? "active" : ""} href="#deal-board" onClick={() => setQuickFilter("saved")}><Bookmark size={18} /> Watchlist <span>{saved.size}</span></a>
           <p>Intelligence</p>
           <a href="#deal-board" onClick={() => setQuickFilter("high-confidence")}><CircleDollarSign size={18} /> Market values</a>
-          <a href="#deal-board"><Database size={18} /> Closed comps</a>
+          <Link href="/comps"><Database size={18} /> Comp ledger</Link>
           <a href="#source-health"><HeartPulse size={18} /> Data health</a>
         </nav>
 
         <div className="source-health-card" id="source-health">
           <div><Activity size={16} /><span>Source health</span><strong>{sourceMeta.status === "live" ? "Operational" : sourceMeta.status === "checking" ? "Checking" : "Fallback"}</strong></div>
           <p>{sourceMeta.status === "live" ? `Official GSA catalog delivered ${sourceMeta.vehicleLots} vehicle lots.` : "Last-known official snapshot is visible. Closing-detail adapter remains permission-gated."}</p>
-          <div className="health-meter"><span /></div>
+          <div className={`health-meter ${sourceMeta.status === "live" ? "" : "is-stale"}`}><span /></div>
           <small>Hourly discovery · adaptive watch planned</small>
         </div>
 
@@ -397,7 +420,7 @@ export function DealBoard() {
             <kbd>⌘ K</kbd>
           </div>
           <div className="topbar-status">
-            <span className="live-dot" />
+            <span className={`live-dot ${sourceMeta.status === "live" ? "" : "is-stale"}`} />
             <div><strong>Official source</strong><small>{sourceMeta.status === "live" ? "Hourly feed" : "Snapshot fallback"}</small></div>
           </div>
           <button className="icon-button" type="button" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></button>
@@ -409,7 +432,7 @@ export function DealBoard() {
             <div>
               <p className="eyebrow"><span /> Official GSA vehicle intelligence</p>
               <h1>The deal board</h1>
-              <p>Every active vehicle, ranked by projected-close economics—not an artificially low early bid.</p>
+              <p>Every active vehicle in one underwriting queue. Deal Scores activate only when independent value and comparable evidence are available.</p>
             </div>
             <div className="intro-actions">
               <button type="button" className="refresh-button" onClick={refreshSnapshot} disabled={refreshing}>
@@ -423,7 +446,7 @@ export function DealBoard() {
             <article>
               <div className="metric-icon blue"><CarFront size={18} /></div>
               <div><span>Tracked opportunities</span><strong>{auctions.length}</strong><small>Official GSA vehicle lots</small></div>
-              <em>{sourceMeta.mode === "official-hourly-feed" ? "Live hourly discovery" : "Last-known snapshot"}</em>
+              <em>{sourceMeta.status === "live" ? "Live hourly discovery" : sourceMeta.status === "checking" ? "Checking official source" : "Last-known snapshot"}</em>
             </article>
             <article>
               <div className="metric-icon green"><CircleDollarSign size={18} /></div>
@@ -438,7 +461,7 @@ export function DealBoard() {
             <article>
               <div className="metric-icon amber"><Clock3 size={18} /></div>
               <div><span>Closing room</span><strong>{closingCount}</strong><small>Inside 30 minutes</small></div>
-              <em className={closingCount ? "urgent-copy" : ""}>{closingCount ? "Adaptive watch" : "No urgent lots"}</em>
+              <em className={closingCount ? "urgent-copy" : ""}>{closingCount ? "Verify live at GSA" : "No urgent lots"}</em>
             </article>
           </section>
 
@@ -446,9 +469,18 @@ export function DealBoard() {
             <ShieldCheck size={18} />
             <div>
               <strong>Evidence-aware by design</strong>
-              <span>Market values are demo references until a licensed KBB, Black Book, J.D. Power, or other provider is connected. Current GSA bids never substitute for vehicle value.</span>
+              <span>Market values are demo references until a licensed KBB, Black Book, J.D. Power, or other provider is connected. A safe bid ceiling activates only with sufficient independent evidence; current GSA bids never substitute for value.</span>
             </div>
             <a href="#source-health">View source ledger <ArrowRight size={14} /></a>
+          </section>
+
+          <section className="source-notice comp-ledger-notice" id="comp-ledger">
+            <Database size={18} />
+            <div>
+              <strong>Comparable ledger</strong>
+              <span>This installation records closed high bids after two confirmed catalog misses; award price remains unknown until an authoritative outcome source confirms it. Historical bulk backfill is not active.</span>
+            </div>
+            <Link href="/comps">Open ledger <ArrowRight size={14} /></Link>
           </section>
 
           <section className="board-toolbar">
@@ -469,14 +501,14 @@ export function DealBoard() {
             </div>
           </section>
 
-          <div className="result-line"><strong>{opportunities.length} opportunities</strong><span>Sorted by projected-close Deal Score</span></div>
+          <div className="result-line"><strong>{opportunities.length} opportunities</strong><span>Deal Score order; insufficient-evidence rows remain unscored</span></div>
 
           <section className={`opportunity-list ${compact ? "compact-list" : ""}`}>
             {opportunities.map((auction) => (
               <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} />
             ))}
             {!opportunities.length && (
-              <div className="empty-state"><Search size={28} /><h2>No vehicles match these filters</h2><p>Clear a filter or widen the bid range to bring opportunities back into view.</p><button type="button" onClick={() => { setQuery(""); setQuickFilter("all"); setStateFilter("all"); setConditionFilter("all"); setMaxBid(""); }}>Reset filters</button></div>
+              <div className="empty-state"><Search size={28} /><h2>{sourceMeta.status === "checking" ? "Checking the official GSA catalog" : auctions.length === 0 ? "No active vehicle lots are available" : "No vehicles match these filters"}</h2><p>{auctions.length === 0 ? "The board will populate when the official source or a still-active reference snapshot is available." : "Clear a filter or widen the bid range to bring opportunities back into view."}</p><button type="button" onClick={() => { setQuery(""); setQuickFilter("all"); setStateFilter("all"); setConditionFilter("all"); setMaxBid(""); }}>Reset filters</button></div>
             )}
           </section>
 

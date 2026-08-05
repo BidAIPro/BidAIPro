@@ -166,9 +166,9 @@ export interface AuctionOpportunity {
   imageUrl: string;
   imageSource: "gsa-auctions";
   status: AuctionStatus;
-  currentBidCents: MoneyCents;
-  bidCount: number;
-  endsAt: ISODateTime;
+  currentBidCents: MoneyCents | null;
+  bidderCount: number | null;
+  endsAt: ISODateTime | null;
   lastCheckedAt: ISODateTime;
   location: AuctionLocation;
   vehicle: VehicleSnapshot;

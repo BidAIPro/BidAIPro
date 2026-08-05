@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  discoveryToOpportunity,
-  mergeEnrichedSeeds,
-} from "../lib/opportunity-adapter.ts";
-import { SEED_AUCTIONS } from "../lib/seed-auctions.ts";
+import { discoveryToOpportunity } from "../lib/opportunity-adapter.ts";
 
 const observedAt = "2026-08-05T04:00:00.000Z";
 
@@ -46,6 +42,7 @@ test("official discovery stays visible without fabricating value or a safe ceili
   const opportunity = discoveryToOpportunity(discovery(), observedAt);
   assert.equal(opportunity.externalId, "372498");
   assert.equal(opportunity.currentBidCents, 918600);
+  assert.equal(opportunity.bidderCount, 3);
   assert.equal(opportunity.vehicle.vin, "NM0GE9E26M1495395");
   assert.equal(opportunity.imageUrl, "");
   assert.equal(opportunity.valuation.status, "unavailable");
@@ -53,31 +50,17 @@ test("official discovery stays visible without fabricating value or a safe ceili
   assert.equal(opportunity.assessment.status, "insufficient");
   assert.equal(opportunity.assessment.safeMaxBidCents, null);
   assert.equal(opportunity.assessment.score, 0);
+  assert.equal(opportunity.endsAt, "2026-08-05T00:00:00.000Z");
 });
 
-test("an enriched record replaces the discovery shell while current auction facts stay fresh", () => {
-  const seed = SEED_AUCTIONS[0];
-  const live = discoveryToOpportunity(
-    discovery({
-      id: "gsa:seed:001",
-      url: seed.sourceUrl,
-      currentBid: 4321,
-      bidderCount: 9,
-      endsAt: "2026-08-08T00:00:00.000Z",
-    }),
+test("missing source facts remain unavailable instead of becoming zero-valued deals", () => {
+  const opportunity = discoveryToOpportunity(
+    discovery({ currentBid: null, bidderCount: null, endsAt: null }),
     observedAt,
   );
-  const [merged] = mergeEnrichedSeeds([live], [seed]);
-  assert.equal(merged.id, seed.id);
-  assert.equal(merged.valuation.status, "reference-only");
-  assert.equal(merged.currentBidCents, 432100);
-  assert.equal(merged.bidCount, 9);
-  assert.equal(merged.lastCheckedAt, observedAt);
-});
-
-test("healthy official discovery never appends unmatched reference snapshots", () => {
-  const live = discoveryToOpportunity(discovery(), observedAt);
-  const merged = mergeEnrichedSeeds([live], SEED_AUCTIONS);
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0].externalId, "372498");
+  assert.equal(opportunity.currentBidCents, null);
+  assert.equal(opportunity.bidderCount, null);
+  assert.equal(opportunity.endsAt, null);
+  assert.equal(opportunity.assessment.status, "insufficient");
+  assert.equal(opportunity.assessment.safeMaxBidCents, null);
 });

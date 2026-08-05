@@ -63,7 +63,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
   const valueMedian = auction.valuation.medianCents ?? 0;
   const valueHigh = auction.valuation.highCents ?? Math.max(valueMedian, 1);
   const rangeSpan = Math.max(1, valueHigh - valueLow);
-  const bidPosition = Math.max(0, Math.min(100, ((auction.currentBidCents - valueLow) / rangeSpan) * 100));
+  const bidPosition = auction.currentBidCents === null ? 0 : Math.max(0, Math.min(100, ((auction.currentBidCents - valueLow) / rangeSpan) * 100));
   const ceilingPosition = auction.assessment.safeMaxBidCents === null ? 0 : Math.max(0, Math.min(100, ((auction.assessment.safeMaxBidCents - valueLow) / rangeSpan) * 100));
   const forecastPosition = auction.forecast.expectedCents === null ? 0 : Math.max(0, Math.min(100, ((auction.forecast.expectedCents - valueLow) / rangeSpan) * 100));
 
@@ -121,7 +121,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
             </div>
 
             <div className="decision-grid">
-              <article><span>Current bid</span><strong>{dollars(auction.currentBidCents)}</strong><small>{auction.bidCount ?? 0} bids · GSA observed</small></article>
+              <article><span>Current bid</span><strong>{dollars(auction.currentBidCents)}</strong><small>{auction.bidderCount === null ? "Bidder count unavailable" : `${auction.bidderCount} bidders`} · GSA observed</small></article>
               <article><span>Projected close</span><strong>{dollars(auction.forecast.expectedCents)}</strong><small>{dollars(auction.forecast.lowCents)}–{dollars(auction.forecast.highCents)}</small></article>
               <article><span>Conservative value</span><strong>{dollars(auction.assessment.conservativeValueCents)}</strong><small>{auction.valuation.status === "provider" ? auction.valuation.provider : "Demo market reference"}</small></article>
               <article className="primary-decision"><span>Safe bid ceiling</span><strong>{dollars(auction.assessment.safeMaxBidCents)}</strong><small>After all modeled costs</small></article>
@@ -130,7 +130,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
             <div className="decision-actions">
               <a href={auction.sourceUrl} target="_blank" rel="noreferrer" className="official-cta">Open official auction <ExternalLink size={16} /></a>
               <Link href="#cost-model" className="outline-cta">Inspect the math <ArrowRight size={15} /></Link>
-              <span><Clock3 size={14} /> Scheduled close {new Date(auction.endsAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
+              <span><Clock3 size={14} /> Scheduled close {auction.endsAt ? new Date(auction.endsAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : "unavailable"}</span>
             </div>
           </div>
         </section>

@@ -5,6 +5,12 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    // Listing media stays a direct official-source URL. Do not proxy or rehost
+    // it through the application until its reuse rights are confirmed.
+    files: ["app/components/deal-board.tsx", "app/vehicle/**/page.tsx"],
+    rules: { "@next/next/no-img-element": "off" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

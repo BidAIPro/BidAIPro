@@ -4,7 +4,7 @@ import { DealBoard } from "./components/deal-board";
 export const metadata: Metadata = {
   title: "Deal Board",
   description:
-    "Active official GSA vehicle auctions ranked by projected value, risk, and bid headroom.",
+    "Active official GSA vehicle auctions organized by source freshness, valuation evidence, risk, and available bid headroom.",
 };
 
 export default function Home() {
