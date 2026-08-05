@@ -91,7 +91,7 @@ const MARKET_VALUE_BATCH_SIZE = 12;
 const MARKET_VALUE_REFRESH_MS = 55 * 60_000;
 const MARKET_VALUE_REQUEST_TIMEOUT_MS = 10_000;
 const LIVE_BID_REQUEST_TIMEOUT_MS = 10_000;
-const OPPORTUNITY_REQUEST_TIMEOUT_MS = 35_000;
+const OPPORTUNITY_REQUEST_TIMEOUT_MS = 45_000;
 const PUBLISHED_SNAPSHOT_TIMEOUT_MS = 6_000;
 const PHOTOS_RETRY_INTERVAL_MS = 2 * 60_000;
 const FOCUS_REFRESH_MINIMUM_AGE_MS = 60_000;
@@ -340,6 +340,7 @@ function OpportunityCard({
   const currentBid = auction.currentBidCents;
   const marketValue = auction.valuation.medianCents;
   const predictedClose = auction.forecast.expectedCents;
+  const marketOnlyProjection = auction.forecast.reasonCodes.includes("MARKET_ONLY_BEFORE_PUBLIC_BID");
   const safeMax = auction.assessment.safeMaxBidCents;
   const allInNow = currentBid === null ? null : auction.assessment.allInAtCurrentBidCents;
   const addedCostsNow = currentBid === null || allInNow === null ? null : Math.max(0, allInNow - currentBid);
@@ -437,7 +438,9 @@ function OpportunityCard({
           <div>
             <span>Projected close · before costs</span>
             <strong>{dollars(predictedClose)}</strong>
-            <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}` : "Needs matched close-price comps"}</small>
+            <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null
+              ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}${marketOnlyProjection ? " · market-only until a bid appears" : ""}`
+              : "Needs matched close-price comps"}</small>
           </div>
           <div>
             <span>Adjusted market value</span>

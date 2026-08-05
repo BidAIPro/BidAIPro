@@ -31,7 +31,7 @@ import { VehicleGallery } from "./vehicle-gallery";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const OPPORTUNITY_REQUEST_TIMEOUT_MS = 35_000;
+const OPPORTUNITY_REQUEST_TIMEOUT_MS = 45_000;
 const MARKET_VALUE_REQUEST_TIMEOUT_MS = 10_000;
 const LIVE_BID_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -49,6 +49,21 @@ function odometerStatusLabel(status: AuctionOpportunity["vehicle"]["odometerStat
   if (status === "conflicting-readings") return "Conflicting GSA readings";
   if (status === "not-reported") return "Not reported";
   return "GSA reported · verify";
+}
+
+function supportsVehicleLivePolling(auction: AuctionOpportunity) {
+  if (auction.status !== "active") return false;
+  if (auction.source === "gsa-fleet") {
+    return auction.onlineBidding !== false &&
+      auction.saleType !== "live" &&
+      Boolean(auction.vehicle.vin && auction.saleNumber);
+  }
+  return auction.id.startsWith("live-") && /^\d+$/.test(auction.externalId);
+}
+
+function isScheduledOfflineFleetSale(auction: AuctionOpportunity) {
+  return auction.source === "gsa-fleet" &&
+    (auction.onlineBidding === false || auction.saleType === "live");
 }
 
 function LoadingState({ title, copy }: { title: string; copy: string }) {
@@ -83,7 +98,10 @@ export function LiveVehicleDetail() {
     );
     async function load() {
       try {
-        const response = await fetch(publicApiUrl("/api/opportunities"), { signal: controller.signal });
+        const response = await fetch(
+          publicApiUrl(`/api/opportunities?id=${encodeURIComponent(requestedId)}`),
+          { signal: controller.signal },
+        );
         if (!response.ok) throw new Error(`Opportunity feed returned ${response.status}`);
         const payload = await response.json() as {
           data?: AuctionOpportunity[];
@@ -94,10 +112,11 @@ export function LiveVehicleDetail() {
         };
         const match = payload.data?.find((item) => item.id === requestedId || item.externalId === requestedId) ?? null;
         setAuction(match);
-        setLiveBidPolling(Boolean(match && (
+        const sourcePollingAvailable = Boolean(match && (
           payload.meta?.sourceHealth?.liveBidPollingBySource?.[match.source] === true ||
           (match.source === "gsa-auctions" && payload.meta?.sourceHealth?.liveBidPolling === true)
-        )));
+        ));
+        setLiveBidPolling(Boolean(match && sourcePollingAvailable && supportsVehicleLivePolling(match)));
         setStatus(match ? "ready" : "missing");
       } catch {
         if (mounted) setStatus("error");
@@ -253,6 +272,8 @@ export function LiveVehicleDetail() {
   if (!auction || status === "missing") return <LoadingState title="Vehicle not found in the active feed" copy="It may have closed, changed identifiers, or left the current GSA catalog." />;
 
   const { costs } = auction.assessment;
+  const scheduledOfflineFleetSale = isScheduledOfflineFleetSale(auction);
+  const marketOnlyProjection = auction.forecast.reasonCodes.includes("MARKET_ONLY_BEFORE_PUBLIC_BID");
   const allInNow = auction.currentBidCents === null ? null : auction.assessment.allInAtCurrentBidCents;
   const addedCostsNow = auction.currentBidCents === null || allInNow === null ? null : Math.max(0, allInNow - auction.currentBidCents);
   const costRows = [
@@ -272,7 +293,7 @@ export function LiveVehicleDetail() {
       <header className="detail-topbar">
         <Link href="/" className="detail-brand"><span><TrendingUp size={18} /></span><strong>BIDAI</strong><em>PRO</em></Link>
         <Link href="/" className="back-link"><ArrowLeft size={15} /> Back to deal board</Link>
-        <div className="detail-source-status"><span /> {liveBidPolling ? "Live source checks available" : "Snapshot · verify current bid"}</div>
+        <div className="detail-source-status"><span /> {liveBidPolling ? "Live source checks available" : scheduledOfflineFleetSale ? "Scheduled in-person sale · no online bid feed" : "Snapshot · verify current bid"}</div>
       </header>
 
       <div className="detail-wrap">
@@ -310,13 +331,13 @@ export function LiveVehicleDetail() {
         {!liveBidPolling && (
           <section className="detail-feed-warning" aria-label="Bid freshness warning">
             <AlertTriangle size={18} />
-            <div><strong>Snapshot bid — live refresh unavailable</strong><span>GSA blocks the hosted live-bid connection. Verify the bid, bidder count, extensions, and closing status at the official auction before acting.</span></div>
+            <div><strong>{scheduledOfflineFleetSale ? "Scheduled in-person sale — no online bid feed" : "Snapshot bid — live refresh unavailable"}</strong><span>{scheduledOfflineFleetSale ? "This GSA Fleet event is conducted offline. The scheduled event time is shown, but no online current bid or automatic bid refresh is claimed." : "GSA blocks the hosted live-bid connection. Verify the bid, bidder count, extensions, and closing status at the official auction before acting."}</span></div>
             <a href={auction.sourceUrl} target="_blank" rel="noreferrer">Verify live at GSA <ExternalLink size={14} /></a>
           </section>
         )}
 
         <section className="detail-stat-strip">
-          <article><CircleDollarSign size={17} /><span>Projected close<strong>{dollars(auction.forecast.expectedCents)}</strong><small>Before added costs</small></span></article>
+          <article><CircleDollarSign size={17} /><span>Projected close<strong>{dollars(auction.forecast.expectedCents)}</strong><small>{marketOnlyProjection ? "Market/outcome estimate before a public bid" : "Before added costs"}</small></span></article>
           <article><TrendingUp size={17} /><span>Conservative value<strong>{dollars(auction.assessment.conservativeValueCents)}</strong><small>Independent of live bid</small></span></article>
           <article><Database size={17} /><span>Forecast evidence<strong>{closeForecastEvidenceLabel(auction.forecast)}</strong><small>{auction.forecast.exactModelCount} exact-model matches</small></span></article>
           <article><ShieldCheck size={17} /><span>Model confidence<strong>{Math.round(auction.assessment.confidence * 100)}%</strong><small>Forecast, not a guarantee</small></span></article>

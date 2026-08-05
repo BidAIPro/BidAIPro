@@ -93,9 +93,10 @@ test("keeps social metadata and database capability wired", async () => {
 });
 
 test("keeps the open deal board fresh and expires reference snapshots", async () => {
-  const [board, opportunityRoute, gallery, liveDetail, comparableLedger, styles, evidenceLabels] = await Promise.all([
+  const [board, opportunityRoute, opportunityPresentation, gallery, liveDetail, comparableLedger, styles, evidenceLabels] = await Promise.all([
     readFile(new URL("../app/components/deal-board.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/opportunities/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/opportunity-presentation.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/components/vehicle-gallery.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/live-vehicle-detail.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/comps/comparable-ledger.tsx", import.meta.url), "utf8"),
@@ -115,6 +116,9 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /Source and confidence remain visible beside every value/);
   assert.match(board, /Official closed-catalog results are imported hourly/);
   assert.match(liveDetail, /OPPORTUNITY_REQUEST_TIMEOUT_MS/);
+  assert.match(liveDetail, /\/api\/opportunities\?id=\$\{encodeURIComponent\(requestedId\)\}/);
+  assert.match(liveDetail, /supportsVehicleLivePolling/);
+  assert.match(liveDetail, /Scheduled in-person sale · no online bid feed/);
   assert.match(liveDetail, /MARKET_VALUE_REQUEST_TIMEOUT_MS/);
   assert.match(liveDetail, /LIVE_BID_REQUEST_TIMEOUT_MS/);
   assert.match(comparableLedger, /LEDGER_REQUEST_TIMEOUT_MS/);
@@ -146,6 +150,8 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
     assert.doesNotMatch(publicClient, /cache:\s*["']no-store["']/);
   }
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
+  assert.match(opportunityRoute, /DIRECT_GSA_DEADLINE_MS/);
+  assert.match(opportunityRoute, /withinDeadline/);
   assert.match(opportunityRoute, /status: "stale"/);
   assert.doesNotMatch(opportunityRoute, /imageUrl: null, images: \[\]/);
   assert.match(opportunityRoute, /liveBidPollingBySource/);
@@ -153,7 +159,12 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(opportunityRoute, /"gsa-fleet": fleetLive/);
   assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
+  assert.match(opportunityRoute, /compactOpportunityForBoard/);
+  assert.match(opportunityPresentation, /outcomeAnchors: \[\]/);
+  assert.match(opportunityRoute, /recordsByOpportunityId/);
+  assert.match(opportunityRoute, /fetchGsaFleetVehicleDetail/);
   assert.match(gallery, /aria-modal="true"/);
+  assert.match(gallery, /Load \$\{title\} official photo gallery/);
   assert.match(gallery, /ArrowLeft/);
   assert.match(gallery, /ArrowRight/);
   assert.match(gallery, /Escape/);

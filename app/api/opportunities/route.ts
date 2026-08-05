@@ -12,6 +12,7 @@ import {
   discoveryToOpportunity,
 } from "../../../lib/opportunity-adapter";
 import type { AuctionOpportunity } from "../../../lib/auction-types";
+import { compactOpportunityForBoard } from "../../../lib/opportunity-presentation";
 import {
   buildGsaFleetComparableIndex,
   buildGsaFleetOutcomeValuation,
@@ -24,8 +25,10 @@ import {
   enrichGsaFleetVehicleDetails,
   fetchGsaFleetActiveListings,
   fetchGsaFleetClosedResults,
+  fetchGsaFleetVehicleDetail,
   GsaFleetClientError,
   type GsaFleetVehicleDetail,
+  type GsaFleetVehicleRecord,
 } from "../../../lib/gsa-fleet-client";
 import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 
@@ -35,6 +38,9 @@ export const OPTIONS = publicApiPreflight;
 
 const CACHE_CONTROL =
   "public, max-age=0, s-maxage=300, stale-while-revalidate=300, stale-if-error=600";
+const DETAIL_CACHE_CONTROL =
+  "public, max-age=0, s-maxage=60, stale-while-revalidate=120, stale-if-error=300";
+const DIRECT_GSA_DEADLINE_MS = 18_000;
 
 interface FleetBoardSnapshot {
   opportunities: AuctionOpportunity[];
@@ -46,10 +52,28 @@ interface FleetBoardSnapshot {
   observedAt: string;
   detailSucceeded: number;
   comparableIndex: GsaFleetComparableIndex;
+  recordsByOpportunityId: Map<string, GsaFleetVehicleRecord>;
 }
 
 let fleetBoardCache: { expiresAt: number; value: FleetBoardSnapshot } | null = null;
 let fleetBoardRequest: Promise<FleetBoardSnapshot> | null = null;
+
+async function withinDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new GsaClientError(
+          "GSA_DIRECT_DEADLINE",
+          "The direct GSA Auctions catalog exceeded the route deadline.",
+        )), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
   if (fleetBoardCache && fleetBoardCache.expiresAt > now.getTime()) {
@@ -116,6 +140,9 @@ async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
       observedAt: active.observedAt,
       detailSucceeded,
       comparableIndex: index,
+      recordsByOpportunityId: new Map(
+        visibleRows.map((row) => [`fleet-${row.sourceId}`, row]),
+      ),
     };
     fleetBoardCache = { expiresAt: Date.now() + 5 * 60_000, value };
     return value;
@@ -123,6 +150,52 @@ async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
     fleetBoardRequest = null;
   });
   return fleetBoardRequest;
+}
+
+function requestedOpportunityId(request?: Request): string | null {
+  if (!request) return null;
+  try {
+    const value = new URL(request.url).searchParams.get("id")?.trim() ?? "";
+    return value && value.length <= 160 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function opportunitiesForResponse(
+  opportunities: AuctionOpportunity[],
+  requestedId: string | null,
+  fleet: FleetBoardSnapshot | null,
+): Promise<AuctionOpportunity[]> {
+  if (!requestedId) return opportunities.map(compactOpportunityForBoard);
+  const match = opportunities.find((item) =>
+    item.id === requestedId || item.externalId === requestedId
+  );
+  if (!match) return [];
+  if (match.source !== "gsa-fleet" || !fleet) return [match];
+
+  const row = fleet.recordsByOpportunityId.get(match.id);
+  if (!row?.vin) return [match];
+  try {
+    const detail = await fetchGsaFleetVehicleDetail(row.vin, {
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (
+      detail.saleNumber && row.saleNumber &&
+      detail.saleNumber.trim().toUpperCase() !== row.saleNumber.trim().toUpperCase()
+    ) {
+      return [match];
+    }
+    return [gsaFleetListingToOpportunity(
+      row,
+      gsaFleetComparableCandidates(row, fleet.comparableIndex),
+      detail,
+    )];
+  } catch {
+    // The already validated listing record is still a useful fallback when
+    // the optional detail/gallery lookup is briefly unavailable.
+    return [match];
+  }
 }
 
 function combinedCoverage(
@@ -253,7 +326,8 @@ async function persistSnapshotOnce(snapshot: GsaRunnerSnapshot, now: number) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const requestedId = requestedOpportunityId(request);
   const requestNow = new Date();
   const fleetRequest = buildFleetBoard(requestNow)
     .then((data) => ({ data, errorCode: null as string | null }))
@@ -263,8 +337,51 @@ export async function GET() {
         ? error.code
         : "GSA_FLEET_UNKNOWN_ERROR",
     }));
+  if (requestedId?.startsWith("fleet-")) {
+    const fleet = await fleetRequest;
+    if (fleet.data) {
+      const data = await opportunitiesForResponse(
+        fleet.data.opportunities,
+        requestedId,
+        fleet.data,
+      );
+      return Response.json(
+        {
+          data,
+          meta: {
+            mode: "official-gsa-fleet-detail",
+            coverage: combinedCoverage(null, 0, fleet.data),
+            sourceHealth: combinedSourceHealth(
+              { status: "live", discoveryCadence: "hourly" },
+              false,
+              fleet.data,
+            ),
+          },
+        },
+        { headers: publicApiHeaders({ "Cache-Control": DETAIL_CACHE_CONTROL }) },
+      );
+    }
+    return Response.json(
+      {
+        data: [],
+        meta: {
+          mode: "official-gsa-fleet-detail-unavailable",
+          coverage: null,
+          sourceHealth: {
+            status: "unavailable",
+            lastErrorCode: fleet.errorCode,
+            discoveryCadence: "hourly",
+          },
+        },
+      },
+      { headers: publicApiHeaders({ "Cache-Control": "no-store" }) },
+    );
+  }
   try {
-    const discovery = await getGsaVehicleAuctions({ apiKey: env.GSA_API_KEY });
+    const discovery = await withinDeadline(
+      getGsaVehicleAuctions({ apiKey: env.GSA_API_KEY }),
+      DIRECT_GSA_DEADLINE_MS,
+    );
     const now = Date.now();
     const activeAuctions = discovery.auctions.filter((auction) => isActiveAt(auction, now));
     let gsaOpportunities = activeAuctions.map((auction) =>
@@ -287,10 +404,15 @@ export async function GET() {
     ];
     const gsaCoverage = coverageForResponse(discovery.coverage, activeAuctions);
     const gsaLive = discovery.sourceHealth.sourceMode === "ppms-public-catalog";
+    const responseOpportunities = await opportunitiesForResponse(
+      opportunities,
+      requestedId,
+      fleet.data,
+    );
 
     return Response.json(
       {
-        data: opportunities,
+        data: responseOpportunities,
         meta: {
           mode: fleet.data
             ? "official-gsa-auctions-and-fleet"
@@ -310,7 +432,9 @@ export async function GET() {
           },
         },
       },
-      { headers: publicApiHeaders({ "Cache-Control": CACHE_CONTROL }) },
+      { headers: publicApiHeaders({
+        "Cache-Control": requestedId ? DETAIL_CACHE_CONTROL : CACHE_CONTROL,
+      }) },
     );
   } catch (error) {
     const directErrorCode = error instanceof GsaClientError ? error.code : "GSA_UNKNOWN_ERROR";
@@ -344,10 +468,15 @@ export async function GET() {
         ...(fleet.data?.opportunities ?? []),
       ];
       const gsaCoverage = coverageForResponse(snapshot.coverage, responseAuctions);
+      const responseData = await opportunitiesForResponse(
+        combinedOpportunities,
+        requestedId,
+        fleet.data,
+      );
 
       return Response.json(
         {
-          data: combinedOpportunities,
+          data: responseData,
           meta: {
             mode: fleet.data
               ? "official-gsa-fleet-with-gsa-auctions-snapshot"
@@ -401,9 +530,14 @@ export async function GET() {
           ? snapshotError.code
           : "GSA_RUNNER_SNAPSHOT_UNKNOWN_ERROR";
       if (fleet.data) {
+        const responseData = await opportunitiesForResponse(
+          fleet.data.opportunities,
+          requestedId,
+          fleet.data,
+        );
         return Response.json(
           {
-            data: fleet.data.opportunities,
+            data: responseData,
             meta: {
               mode: "official-gsa-fleet-only",
               coverage: combinedCoverage(null, 0, fleet.data),
@@ -418,7 +552,9 @@ export async function GET() {
               ),
             },
           },
-          { headers: publicApiHeaders({ "Cache-Control": CACHE_CONTROL }) },
+          { headers: publicApiHeaders({
+            "Cache-Control": requestedId ? DETAIL_CACHE_CONTROL : CACHE_CONTROL,
+          }) },
         );
       }
       return Response.json(

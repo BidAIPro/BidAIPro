@@ -180,6 +180,33 @@ export function VehicleGallery({
     .join(" ");
 
   if (imageCount === 0) {
+    if (lazyGalleryUrl) {
+      return (
+        <div className={`${rootClassName} vehicle-gallery--empty`}>
+          <button
+            ref={triggerRef}
+            className="vehicle-gallery__trigger"
+            type="button"
+            onClick={() => {
+              setIsOpen(true);
+              loadLazyGallery();
+            }}
+            aria-haspopup="dialog"
+            aria-label={`Load ${title} official photo gallery`}
+          >
+            <VehicleImage
+              src={null}
+              alt={`${title}. Official listing gallery has not loaded yet.`}
+              fallbackTitle={fallbackTitle}
+              fallbackCopy={galleryLoading ? "Loading the official GSA gallery…" : fallbackCopy}
+              variant={variant}
+              priority={priority}
+            />
+            <span className="vehicle-gallery__expand" aria-hidden="true"><Maximize2 /></span>
+          </button>
+        </div>
+      );
+    }
     return (
       <div className={`${rootClassName} vehicle-gallery--empty`}>
         <VehicleImage
