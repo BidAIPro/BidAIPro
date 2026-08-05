@@ -10,7 +10,6 @@ import {
   Clock3,
   Database,
   ExternalLink,
-  FileSearch,
   Fuel,
   Gauge,
   MapPin,
@@ -21,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { MarketReferenceLinks } from "../../components/market-reference-links";
+import { MarketValueEvidence } from "../../components/market-reference-links";
 import { VehicleGallery } from "../../components/vehicle-gallery";
 import type { AuctionOpportunity } from "../../../lib/auction-types";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
@@ -163,8 +162,8 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
 
         <div className="detail-grid">
           <section className="analysis-card market-card">
-            <div className="section-heading"><div><p>Market intelligence</p><h2>Value range & bid position</h2></div><span className="evidence-label"><Database size={13} /> {auction.valuation.sampleSize} reference observations</span></div>
-            <p className="section-copy">The market reference stays independent of the live GSA bid. Condition, mileage, title, operability, geography, and data gaps are reserved separately.</p>
+            <div className="section-heading"><div><p>Market intelligence</p><h2>Numeric value range &amp; bid position</h2></div><span className="evidence-label"><Database size={13} /> {auction.valuation.sampleSize} reference observations</span></div>
+            <p className="section-copy">The numeric market evidence stays independent of the live GSA bid. Condition, mileage, title, operability, geography, and data gaps remain explicit.</p>
             <div className="market-range">
               <div className="range-labels"><span>Low {dollars(auction.valuation.lowCents)}</span><span>Median {dollars(auction.valuation.medianCents)}</span><span>High {dollars(auction.valuation.highCents)}</span></div>
               <div className="range-track">
@@ -175,9 +174,8 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               </div>
             </div>
             <div className="market-legend"><span><i className="dot bid" /> Current bid {dollars(auction.currentBidCents)}</span><span><i className="dot forecast" /> Projected close {dollars(auction.forecast.expectedCents)}</span><span><i className="dot ceiling" /> Safe ceiling {dollars(auction.assessment.safeMaxBidCents)}</span></div>
-            <div className="provenance-note"><FileSearch size={16} /><div><strong>{auction.valuation.provider}</strong><span>{auction.valuation.provenanceNote}</span></div><em>{auction.valuation.status === "provider" ? "Licensed source" : auction.valuation.status === "reference-only" ? "Reference only · not KBB" : "No licensed value connected"}</em></div>
-            <p className="market-vehicle-facts">References are prepared for <b>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</b>. Refine them with VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "unknown" : `${integer.format(auction.vehicle.mileage)} mi`}</b>, ZIP <b>{auction.location.postalCode || "not captured"}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
-            <MarketReferenceLinks auction={auction} />
+            <p className="market-vehicle-facts">The numeric reference is prepared for <b>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</b>, VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "unknown" : `${integer.format(auction.vehicle.mileage)} mi`}</b>, ZIP <b>{auction.location.postalCode || "not captured"}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
+            <MarketValueEvidence auction={auction} />
           </section>
 
           <section className="analysis-card vehicle-card-detail">

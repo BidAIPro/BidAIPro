@@ -92,6 +92,37 @@ function sourceRiskFlags(auction: GsaVehicleAuction): string[] {
 }
 
 /**
+ * Applies an independently fetched value to an opportunity and reruns the
+ * exact same ceiling/cost model used when the listing was first adapted.
+ */
+export function applyValuationToOpportunity(
+  opportunity: AuctionOpportunity,
+  valuation: ValuationReference,
+  calculatedAt = valuation.asOf,
+): AuctionOpportunity {
+  const listingConfidence = opportunity.vehicle.vin && opportunity.vehicle.mileage !== undefined
+    ? 0.65
+    : 0.45;
+  return {
+    ...opportunity,
+    valuation,
+    assessment: assessDeal({
+      currentBidCents: opportunity.currentBidCents ?? 0,
+      valuation,
+      forecast: opportunity.forecast,
+      costs: DEFAULT_DEAL_COSTS,
+      target: DEFAULT_PROFIT_TARGET,
+      calculatedAt,
+      dataConfidence: listingConfidence,
+    }),
+    provenance: {
+      ...opportunity.provenance,
+      valuation: valuation.status === "unavailable" ? "unavailable" : "provider",
+    },
+  };
+}
+
+/**
  * Converts an official hourly discovery record into a deliberately incomplete
  * Deal Board record. It is visible, but cannot receive a safe ceiling or an
  * actionable score until independent valuation and outcome evidence exist.

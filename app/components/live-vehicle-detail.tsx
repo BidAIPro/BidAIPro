@@ -20,11 +20,12 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { AuctionOpportunity } from "../../lib/auction-types";
+import type { AuctionOpportunity, ValuationReference } from "../../lib/auction-types";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
+import { applyValuationToOpportunity } from "../../lib/opportunity-adapter";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
-import { MarketReferenceLinks } from "./market-reference-links";
+import { MarketValueEvidence } from "./market-reference-links";
 import { VehicleGallery } from "./vehicle-gallery";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -61,8 +62,11 @@ export function LiveVehicleDetail() {
   const [auction, setAuction] = useState<AuctionOpportunity | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
   const [liveBidPolling, setLiveBidPolling] = useState(false);
+  const [marketValueLoading, setMarketValueLoading] = useState(false);
   const liveBidRequest = useRef<AbortController | null>(null);
   const liveBidLastAttempt = useRef(0);
+  const marketValueRequest = useRef<AbortController | null>(null);
+  const marketValueAttempted = useRef<string | null>(null);
 
   useEffect(() => {
     if (!requestedId) return;
@@ -88,6 +92,59 @@ export function LiveVehicleDetail() {
     void load();
     return () => controller.abort();
   }, [requestedId]);
+
+  const marketValueExternalId = auction?.externalId ?? null;
+
+  useEffect(() => {
+    if (!marketValueExternalId || marketValueAttempted.current === marketValueExternalId) return;
+    marketValueAttempted.current = marketValueExternalId;
+    const controller = new AbortController();
+    marketValueRequest.current = controller;
+    setMarketValueLoading(true);
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          publicApiUrl(`/api/market-values?ids=${encodeURIComponent(marketValueExternalId)}`),
+          { cache: "no-store", signal: controller.signal },
+        );
+        if (!response.ok) throw new Error(`Market value feed returned ${response.status}`);
+        const payload = await response.json() as {
+          data?: Array<{
+            externalId: string;
+            valuation: ValuationReference;
+            cacheStatus: "fresh" | "refreshed" | "unavailable";
+          }>;
+          meta?: { generatedAt?: string };
+        };
+        const result = payload.data?.find((item) => item.externalId === marketValueExternalId);
+        if (!result) throw new Error("Market value feed omitted this vehicle");
+        setAuction((current) => current && !(
+          result.valuation.status === "unavailable" &&
+          current.valuation.status !== "unavailable"
+        )
+          ? applyValuationToOpportunity(
+              current,
+              result.valuation,
+              payload.meta?.generatedAt ?? new Date().toISOString(),
+            )
+          : current
+        );
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      } finally {
+        if (marketValueRequest.current === controller) {
+          marketValueRequest.current = null;
+          setMarketValueLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+      if (marketValueRequest.current === controller) marketValueRequest.current = null;
+    };
+  }, [marketValueExternalId]);
 
   useEffect(() => {
     if (!liveBidPolling || !auction?.id.startsWith("live-") || !auction.endsAt || !/^\d+$/.test(auction.externalId)) {
@@ -192,7 +249,7 @@ export function LiveVehicleDetail() {
             <div className="decision-grid">
               <article><span>Current bid · before costs</span><strong>{dollars(auction.currentBidCents)}</strong><small>Observed GSA auction price only</small></article>
               <article className="all-in-decision"><span>Modeled all-in now</span><strong>{dollars(allInNow)}</strong><small>{addedCostsNow === null ? "Added costs unavailable" : `Includes ${dollars(addedCostsNow)} modeled added costs`}</small></article>
-              <article><span>Market reference</span><strong>{auction.valuation.medianCents === null ? "Free checks" : dollars(auction.valuation.medianCents)}</strong><small>{auction.valuation.status === "provider" ? auction.valuation.provider : "Direct provider and comp links"}</small></article>
+              <article><span>Adjusted market value</span><strong>{auction.valuation.medianCents === null ? marketValueLoading ? "Pulling…" : "Unavailable" : dollars(auction.valuation.medianCents)}</strong><small>{auction.valuation.medianCents === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${auction.valuation.sampleSize} observations`}</small></article>
               <article className="primary-decision"><span>Safe bid ceiling · before costs</span><strong>{dollars(auction.assessment.safeMaxBidCents)}</strong><small>Maximum auction bid under current assumptions</small></article>
             </div>
 
@@ -230,11 +287,10 @@ export function LiveVehicleDetail() {
           </section>
 
           <section className="analysis-card market-card">
-            <div className="section-heading"><div><p>Market intelligence</p><h2>Independent value verification</h2></div><FileSearch size={18} /></div>
-            <p className="section-copy">The displayed reference is kept independent of the live bid. Condition, mileage, title, operability, and geography must match before relying on any value.</p>
-            <div className="provenance-note"><FileSearch size={16} /><div><strong>{auction.valuation.provider}</strong><span>{auction.valuation.provenanceNote}</span></div><em>{auction.valuation.status === "provider" ? "Licensed source" : auction.valuation.status === "reference-only" ? "Reference only · not KBB" : "No licensed value connected"}</em></div>
-            <p className="market-vehicle-facts">References are prepared for <b>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</b>. Refine them with VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{mileage(auction)}</b>, ZIP <b>{auction.location.postalCode || "not captured"}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
-            <MarketReferenceLinks auction={auction} />
+            <div className="section-heading"><div><p>Market intelligence</p><h2>Automatic market value</h2></div><FileSearch size={18} /></div>
+            <p className="section-copy">BidAI Pro pulls the numeric source evidence automatically and keeps it independent of the live GSA bid. The displayed range identifies the provider, sample, as-of date, confidence, and mileage adjustment.</p>
+            <p className="market-vehicle-facts">The automatic match is prepared for <b>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</b>, VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, captured mileage <b>{mileage(auction)}</b>, ZIP <b>{auction.location.postalCode || "not captured"}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
+            <MarketValueEvidence auction={auction} loading={marketValueLoading} />
           </section>
 
           <section className="analysis-card cost-card" id="cost-model">

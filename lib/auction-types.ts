@@ -62,6 +62,21 @@ export type ValuationType =
   | "auction-comp"
   | "composite";
 
+export interface ValuationEvidence {
+  /** Unadjusted range reported by the source before mileage matching. */
+  rawLowCents: MoneyCents | null;
+  rawMedianCents: MoneyCents | null;
+  rawHighCents: MoneyCents | null;
+  inputMileage: number | null;
+  comparableMedianMileage: number | null;
+  /** Difference between the source median and the displayed median. */
+  mileageAdjustmentCents: MoneyCents | null;
+  conditionAdjustmentCents: MoneyCents | null;
+  conditionAdjustmentPct: number | null;
+  conditionBasis: string | null;
+  matchBasis: string;
+}
+
 /**
  * An independently sourced vehicle value. A reference-only value may be shown
  * for product development, but it must not be presented as KBB or as a licensed
@@ -80,6 +95,7 @@ export interface ValuationReference {
   sampleSize: number;
   sourceUrl?: string;
   provenanceNote: string;
+  evidence?: ValuationEvidence;
 }
 
 export type ForecastStatus = "available" | "reference-only" | "insufficient";

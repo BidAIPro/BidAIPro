@@ -40,8 +40,8 @@ test("server-renders the production Deal Board", async () => {
   assert.match(html, /BIDAI/);
   assert.match(html, /The deal board/i);
   assert.match(html, /Official GSA vehicle intelligence/i);
-  assert.match(html, /Safe bid ceiling/i);
-  assert.match(html, /not copied into a deal score|authorized numeric evidence/i);
+  assert.match(html, /Modeled headroom/i);
+  assert.match(html, /Automatic market pricing/i);
   assert.match(html, /Not affiliated with or endorsed by/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
@@ -58,10 +58,10 @@ test("server-renders a complete vehicle underwriting dossier", async () => {
   assert.match(html, /Current bid .*no added costs/i);
   assert.match(html, /Modeled added-cost total/i);
   assert.match(html, /Modeled all-in cost now/i);
-  assert.match(html, /Free independent market references/i);
-  assert.match(html, /KBB value lookup/i);
-  assert.match(html, /Sold-listing search/i);
-  assert.match(html, /No copied or invented values/i);
+  assert.match(html, /Automatic numeric market evidence/i);
+  assert.match(html, /Mileage \+ condition estimate/i);
+  assert.match(html, /Secondary verification links/i);
+  assert.match(html, /KBB/i);
   assert.match(html, /Comparable outcome ledger/i);
   assert.match(html, /Open official auction/i);
 });
@@ -105,7 +105,9 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /remainingMs > 30 \* 60_000/);
   assert.match(board, /if \(!sourceMeta\.liveBidPolling\) return/);
   assert.match(board, /Snapshot only · verify bid/);
-  assert.match(board, /MarketReferenceLinks/);
+  assert.match(board, /MarketValueEvidence/);
+  assert.match(board, /\/api\/market-values\?ids=/);
+  assert.match(board, /applyValuationToOpportunity/);
   assert.match(board, /VehicleGallery/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);

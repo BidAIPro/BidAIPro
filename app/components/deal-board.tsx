@@ -33,15 +33,34 @@ import {
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AuctionOpportunity } from "../../lib/auction-types";
+import type { AuctionOpportunity, ValuationReference } from "../../lib/auction-types";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
+import { applyValuationToOpportunity } from "../../lib/opportunity-adapter";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
-import { MarketReferenceLinks } from "./market-reference-links";
+import { MarketValueEvidence } from "./market-reference-links";
 import { VehicleGallery } from "./vehicle-gallery";
 
 type SortKey = "deal" | "ending" | "profit" | "bid";
 type QuickFilter = "all" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
+
+type MarketValueResponse = {
+  data?: Array<{
+    externalId: string;
+    valuation: ValuationReference;
+    cacheStatus: "fresh" | "refreshed" | "unavailable";
+  }>;
+  meta?: {
+    requested?: number;
+    resolved?: number;
+    refreshed?: number;
+    generatedAt?: string;
+  };
+  errors?: Array<{ externalId: string; code: string }>;
+};
+
+const MARKET_VALUE_BATCH_SIZE = 12;
+const MARKET_VALUE_REFRESH_MS = 55 * 60_000;
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -170,6 +189,7 @@ function OpportunityCard({
   onSave,
   compact,
   livePollingAvailable,
+  marketValueLoading,
 }: {
   auction: AuctionOpportunity;
   now: number;
@@ -177,6 +197,7 @@ function OpportunityCard({
   onSave: () => void;
   compact: boolean;
   livePollingAvailable: boolean;
+  marketValueLoading: boolean;
 }) {
   const countdown = timeLeft(auction.endsAt, now);
   const currentBid = auction.currentBidCents;
@@ -267,9 +288,9 @@ function OpportunityCard({
             <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}` : "More evidence needed"}</small>
           </div>
           <div>
-            <span>Market reference</span>
-            <strong>{marketValue === null ? "Free sources" : dollars(marketValue)}</strong>
-            <small>{auction.valuation.status === "provider" ? auction.valuation.provider : "KBB · Edmunds · J.D. Power"}</small>
+            <span>Adjusted market value</span>
+            <strong>{marketValue === null ? marketValueLoading ? "Pulling…" : "Unavailable" : dollars(marketValue)}</strong>
+            <small>{marketValue === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${auction.valuation.sampleSize} observations`}</small>
           </div>
           <div className="all-in-metric">
             <span>Modeled all-in now</span>
@@ -278,7 +299,7 @@ function OpportunityCard({
           </div>
         </div>
 
-        <MarketReferenceLinks auction={auction} compact />
+        <MarketValueEvidence auction={auction} compact loading={marketValueLoading} />
 
         <div className="headroom-row">
           <div className="headroom-copy">
@@ -328,9 +349,80 @@ export function DealBoard() {
   const [maxBid, setMaxBid] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [marketValueLoadingIds, setMarketValueLoadingIds] = useState<Set<string>>(() => new Set());
+  const [marketValueRefreshActive, setMarketValueRefreshActive] = useState(false);
   const opportunityRequest = useRef<AbortController | null>(null);
+  const marketValueRequest = useRef<AbortController | null>(null);
+  const marketValueAttempts = useRef<Map<string, number>>(new Map());
   const liveBidRequests = useRef<Map<string, AbortController>>(new Map());
   const liveBidAttempts = useRef<Map<string, number>>(new Map());
+
+  const loadMarketValues = useCallback(async (opportunities: readonly AuctionOpportunity[]) => {
+    const checkedAt = Date.now();
+    const pending = opportunities.filter((auction) => {
+      const previousAttempt = marketValueAttempts.current.get(auction.externalId) ?? 0;
+      return auction.status === "active" && checkedAt - previousAttempt >= MARKET_VALUE_REFRESH_MS;
+    });
+    if (!pending.length) return;
+
+    if (marketValueRequest.current) return;
+    const controller = new AbortController();
+    marketValueRequest.current = controller;
+    const pendingIds = new Set(pending.map((auction) => auction.externalId));
+    setMarketValueLoadingIds((current) => new Set([...current, ...pendingIds]));
+    setMarketValueRefreshActive(true);
+
+    try {
+      for (let index = 0; index < pending.length; index += MARKET_VALUE_BATCH_SIZE) {
+        const batch = pending.slice(index, index + MARKET_VALUE_BATCH_SIZE);
+        const externalIds = batch.map((auction) => auction.externalId);
+        for (const externalId of externalIds) marketValueAttempts.current.set(externalId, checkedAt);
+
+        try {
+          const response = await fetch(
+            publicApiUrl(`/api/market-values?ids=${encodeURIComponent(externalIds.join(","))}`),
+            { cache: "no-store", signal: controller.signal },
+          );
+          if (!response.ok) throw new Error(`Market value feed returned ${response.status}`);
+          const payload = await response.json() as MarketValueResponse;
+          if (!Array.isArray(payload.data)) throw new Error("Market value feed omitted its data array");
+          const byExternalId = new Map(payload.data.map((item) => [item.externalId, item.valuation]));
+          const calculatedAt = payload.meta?.generatedAt ?? new Date().toISOString();
+
+          setAuctions((current) => current.map((auction) => {
+            const valuation = byExternalId.get(auction.externalId);
+            return valuation && !(
+              valuation.status === "unavailable" &&
+              auction.valuation.status !== "unavailable"
+            )
+              ? applyValuationToOpportunity(auction, valuation, calculatedAt)
+              : auction;
+          }));
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError") return;
+          // A transient batch failure should be eligible for the next manual or
+          // scheduled refresh instead of becoming a one-session dead end.
+          for (const externalId of externalIds) marketValueAttempts.current.delete(externalId);
+        } finally {
+          setMarketValueLoadingIds((current) => {
+            const next = new Set(current);
+            for (const externalId of externalIds) next.delete(externalId);
+            return next;
+          });
+        }
+      }
+    } finally {
+      if (marketValueRequest.current === controller) {
+        marketValueRequest.current = null;
+        setMarketValueRefreshActive(false);
+        setMarketValueLoadingIds((current) => {
+          const next = new Set(current);
+          for (const externalId of pendingIds) next.delete(externalId);
+          return next;
+        });
+      }
+    }
+  }, []);
 
   const loadOpportunities = useCallback(async () => {
     opportunityRequest.current?.abort();
@@ -358,20 +450,32 @@ export function DealBoard() {
         const existing = new Map(current.map((auction) => [auction.id, auction]));
         return payload.data!.map((fresh) => {
           const newer = existing.get(fresh.id);
-          if (!newer || Date.parse(newer.lastCheckedAt) <= Date.parse(fresh.lastCheckedAt)) {
-            return fresh;
+          let merged = !newer || Date.parse(newer.lastCheckedAt) <= Date.parse(fresh.lastCheckedAt)
+            ? fresh
+            : {
+                ...fresh,
+                status: newer.status,
+                currentBidCents: newer.currentBidCents,
+                bidderCount: newer.bidderCount,
+                endsAt: newer.endsAt,
+                lastCheckedAt: newer.lastCheckedAt,
+                assessment: newer.assessment,
+              };
+          if (
+            newer &&
+            newer.valuation.status !== "unavailable" &&
+            merged.valuation.status === "unavailable"
+          ) {
+            merged = applyValuationToOpportunity(
+              merged,
+              newer.valuation,
+              merged.lastCheckedAt,
+            );
           }
-          return {
-            ...fresh,
-            status: newer.status,
-            currentBidCents: newer.currentBidCents,
-            bidderCount: newer.bidderCount,
-            endsAt: newer.endsAt,
-            lastCheckedAt: newer.lastCheckedAt,
-            assessment: newer.assessment,
-          };
+          return merged;
         });
       });
+      void loadMarketValues(payload.data);
       setSourceMeta({
         mode: payload.meta?.mode ?? "unknown",
         status: payload.meta?.sourceHealth?.status ?? "unknown",
@@ -389,7 +493,7 @@ export function DealBoard() {
     } finally {
       if (opportunityRequest.current === controller) setRefreshing(false);
     }
-  }, []);
+  }, [loadMarketValues]);
 
   const loadLiveBid = useCallback(async (auction: AuctionOpportunity) => {
     if (!auction.id.startsWith("live-") || !/^\d+$/.test(auction.externalId)) return;
@@ -464,6 +568,8 @@ export function DealBoard() {
   }, [auctions, loadLiveBid, sourceMeta.liveBidPolling]);
 
   useEffect(() => () => {
+    marketValueRequest.current?.abort();
+    marketValueRequest.current = null;
     for (const controller of liveBidRequests.current.values()) controller.abort();
     liveBidRequests.current.clear();
   }, []);
@@ -486,7 +592,10 @@ export function DealBoard() {
         if (remaining < 0 || remaining > 30 * 60_000) return false;
       }
       if (quickFilter === "trucks" && !`${auction.vehicle.bodyStyle ?? ""} ${auction.title}`.toLowerCase().match(/truck|pickup|silverado|ram|f-?2/)) return false;
-      if (quickFilter === "high-confidence" && auction.assessment.confidence < 0.7) return false;
+      if (
+        quickFilter === "high-confidence" &&
+        (auction.valuation.status === "unavailable" || auction.valuation.confidence < 0.7)
+      ) return false;
       if (quickFilter === "under-10k" && (auction.currentBidCents === null || auction.currentBidCents > 1_000_000)) return false;
       if (quickFilter === "saved" && !saved.has(auction.id)) return false;
       return auction.status === "active";
@@ -518,6 +627,9 @@ export function DealBoard() {
   const medianDiscount = discountEvidence.length
     ? discountEvidence[Math.floor(discountEvidence.length / 2)]!
     : null;
+  const marketValuedCount = auctions.filter((auction) =>
+    auction.valuation.status !== "unavailable" && auction.valuation.medianCents !== null
+  ).length;
 
   function toggleSaved(id: string) {
     setSaved((current) => {
@@ -602,8 +714,8 @@ export function DealBoard() {
             </article>
             <article>
               <div className="metric-icon green"><CircleDollarSign size={18} /></div>
-              <div><span>Modeled headroom</span><strong>{dollars(totalHeadroom)}</strong><small>{totalHeadroom === null ? "Licensed value required" : "Across active shortlist"}</small></div>
-              <em>{totalHeadroom === null ? "Not yet scored" : "After risk reserves"}</em>
+              <div><span>Modeled headroom</span><strong>{dollars(totalHeadroom)}</strong><small>{marketValuedCount} of {auctions.length} vehicles valued</small></div>
+              <em>{marketValueRefreshActive ? "Pulling market values…" : totalHeadroom === null ? "Awaiting numeric evidence" : "After risk reserves"}</em>
             </article>
             <article>
               <div className="metric-icon violet"><TrendingUp size={18} /></div>
@@ -620,8 +732,10 @@ export function DealBoard() {
           <section className="source-notice">
             <ShieldCheck size={18} />
             <div>
-              <strong>Evidence-aware by design</strong>
-              <span>Every vehicle now includes free KBB, Edmunds, J.D. Power, active-listing, and sold-listing research links; CARFAX is included when GSA provides a valid VIN. Their results stay with the provider and are not copied into a deal score; the safe bid ceiling stays disabled until authorized numeric evidence is imported.</span>
+              <strong>Automatic market pricing</strong>
+              <span>{marketValueRefreshActive
+                ? `Pulling numeric market evidence automatically for ${marketValueLoadingIds.size} vehicles. Each result shows its provider, range, mileage adjustment, sample size, as-of date, and confidence.`
+                : `${marketValuedCount} of ${auctions.length} active vehicles currently have automatic numeric market evidence. Source and confidence remain visible beside every value.`}</span>
             </div>
             <a href="#source-health">View source ledger <ArrowRight size={14} /></a>
           </section>
@@ -668,7 +782,7 @@ export function DealBoard() {
 
           <section className={`opportunity-list ${compact ? "compact-list" : ""}`}>
             {opportunities.map((auction) => (
-              <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} livePollingAvailable={sourceMeta.liveBidPolling} />
+              <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} livePollingAvailable={sourceMeta.liveBidPolling} marketValueLoading={marketValueLoadingIds.has(auction.externalId)} />
             ))}
             {!opportunities.length && (
               <div className="empty-state"><Search size={28} /><h2>{sourceMeta.status === "checking" ? "Checking the official GSA catalog" : auctions.length === 0 ? "No active vehicle lots are available" : "No vehicles match these filters"}</h2><p>{auctions.length === 0 ? "The board will populate when the official source or a still-active reference snapshot is available." : "Clear a filter or widen the bid range to bring opportunities back into view."}</p><button type="button" onClick={() => { setQuery(""); setQuickFilter("all"); setStateFilter("all"); setConditionFilter("all"); setMaxBid(""); }}>Reset filters</button></div>
