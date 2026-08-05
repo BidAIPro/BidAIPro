@@ -201,6 +201,8 @@ export interface GsaFleetClientOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   forceRefresh?: boolean;
+  /** Disable module retention for memory-bounded one-shot Worker rebuilds. */
+  cacheResult?: boolean;
 }
 
 export interface GsaFleetListingOptions extends GsaFleetClientOptions {
@@ -1096,13 +1098,15 @@ async function fetchListingSnapshot(
     kind === "active-and-coming"
       ? GSA_FLEET_ACTIVE_CACHE_SECONDS
       : GSA_FLEET_CLOSED_CACHE_SECONDS;
-  cacheSet(
-    cache,
-    cacheKey,
-    snapshot,
-    now.getTime() + cacheSeconds * 1_000,
-    MAX_LISTING_CACHE_ENTRIES,
-  );
+  if (options.cacheResult !== false) {
+    cacheSet(
+      cache,
+      cacheKey,
+      snapshot,
+      now.getTime() + cacheSeconds * 1_000,
+      MAX_LISTING_CACHE_ENTRIES,
+    );
+  }
   return snapshot;
 }
 

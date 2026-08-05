@@ -5,6 +5,7 @@ import {
   type GsaFleetListingSnapshot,
   type GsaFleetVehicleRecord,
 } from "./gsa-fleet-client.ts";
+import { gsaFleetValuationCondition } from "./gsa-fleet-adapter.ts";
 import { canonicalVehicleFamily } from "./gsa-market-valuations.ts";
 
 export const GSA_FLEET_ACTIVE_SOURCE_CHECK_SCOPE = "hourly-internet-catalog";
@@ -138,7 +139,8 @@ function assertSnapshot(
     snapshot.kind !== expectedKind ||
     snapshot.complete !== true ||
     !Number.isSafeInteger(snapshot.advertisedCount) ||
-    snapshot.advertisedCount < snapshot.rows.length ||
+    snapshot.advertisedCount <= 0 ||
+    snapshot.advertisedCount !== snapshot.rows.length ||
     !Number.isFinite(Date.parse(snapshot.observedAt))
   ) {
     const error = new Error(
@@ -497,6 +499,7 @@ export async function syncClosedGsaFleetOutcomes(
       pageSize: options.pageSize ?? 1_000,
       maxRows: options.maxRows ?? GSA_FLEET_MAX_CLOSED_ROWS,
       forceRefresh: true,
+      cacheResult: false,
       signal: options.signal,
     });
     assertSnapshot(snapshot, "closed-results");
@@ -521,9 +524,9 @@ export async function syncClosedGsaFleetOutcomes(
        ) VALUES (
          ?1, 'gsa-fleet', ?2,
          (SELECT id FROM auctions WHERE source_key = 'gsa-fleet' AND external_id = ?2 LIMIT 1),
-         ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, 'unknown', NULL, 'unknown',
-         ?10, ?11, ?12, ?13, 'confirmed', ?14, 'USD',
-         'awarded-price-official-gsa-fleet', ?15, ?16, ?16
+         ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, ?10, NULL, 'unknown',
+         ?11, ?12, ?13, ?14, 'confirmed', ?15, 'USD',
+         'awarded-price-official-gsa-fleet', ?16, ?17, ?17
        ) ON CONFLICT(source_key, external_id) DO UPDATE SET
          source_auction_id = COALESCE(excluded.source_auction_id, comparable_sales.source_auction_id),
          canonical_url = excluded.canonical_url,
@@ -533,6 +536,7 @@ export async function syncClosedGsaFleetOutcomes(
          make = excluded.make,
          model = excluded.model,
          mileage = COALESCE(excluded.mileage, comparable_sales.mileage),
+         condition = excluded.condition,
          city = excluded.city,
          state = excluded.state,
          closed_high_bid_cents = excluded.closed_high_bid_cents,
@@ -556,6 +560,7 @@ export async function syncClosedGsaFleetOutcomes(
         vehicle.make,
         vehicle.model,
         vehicle.mileage,
+        gsaFleetValuationCondition(vehicle.conditionCode),
         vehicle.location.city,
         vehicle.location.state,
         vehicle.highBidCents !== null && vehicle.highBidCents > 0

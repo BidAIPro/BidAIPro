@@ -13,6 +13,11 @@ import {
 } from "../lib/gsa-fleet-persistence";
 import { getGsaVehicleAuctions } from "../lib/gsa-client";
 import { persistGsaDiscovery, recordGsaSourceFailure } from "../lib/gsa-persistence";
+import {
+  DEAL_BOARD_SNAPSHOT_REBUILD_CRON,
+  rebuildDealBoardSnapshot,
+  reconcileDealBoardSnapshotBids,
+} from "../lib/deal-board-snapshot";
 
 interface Env {
   ASSETS: Fetcher;
@@ -64,6 +69,12 @@ const worker = {
       const failures = refreshes
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => result.reason);
+      try {
+        await reconcileDealBoardSnapshotBids(env.DB, new Date());
+      } catch {
+        // Live source observations remain safely normalized in D1 even if a
+        // cache row cannot be reconciled during a deployment or migration.
+      }
       if (failures.length > 0) {
         throw new AggregateError(failures, "One or more closing-window refreshes failed.");
       }
@@ -92,6 +103,7 @@ const worker = {
       try {
         const snapshot = await fetchGsaFleetActiveListings({
           forceRefresh: true,
+          cacheResult: false,
           now: checkedAt,
           signal: AbortSignal.timeout(45_000),
         });
@@ -108,7 +120,7 @@ const worker = {
       return;
     }
 
-    if (controller.cron === "49 * * * *") {
+    if (controller.cron === DEAL_BOARD_SNAPSHOT_REBUILD_CRON) {
       try {
         await syncClosedGsaFleetOutcomes(env.DB, {
           bootstrapDays: 7,
@@ -118,6 +130,18 @@ const worker = {
       } catch {
         // The Fleet sync records its own failed source check. Keep this source
         // independent from both active catalogs and closing-window refreshes.
+      }
+      // Build from the best independently available source data even when the
+      // optional closed-outcome sync above failed. A failed generation never
+      // replaces the last complete snapshot.
+      try {
+        await rebuildDealBoardSnapshot(env.DB, {
+          apiKey: env.GSA_API_KEY,
+          signal: AbortSignal.timeout(55_000),
+        });
+      } catch {
+        // Failed generations are recorded without replacing the last complete
+        // snapshot. The request route retains its direct official-source path.
       }
       return;
     }

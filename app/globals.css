@@ -163,7 +163,7 @@ img { display: block; max-width: 100%; }
 .state-select.is-active > span { color: #34745f; }
 .state-select > strong, .sort-select > strong { min-width: 0; flex: 1; overflow: hidden; color: #263a32; font-size: 12px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .state-select > svg, .state-select > span, .state-select > strong, .sort-select > svg, .sort-select > strong { pointer-events: none; }
-.state-select select, .sort-select select { position: absolute; inset: 0; z-index: 1; width: 100%; max-width: none; height: 100%; padding: 0; opacity: 0; border: 0; cursor: pointer; }
+.state-select select, .sort-select select { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; max-width: none; height: 100%; padding: 0; opacity: 0; border: 0; appearance: none; cursor: pointer; }
 .sort-select { position: relative; display: flex; width: 170px; height: 36px; align-items: center; gap: 6px; padding: 0 8px; color: #65726c; background: #fff; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; transition: border-color .18s ease, box-shadow .18s ease; }
 .sort-select:hover { border-color: #b6c8c0; }
 .sort-select:focus-within { border-color: #69ab95; box-shadow: 0 0 0 3px #e5f5ef; }

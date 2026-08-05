@@ -261,10 +261,11 @@ test("upserts confirmed Fleet awards while excluding an unawarded displayed high
   assert.match(upserts[0].sql, /'confirmed'/);
   assert.match(upserts[0].sql, /'awarded-price-official-gsa-fleet'/);
   assert.equal(upserts[0].args[1], "fleet-closed-1");
-  assert.equal(upserts[0].args[11], 1_372_500);
-  assert.equal(upserts[0].args[12], 1_382_500);
-  assert.equal(upserts[1].args[11], 0);
-  assert.equal(upserts[1].args[12], 1_320_000);
+  assert.equal(upserts[0].args[9], "usable");
+  assert.equal(upserts[0].args[12], 1_372_500);
+  assert.equal(upserts[0].args[13], 1_382_500);
+  assert.equal(upserts[1].args[12], 0);
+  assert.equal(upserts[1].args[13], 1_320_000);
 
   const cursor = database.operations.find((operation) => operation.kind === "first");
   assert.equal(cursor.args[0], GSA_FLEET_CLOSED_SOURCE_CHECK_SCOPE);

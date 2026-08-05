@@ -13,6 +13,11 @@ import {
 } from "../../../lib/opportunity-adapter";
 import type { AuctionOpportunity } from "../../../lib/auction-types";
 import { compactOpportunityForBoard } from "../../../lib/opportunity-presentation";
+import { applyLiveBidSnapshot } from "../../../lib/live-bid-snapshot";
+import {
+  readDealBoardSnapshot,
+  readDealBoardSnapshotOpportunity,
+} from "../../../lib/deal-board-snapshot";
 import {
   buildGsaFleetComparableIndex,
   buildGsaFleetOutcomeValuation,
@@ -24,12 +29,12 @@ import {
 import {
   enrichGsaFleetVehicleDetails,
   fetchGsaFleetActiveListings,
-  fetchGsaFleetClosedResults,
   fetchGsaFleetVehicleDetail,
   GsaFleetClientError,
   type GsaFleetVehicleDetail,
   type GsaFleetVehicleRecord,
 } from "../../../lib/gsa-fleet-client";
+import { readDurableGsaFleetComparableIndex } from "../../../lib/gsa-fleet-comparable-store";
 import { publicApiHeaders, publicApiPreflight } from "../../../lib/public-api-cors";
 
 export const revalidate = 300;
@@ -51,6 +56,9 @@ interface FleetBoardSnapshot {
   closedOutcomeCount: number;
   observedAt: string;
   detailSucceeded: number;
+  closedOutcomeErrorCode: string | null;
+  activeInventoryErrorCode: string | null;
+  cacheStatus: "refresh" | "stale-fallback";
   comparableIndex: GsaFleetComparableIndex;
   recordsByOpportunityId: Map<string, GsaFleetVehicleRecord>;
 }
@@ -75,28 +83,43 @@ async function withinDeadline<T>(promise: Promise<T>, timeoutMs: number): Promis
   }
 }
 
-async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
+async function buildFleetBoard(db: D1Database, now: Date): Promise<FleetBoardSnapshot> {
   if (fleetBoardCache && fleetBoardCache.expiresAt > now.getTime()) {
     return fleetBoardCache.value;
   }
   if (fleetBoardRequest) return fleetBoardRequest;
 
+  const previous = fleetBoardCache?.value ?? null;
   fleetBoardRequest = (async () => {
-    const [active, closed] = await Promise.all([
-      fetchGsaFleetActiveListings({
-        now,
-        pageSize: 10_000,
-        maxRows: 10_000,
-        signal: AbortSignal.timeout(25_000),
-      }),
-      fetchGsaFleetClosedResults({
-        now,
-        pageSize: 25_000,
-        maxRows: 25_000,
-        signal: AbortSignal.timeout(25_000),
-      }),
-    ]);
-    const index = buildGsaFleetComparableIndex(closed.rows);
+    // Load compact D1 outcomes before the public inventory fetch so their raw
+    // response pages are never resident at the same time in a 128 MB Worker.
+    const closedResult = await readDurableGsaFleetComparableIndex(db)
+      .then((data) => ({ data, errorCode: null as string | null }))
+      .catch((error) => ({
+        data: null,
+        errorCode: error instanceof Error && "code" in error &&
+            typeof error.code === "string"
+          ? error.code
+          : "GSA_FLEET_COMPARABLE_STORE_UNKNOWN_ERROR",
+      }));
+    const active = await fetchGsaFleetActiveListings({
+      now,
+      pageSize: 10_000,
+      maxRows: 10_000,
+      cacheResult: false,
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (active.rows.length === 0 || active.rows.length !== active.advertisedCount) {
+      throw new GsaFleetClientError(
+        "GSA_FLEET_ACTIVE_INCOMPLETE",
+        "The public GSA Fleet inventory did not match its advertised count.",
+      );
+    }
+    // Active/Coming Soon inventory is independently authoritative. Optional
+    // closed-outcome evidence may be unavailable without hiding that inventory.
+    const index = closedResult.data?.index ?? buildGsaFleetComparableIndex([]);
+    const closedOutcomeErrorCode = closedResult.errorCode ??
+      (closedResult.data?.rowCount ? null : "GSA_FLEET_COMPARABLE_STORE_EMPTY");
     const visibleRows = active.rows.filter((row) =>
       row.phase === "coming" || row.phase === "active"
     );
@@ -121,13 +144,16 @@ async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
         // A complete listing is still returned if optional dossier enrichment fails.
       }
     }
-    const opportunities = visibleRows.map((row) =>
-      gsaFleetListingToOpportunity(
+    const opportunities = visibleRows.map((row) => {
+      const opportunity = gsaFleetListingToOpportunity(
         row,
         gsaFleetComparableCandidates(row, index),
         details.get(row.sourceId),
-      )
-    );
+      );
+      return opportunity.status === "active" || opportunity.status === "closing"
+        ? opportunity
+        : compactOpportunityForBoard(opportunity);
+    });
     const value: FleetBoardSnapshot = {
       opportunities,
       advertisedActiveCount: active.advertisedCount,
@@ -139,6 +165,9 @@ async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
       closedOutcomeCount: index.all.length,
       observedAt: active.observedAt,
       detailSucceeded,
+      closedOutcomeErrorCode,
+      activeInventoryErrorCode: null,
+      cacheStatus: "refresh" as const,
       comparableIndex: index,
       recordsByOpportunityId: new Map(
         visibleRows.map((row) => [`fleet-${row.sourceId}`, row]),
@@ -146,7 +175,20 @@ async function buildFleetBoard(now: Date): Promise<FleetBoardSnapshot> {
     };
     fleetBoardCache = { expiresAt: Date.now() + 5 * 60_000, value };
     return value;
-  })().finally(() => {
+  })().catch((error) => {
+    if (!previous) throw error;
+    const fallback = {
+      ...previous,
+      cacheStatus: "stale-fallback" as const,
+      activeInventoryErrorCode: error instanceof GsaFleetClientError
+        ? error.code
+        : "GSA_FLEET_ACTIVE_INVENTORY_UNKNOWN_ERROR",
+    };
+    // Avoid refetching a failing upstream on every request while keeping the
+    // retry window short enough to recover promptly.
+    fleetBoardCache = { expiresAt: Date.now() + 30_000, value: fallback };
+    return fallback;
+  }).finally(() => {
     fleetBoardRequest = null;
   });
   return fleetBoardRequest;
@@ -195,6 +237,61 @@ async function opportunitiesForResponse(
     // The already validated listing record is still a useful fallback when
     // the optional detail/gallery lookup is briefly unavailable.
     return [match];
+  }
+}
+
+async function enrichPrecomputedFleetDetail(
+  opportunity: AuctionOpportunity,
+): Promise<AuctionOpportunity> {
+  if (opportunity.source !== "gsa-fleet" || !opportunity.vehicle.vin) {
+    return opportunity;
+  }
+  try {
+    const detail = await fetchGsaFleetVehicleDetail(opportunity.vehicle.vin, {
+      signal: AbortSignal.timeout(12_000),
+    });
+    const images = [...new Set([
+      ...detail.images,
+      opportunity.imageUrl,
+      ...(opportunity.images ?? []),
+    ].filter(Boolean))];
+    const comments = detail.comments?.trim().replace(/\s+/g, " ") ?? "";
+    const riskFlags = [...new Set([
+      ...(opportunity.vehicle.riskFlags ?? []),
+      ...(detail.openRecallCount
+        ? [`${detail.openRecallCount} open recall${detail.openRecallCount === 1 ? "" : "s"} reported`]
+        : []),
+      ...(comments ? [comments.slice(0, 500)] : []),
+    ])];
+    const enriched = {
+      ...opportunity,
+      sourceUrl: detail.sourceUrl || opportunity.sourceUrl,
+      imageUrl: images[0] ?? "",
+      images,
+      startsAt: detail.startsAt ?? opportunity.startsAt,
+      saleNumber: detail.saleNumber ?? opportunity.saleNumber,
+      vehicle: {
+        ...opportunity.vehicle,
+        trim: detail.series ?? opportunity.vehicle.trim,
+        bodyStyle: detail.bodyStyle ?? opportunity.vehicle.bodyStyle,
+        transmission: detail.transmission ?? opportunity.vehicle.transmission,
+        fuelType: detail.fuelType ?? opportunity.vehicle.fuelType,
+        drivetrain: detail.drivetrain ?? opportunity.vehicle.drivetrain,
+        color: detail.color ?? opportunity.vehicle.color,
+        description: comments || opportunity.vehicle.description,
+        riskFlags,
+      },
+    };
+    return applyLiveBidSnapshot(enriched, {
+      externalId: enriched.externalId,
+      status: enriched.status,
+      currentBidCents: detail.highBidCents ?? enriched.currentBidCents,
+      bidderCount: enriched.bidderCount,
+      endsAt: detail.effectiveEndsAt ?? enriched.endsAt,
+      lastCheckedAt: detail.observedAt,
+    });
+  } catch {
+    return opportunity;
   }
 }
 
@@ -269,6 +366,9 @@ function combinedSourceHealth(
       "gsa-fleet": fleetLive,
     },
     fleetObservedAt: fleet?.observedAt ?? null,
+    fleetClosedOutcomeErrorCode: fleet?.closedOutcomeErrorCode ?? null,
+    fleetActiveInventoryErrorCode: fleet?.activeInventoryErrorCode ?? null,
+    fleetCache: fleet?.cacheStatus ?? "unavailable",
   };
 }
 
@@ -329,7 +429,32 @@ async function persistSnapshotOnce(snapshot: GsaRunnerSnapshot, now: number) {
 export async function GET(request: Request) {
   const requestedId = requestedOpportunityId(request);
   const requestNow = new Date();
-  const fleetRequest = buildFleetBoard(requestNow)
+  try {
+    const precomputed = requestedId
+      ? await readDealBoardSnapshotOpportunity(env.DB, requestedId, requestNow)
+      : await readDealBoardSnapshot(env.DB, requestNow);
+    if (precomputed) {
+      const responseData = requestedId && precomputed.data[0]
+        ? [await enrichPrecomputedFleetDetail(precomputed.data[0])]
+        : precomputed.data;
+      return Response.json(
+        { data: responseData, meta: precomputed.meta },
+        { headers: publicApiHeaders({
+          "Cache-Control": precomputed.stale
+            ? "no-store"
+            : requestedId ? DETAIL_CACHE_CONTROL : CACHE_CONTROL,
+          "X-BidAI-Snapshot": precomputed.snapshotId,
+          ...(precomputed.stale
+            ? { Warning: '110 - "Precomputed official-source snapshot is stale"' }
+            : {}),
+        }) },
+      );
+    }
+  } catch {
+    // A missing migration or corrupt/partial cache must fall through to the
+    // existing official-source path instead of taking the board offline.
+  }
+  const fleetRequest = buildFleetBoard(env.DB, requestNow)
     .then((data) => ({ data, errorCode: null as string | null }))
     .catch((error) => ({
       data: null,
@@ -409,6 +534,10 @@ export async function GET(request: Request) {
       requestedId,
       fleet.data,
     );
+    const completeBoardResponse = discovery.sourceHealth.status === "live" &&
+      fleet.data !== null &&
+      fleet.data.cacheStatus === "refresh" &&
+      fleet.data.closedOutcomeErrorCode === null;
 
     return Response.json(
       {
@@ -429,11 +558,17 @@ export async function GET(request: Request) {
               fleet.data,
             ),
             fleetErrorCode: fleet.errorCode,
+            partial: !completeBoardResponse,
           },
         },
       },
       { headers: publicApiHeaders({
-        "Cache-Control": requestedId ? DETAIL_CACHE_CONTROL : CACHE_CONTROL,
+        "Cache-Control": requestedId
+          ? DETAIL_CACHE_CONTROL
+          : completeBoardResponse ? CACHE_CONTROL : "no-store",
+        ...(!requestedId && !completeBoardResponse
+          ? { Warning: '110 - "One official board source is using fallback or incomplete evidence"' }
+          : {}),
       }) },
     );
   } catch (error) {
@@ -444,8 +579,8 @@ export async function GET(request: Request) {
       const observedAt = snapshot.sourceHealth.observedAt;
       const imagesFresh = Date.parse(snapshot.imageExpiresAt) > now;
       // Preserve any still-cached photo instead of blanking every card at the
-      // safety cutoff. VehicleImage degrades cleanly when a signature truly
-      // expires, while imagesFresh makes the client retry the renewed feed.
+      // safety cutoff. VehicleImage degrades cleanly when a signature is no
+      // longer usable; imagesFresh remains explicit source-health metadata.
       const responseAuctions = snapshot.auctions
         .filter((auction) => isActiveAt(auction, now));
       let opportunities = responseAuctions.map((auction) =>
@@ -543,7 +678,7 @@ export async function GET(request: Request) {
               coverage: combinedCoverage(null, 0, fleet.data),
               sourceHealth: combinedSourceHealth(
                 {
-                  status: "live",
+                  status: "partial",
                   lastErrorCode: `${directErrorCode}__${snapshotErrorCode}`,
                   discoveryCadence: "hourly",
                 },
@@ -553,7 +688,10 @@ export async function GET(request: Request) {
             },
           },
           { headers: publicApiHeaders({
-            "Cache-Control": requestedId ? DETAIL_CACHE_CONTROL : CACHE_CONTROL,
+            "Cache-Control": requestedId ? DETAIL_CACHE_CONTROL : "no-store",
+            ...(!requestedId
+              ? { Warning: '110 - "GSA Fleet-only response; GSA Auctions unavailable"' }
+              : {}),
           }) },
         );
       }

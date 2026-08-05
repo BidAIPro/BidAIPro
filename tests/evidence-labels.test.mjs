@@ -35,3 +35,14 @@ test("uses provider-neutral wording for non-auction market evidence", () => {
     "Projected close · 4 similar closed outcomes",
   );
 });
+
+test("labels a missing close forecast as insufficient instead of pending", () => {
+  assert.equal(
+    closeForecastEvidenceLabel({
+      sampleSize: 0,
+      status: "insufficient",
+      provenance: "insufficient",
+    }),
+    "Projected close · insufficient evidence",
+  );
+});

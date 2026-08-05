@@ -33,24 +33,27 @@ import {
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AuctionOpportunity, ValuationReference } from "../../lib/auction-types";
+import type { AuctionOpportunity } from "../../lib/auction-types";
 import { fetchGsaRunnerSnapshot } from "../../lib/gsa-runner-snapshot";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
-import { applyValuationToOpportunity, discoveryToOpportunity } from "../../lib/opportunity-adapter";
-import { mergeOpportunityFeed } from "../../lib/opportunity-feed";
+import { discoveryToOpportunity } from "../../lib/opportunity-adapter";
 import { closeForecastEvidenceLabel, valuationEvidenceCountLabel } from "../../lib/evidence-labels";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
 import {
   auctionMatchesState,
+  boardVehicleCategory,
   buildStateFilterOptions,
+  compareBestDealOpportunities,
   countAdvancedBoardFilters,
+  isOpenBoardAuction,
+  mergeAuthoritativeOpportunityFeed,
 } from "./deal-board-filters";
 import { MarketValueEvidence } from "./market-reference-links";
 import { VehicleGallery } from "./vehicle-gallery";
 
 type SortKey = "deal" | "ending" | "confidence" | "profit" | "bid";
-type QuickFilter = "all" | "coming" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
+type QuickFilter = "all" | "coming" | "closing" | "under-10k" | "trucks" | "cars" | "other" | "saved";
 type BoardSource = "gsa-auctions" | "gsa-fleet";
 type PollingBySource = Record<BoardSource, boolean>;
 
@@ -72,28 +75,9 @@ const SORT_OPTIONS: ReadonlyArray<{
   { value: "bid", label: "Lowest bid", orderCopy: "Current-bid order" },
 ];
 
-type MarketValueResponse = {
-  data?: Array<{
-    externalId: string;
-    valuation: ValuationReference;
-    cacheStatus: "fresh" | "refreshed" | "unavailable";
-  }>;
-  meta?: {
-    requested?: number;
-    resolved?: number;
-    refreshed?: number;
-    generatedAt?: string;
-  };
-  errors?: Array<{ externalId: string; code: string }>;
-};
-
-const MARKET_VALUE_BATCH_SIZE = 12;
-const MARKET_VALUE_REFRESH_MS = 55 * 60_000;
-const MARKET_VALUE_REQUEST_TIMEOUT_MS = 10_000;
 const LIVE_BID_REQUEST_TIMEOUT_MS = 10_000;
 const OPPORTUNITY_REQUEST_TIMEOUT_MS = 45_000;
 const PUBLISHED_SNAPSHOT_TIMEOUT_MS = 6_000;
-const PHOTOS_RETRY_INTERVAL_MS = 2 * 60_000;
 const FOCUS_REFRESH_MINIMUM_AGE_MS = 60_000;
 const INITIAL_RENDER_LIMIT = 48;
 const RENDER_LIMIT_INCREMENT = 48;
@@ -105,6 +89,20 @@ const NO_LIVE_POLLING: PollingBySource = {
 
 function boardSource(auction: AuctionOpportunity): BoardSource {
   return String(auction.source) === "gsa-fleet" ? "gsa-fleet" : "gsa-auctions";
+}
+
+function authoritativeSourcesForOpportunityResponse(
+  mode: string | undefined,
+  opportunities: readonly AuctionOpportunity[],
+): ReadonlySet<AuctionOpportunity["source"]> {
+  if (
+    mode === "official-gsa-auctions-and-fleet" ||
+    mode === "official-gsa-fleet-with-gsa-auctions-snapshot" ||
+    mode === "precomputed-official-gsa-auctions-and-fleet"
+  ) {
+    return new Set(["gsa-auctions", "gsa-fleet"]);
+  }
+  return new Set(opportunities.map((auction) => auction.source));
 }
 
 function sourceLabel(auction: AuctionOpportunity) {
@@ -153,10 +151,6 @@ function pollingAvailability(meta: SourceHealthMeta | null | undefined): Polling
     "gsa-auctions": meta?.liveBidPolling === true,
     "gsa-fleet": false,
   };
-}
-
-function hasNumericValuation(auction: AuctionOpportunity) {
-  return auction.valuation.status !== "unavailable" && auction.valuation.medianCents !== null;
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -212,7 +206,7 @@ function relativeTime(iso: string, now: number) {
 }
 
 function scoreLabel(score: number, status: AuctionOpportunity["assessment"]["status"]) {
-  if (status === "insufficient") return "Unscored";
+  if (status === "insufficient") return "Insufficient evidence";
   if (score >= 75) return "Strong deal";
   if (score >= 55) return "Worth watching";
   if (score >= 35) return "Needs diligence";
@@ -257,7 +251,7 @@ function DealScore({ score, status }: { score: number; status: AuctionOpportunit
     <div className="deal-score" style={{ "--score": `${bounded * 3.6}deg` } as CSSProperties}>
       <div>
         <strong>{unscored ? "—" : bounded}</strong>
-        <span>{unscored ? "pending" : "/100"}</span>
+        <span>{unscored ? "N/A" : "/100"}</span>
       </div>
     </div>
   );
@@ -317,8 +311,6 @@ function OpportunityCard({
   onSave,
   compact,
   livePollingAvailable,
-  marketValueLoading,
-  photosRefreshing,
 }: {
   auction: AuctionOpportunity;
   now: number;
@@ -326,8 +318,6 @@ function OpportunityCard({
   onSave: () => void;
   compact: boolean;
   livePollingAvailable: boolean;
-  marketValueLoading: boolean;
-  photosRefreshing: boolean;
 }) {
   const isFleet = boardSource(auction) === "gsa-fleet";
   const isComingSoon = auction.status === "preview";
@@ -380,8 +370,8 @@ function OpportunityCard({
         </div>
         <span className="image-source">{
           auction.imageUrl
-            ? photosRefreshing ? "Official photo · renewal pending" : `Official ${sourceName} image`
-            : photosRefreshing ? "Photos temporarily refreshing" : `Open photos at ${isFleet ? "GSA Fleet" : "GSA Auctions"}`
+            ? `Official ${sourceName} image`
+            : `Open photos at ${isFleet ? "GSA Fleet" : "GSA Auctions"}`
         }</span>
       </div>
 
@@ -440,12 +430,12 @@ function OpportunityCard({
             <strong>{dollars(predictedClose)}</strong>
             <small>{auction.forecast.lowCents !== null && auction.forecast.highCents !== null
               ? `${dollars(auction.forecast.lowCents)}–${dollars(auction.forecast.highCents)}${marketOnlyProjection ? " · market-only until a bid appears" : ""}`
-              : "Needs matched close-price comps"}</small>
+              : "Insufficient close-price evidence"}</small>
           </div>
           <div>
             <span>Adjusted market value</span>
-            <strong>{marketValue === null ? marketValueLoading ? "Pulling…" : "Unavailable" : dollars(marketValue)}</strong>
-            <small>{marketValue === null ? "Automatic numeric lookup" : `${auction.valuation.provider} · ${valuationEvidenceCountLabel(auction.valuation)}`}</small>
+            <strong>{marketValue === null ? "Insufficient evidence" : dollars(marketValue)}</strong>
+            <small>{marketValue === null ? "No verified numeric match" : `${auction.valuation.provider} · ${valuationEvidenceCountLabel(auction.valuation)}`}</small>
           </div>
           <div className="all-in-metric">
             <span>Modeled all-in now</span>
@@ -454,7 +444,7 @@ function OpportunityCard({
           </div>
         </div>
 
-        <MarketValueEvidence auction={auction} compact loading={marketValueLoading} />
+        <MarketValueEvidence auction={auction} compact />
 
         <div className="headroom-row">
           <div className="headroom-copy">
@@ -511,128 +501,26 @@ export function DealBoard() {
   const [maxBid, setMaxBid] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => new Set());
   const [refreshing, setRefreshing] = useState(false);
-  const [marketValueLoadingIds, setMarketValueLoadingIds] = useState<Set<string>>(() => new Set());
-  const [marketValueRefreshActive, setMarketValueRefreshActive] = useState(false);
   const [renderWindow, setRenderWindow] = useState({ scope: "", limit: INITIAL_RENDER_LIMIT });
   const opportunityRequest = useRef<AbortController | null>(null);
-  const marketValueRequest = useRef<AbortController | null>(null);
-  const marketValueAttempts = useRef<Map<string, number>>(new Map());
+  const opportunityLoadGeneration = useRef(0);
+  const latestAuctions = useRef<AuctionOpportunity[]>([]);
   const liveBidRequests = useRef<Map<string, AbortController>>(new Map());
   const liveBidAttempts = useRef<Map<string, number>>(new Map());
   const lastOpportunityLoadAt = useRef(0);
-
-  const loadMarketValues = useCallback(async (opportunities: readonly AuctionOpportunity[]) => {
-    const checkedAt = Date.now();
-    const pending = opportunities.filter((auction) => {
-      const previousAttempt = marketValueAttempts.current.get(auction.externalId) ?? 0;
-      return auction.status === "active" &&
-        boardSource(auction) !== "gsa-fleet" &&
-        checkedAt - previousAttempt >= MARKET_VALUE_REFRESH_MS;
-    });
-    if (!pending.length) return;
-
-    if (marketValueRequest.current) return;
-    const controller = new AbortController();
-    marketValueRequest.current = controller;
-    const pendingIds = new Set(pending.map((auction) => auction.externalId));
-    setMarketValueLoadingIds((current) => new Set([...current, ...pendingIds]));
-    setMarketValueRefreshActive(true);
-
-    try {
-      for (let index = 0; index < pending.length; index += MARKET_VALUE_BATCH_SIZE) {
-        const batch = pending.slice(index, index + MARKET_VALUE_BATCH_SIZE);
-        const externalIds = batch.map((auction) => auction.externalId);
-        for (const externalId of externalIds) marketValueAttempts.current.set(externalId, checkedAt);
-
-        const batchController = new AbortController();
-        const abortBatch = () => batchController.abort();
-        controller.signal.addEventListener("abort", abortBatch, { once: true });
-        const batchTimeout = window.setTimeout(
-          () => batchController.abort(),
-          MARKET_VALUE_REQUEST_TIMEOUT_MS,
-        );
-
-        try {
-          const response = await fetch(
-            publicApiUrl(`/api/market-values?ids=${encodeURIComponent(externalIds.join(","))}`),
-            { signal: batchController.signal },
-          );
-          if (!response.ok) throw new Error(`Market value feed returned ${response.status}`);
-          const payload = await response.json() as MarketValueResponse;
-          if (!Array.isArray(payload.data)) throw new Error("Market value feed omitted its data array");
-          const byExternalId = new Map(payload.data.map((item) => [item.externalId, item.valuation]));
-          const calculatedAt = payload.meta?.generatedAt ?? new Date().toISOString();
-
-          setAuctions((current) => current.map((auction) => {
-            const valuation = byExternalId.get(auction.externalId);
-            if (!valuation || valuation.status === "unavailable") return auction;
-            if (
-              hasNumericValuation(auction) &&
-              valuation.confidence <= auction.valuation.confidence
-            ) return auction;
-            return applyValuationToOpportunity(auction, valuation, calculatedAt);
-          }));
-        } catch {
-          if (controller.signal.aborted) return;
-          // A transient batch failure should be eligible for the next manual or
-          // scheduled refresh instead of becoming a one-session dead end.
-          for (const externalId of externalIds) marketValueAttempts.current.delete(externalId);
-        } finally {
-          window.clearTimeout(batchTimeout);
-          controller.signal.removeEventListener("abort", abortBatch);
-          setMarketValueLoadingIds((current) => {
-            const next = new Set(current);
-            for (const externalId of externalIds) next.delete(externalId);
-            return next;
-          });
-        }
-      }
-    } finally {
-      if (marketValueRequest.current === controller) {
-        marketValueRequest.current = null;
-        setMarketValueRefreshActive(false);
-        setMarketValueLoadingIds((current) => {
-          const next = new Set(current);
-          for (const externalId of pendingIds) next.delete(externalId);
-          return next;
-        });
-      }
-    }
-  }, []);
 
   const loadOpportunities = useCallback(async () => {
     lastOpportunityLoadAt.current = Date.now();
     opportunityRequest.current?.abort();
     const controller = new AbortController();
+    const generation = ++opportunityLoadGeneration.current;
     opportunityRequest.current = controller;
     setRefreshing(true);
-
-    let primaryAccepted = false;
-    const publishedSnapshot = publishedSnapshotOpportunities()
-      .then((snapshot) => {
-        if (
-          primaryAccepted ||
-          opportunityRequest.current !== controller ||
-          snapshot.data.length === 0
-        ) return snapshot;
-
-        setAuctions((current) => mergeOpportunityFeed(current, snapshot.data));
-        void loadMarketValues(snapshot.data);
-        setSourceMeta({
-          mode: "published-gsa-snapshot",
-          status: "snapshot",
-          vehicleLots: snapshot.data.length,
-          liveBidPolling: false,
-          liveBidPollingBySource: NO_LIVE_POLLING,
-          imagesFresh: snapshot.imagesFresh,
-          imageExpiresAt: snapshot.imageExpiresAt,
-          message: snapshot.imagesFresh
-            ? "Published official GSA snapshot loaded while live source checks continue."
-            : "Vehicle records are loaded and official photos are being renewed; cached photos remain visible when available.",
-        });
-        return snapshot;
-      })
-      .catch(() => null);
+    const requestIsCurrent = () =>
+      opportunityRequest.current === controller &&
+      opportunityLoadGeneration.current === generation;
+    let emptyResponseWasLive = false;
+    let emptyResponseMode: string | undefined;
 
     const requestTimeout = window.setTimeout(
       () => controller.abort(),
@@ -656,35 +544,39 @@ export function DealBoard() {
       if (!Array.isArray(payload.data)) throw new Error("Opportunity feed omitted its data array");
 
       if (payload.data.length === 0) {
-        const snapshot = await publishedSnapshot;
-        if (opportunityRequest.current !== controller) return;
-        if (snapshot?.data.length) return;
-
-        setAuctions([]);
-        setSourceMeta({
-          mode: payload.meta?.mode ?? "official-catalog-empty",
-          status: payload.meta?.sourceHealth?.status ?? "unavailable",
-          vehicleLots: 0,
-          liveBidPolling: false,
-          liveBidPollingBySource: NO_LIVE_POLLING,
-          imagesFresh: null,
-          imageExpiresAt: null,
-          message: payload.meta?.sourceHealth?.status === "live"
-            ? "The official catalog currently reports no active vehicle lots."
-            : "The live catalog and published snapshot are temporarily unavailable. Try again shortly.",
-        });
-        return;
+        emptyResponseWasLive = payload.meta?.sourceHealth?.status === "live";
+        emptyResponseMode = payload.meta?.mode;
+        throw new Error("Opportunity feed returned no vehicle records");
       }
 
-      primaryAccepted = true;
-      setAuctions((current) => mergeOpportunityFeed(current, payload.data!));
-      void loadMarketValues(payload.data);
+      if (!requestIsCurrent()) return;
+      const authoritativeSources = authoritativeSourcesForOpportunityResponse(
+        payload.meta?.mode,
+        payload.data,
+      );
+      const mergedBoardPreview = mergeAuthoritativeOpportunityFeed(
+        latestAuctions.current,
+        payload.data,
+        authoritativeSources,
+      );
+      setAuctions((current) => {
+        const next = mergeAuthoritativeOpportunityFeed(
+          current,
+          payload.data!,
+          authoritativeSources,
+        );
+        latestAuctions.current = next;
+        return next;
+      });
       const liveBidPollingBySource = pollingAvailability(payload.meta?.sourceHealth);
       const liveBidPolling = Object.values(liveBidPollingBySource).some(Boolean);
       setSourceMeta({
         mode: payload.meta?.mode ?? "unknown",
         status: payload.meta?.sourceHealth?.status ?? "unknown",
-        vehicleLots: payload.meta?.coverage?.vehicleLots ?? payload.data.length,
+        vehicleLots: Math.max(
+          payload.meta?.coverage?.vehicleLots ?? payload.data.length,
+          mergedBoardPreview.length,
+        ),
         liveBidPolling,
         liveBidPollingBySource,
         imagesFresh: payload.meta?.snapshot?.imagesFresh ?? true,
@@ -694,29 +586,74 @@ export function DealBoard() {
           : "Official GSA records loaded from the latest published source snapshots.",
       });
     } catch (error) {
-      if (opportunityRequest.current !== controller) return;
-      const snapshot = await publishedSnapshot;
-      if (opportunityRequest.current !== controller || snapshot?.data.length) return;
+      if (!requestIsCurrent()) return;
+      try {
+        const snapshot = await publishedSnapshotOpportunities();
+        if (!requestIsCurrent()) return;
+        if (snapshot.data.length > 0) {
+          // The public Auctions snapshot is a recovery feed, not a complete
+          // replacement for the last combined board. It may update/add rows,
+          // but it cannot delete records from either source.
+          const authoritativeSources = new Set<AuctionOpportunity["source"]>();
+          const fallbackBoardPreview = mergeAuthoritativeOpportunityFeed(
+            latestAuctions.current,
+            snapshot.data,
+            authoritativeSources,
+          );
+          setAuctions((current) => {
+            const next = mergeAuthoritativeOpportunityFeed(
+              current,
+              snapshot.data,
+              authoritativeSources,
+            );
+            latestAuctions.current = next;
+            return next;
+          });
+          setSourceMeta({
+            mode: "published-gsa-snapshot",
+            status: "snapshot",
+            vehicleLots: fallbackBoardPreview.length,
+            liveBidPolling: false,
+            liveBidPollingBySource: NO_LIVE_POLLING,
+            imagesFresh: snapshot.imagesFresh,
+            imageExpiresAt: snapshot.imageExpiresAt,
+            message: fallbackBoardPreview.some((auction) => auction.source === "gsa-fleet")
+              ? "Published GSA Auctions snapshot loaded; the latest GSA Fleet records remain visible while its source recovers."
+              : "Published official GSA Auctions snapshot loaded after the combined catalog was unavailable.",
+          });
+          return;
+        }
+      } catch {
+        // Keep the latest complete board visible when both current sources and
+        // the fallback snapshot are temporarily unavailable.
+      }
+
+      if (!requestIsCurrent()) return;
+      const retainedCount = latestAuctions.current.length;
       setSourceMeta({
-        mode: "official-sources-unavailable",
-        status: "unavailable",
-        vehicleLots: 0,
+        mode: retainedCount ? "retained-complete-board" : emptyResponseMode ?? "official-sources-unavailable",
+        status: retainedCount ? "stale" : emptyResponseWasLive ? "live" : "unavailable",
+        vehicleLots: retainedCount,
         liveBidPolling: false,
         liveBidPollingBySource: NO_LIVE_POLLING,
         imagesFresh: null,
         imageExpiresAt: null,
-        message: error instanceof Error && error.name === "AbortError"
-          ? "The live source timed out and the published snapshot could not be loaded. Try Refresh view."
-          : "The live catalog and published snapshot could not be loaded. Try Refresh view.",
+        message: retainedCount
+          ? "A partial or unavailable source response was ignored; the latest complete board remains visible."
+          : emptyResponseWasLive
+            ? "The official catalogs currently report no active or coming-soon vehicle lots."
+            : error instanceof Error && error.name === "AbortError"
+              ? "The live source timed out and the published snapshot could not be loaded. Try Refresh view."
+              : "The live catalog and published snapshot could not be loaded. Try Refresh view.",
       });
     } finally {
       window.clearTimeout(requestTimeout);
-      if (opportunityRequest.current === controller) {
+      if (requestIsCurrent()) {
         opportunityRequest.current = null;
         setRefreshing(false);
       }
     }
-  }, [loadMarketValues]);
+  }, []);
 
   const loadLiveBid = useCallback(async (auction: AuctionOpportunity) => {
     if (!canPollAuction(auction)) return;
@@ -768,6 +705,10 @@ export function DealBoard() {
   }, []);
 
   useEffect(() => {
+    latestAuctions.current = auctions;
+  }, [auctions]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -781,23 +722,6 @@ export function DealBoard() {
       opportunityRequest.current?.abort();
     };
   }, [loadOpportunities]);
-
-  const photosNeedRefresh = sourceMeta.imagesFresh === false || (
-    sourceMeta.imageExpiresAt !== null && Date.parse(sourceMeta.imageExpiresAt) <= now
-  );
-
-  useEffect(() => {
-    if (!photosNeedRefresh) return;
-    const initialRetry = window.setTimeout(() => void loadOpportunities(), 0);
-    const timer = window.setInterval(
-      () => void loadOpportunities(),
-      PHOTOS_RETRY_INTERVAL_MS,
-    );
-    return () => {
-      window.clearTimeout(initialRetry);
-      window.clearInterval(timer);
-    };
-  }, [loadOpportunities, photosNeedRefresh]);
 
   useEffect(() => {
     function refreshVisibleBoard() {
@@ -842,8 +766,6 @@ export function DealBoard() {
   }, [auctions, loadLiveBid, sourceMeta.liveBidPollingBySource]);
 
   useEffect(() => () => {
-    marketValueRequest.current?.abort();
-    marketValueRequest.current = null;
     for (const controller of liveBidRequests.current.values()) controller.abort();
     liveBidRequests.current.clear();
   }, []);
@@ -869,7 +791,7 @@ export function DealBoard() {
       if (maxBidCents !== null && (auction.currentBidCents === null || auction.currentBidCents > maxBidCents)) return false;
       if (quickFilter === "coming") {
         if (auction.status !== "preview") return false;
-      } else if (auction.status !== "active") {
+      } else if (!isOpenBoardAuction(auction)) {
         return false;
       }
       if (quickFilter === "closing") {
@@ -877,12 +799,14 @@ export function DealBoard() {
         const remaining = new Date(auction.endsAt).getTime() - now;
         if (remaining < 0 || remaining > 30 * 60_000) return false;
       }
-      if (quickFilter === "trucks" && !`${auction.vehicle.bodyStyle ?? ""} ${auction.title}`.toLowerCase().match(/truck|pickup|silverado|ram|f-?2/)) return false;
       if (
-        quickFilter === "high-confidence" &&
-        (auction.valuation.status === "unavailable" || auction.valuation.confidence < 0.7)
+        (quickFilter === "trucks" || quickFilter === "cars" || quickFilter === "other") &&
+        boardVehicleCategory(auction) !== quickFilter
       ) return false;
-      if (quickFilter === "under-10k" && (auction.currentBidCents === null || auction.currentBidCents > 1_000_000)) return false;
+      if (
+        quickFilter === "under-10k" &&
+        (auction.currentBidCents === null || auction.currentBidCents > 1_000_000)
+      ) return false;
       if (quickFilter === "saved" && !saved.has(auction.id)) return false;
       return true;
     });
@@ -896,11 +820,11 @@ export function DealBoard() {
       if (sort === "confidence") return b.assessment.confidence - a.assessment.confidence || b.assessment.score - a.assessment.score;
       if (sort === "profit") return (b.assessment.projectedProfitCents ?? -Infinity) - (a.assessment.projectedProfitCents ?? -Infinity);
       if (sort === "bid") return (a.currentBidCents ?? Number.POSITIVE_INFINITY) - (b.currentBidCents ?? Number.POSITIVE_INFINITY);
-      return b.assessment.score - a.assessment.score;
+      return compareBestDealOpportunities(a, b);
     });
   }, [auctions, conditionFilter, maxBid, now, query, quickFilter, saved, sort, stateFilter]);
 
-  const activeAuctionCount = auctions.filter((auction) => auction.status === "active").length;
+  const activeAuctionCount = auctions.filter(isOpenBoardAuction).length;
   const comingSoonCount = auctions.filter((auction) => auction.status === "preview").length;
   const boardAuctionCount = activeAuctionCount + comingSoonCount;
   const renderScope = `${query}\u0000${sort}\u0000${quickFilter}\u0000${stateFilter}\u0000${conditionFilter}\u0000${maxBid}`;
@@ -983,7 +907,7 @@ export function DealBoard() {
           <a className={quickFilter === "closing" ? "active" : ""} href="#deal-board" onClick={() => setQuickFilter("closing")}><Clock3 size={18} /> Closing room <span className="attention">{closingCount}</span></a>
           <a className={quickFilter === "saved" ? "active" : ""} href="#deal-board" onClick={() => setQuickFilter("saved")}><Bookmark size={18} /> Watchlist <span>{saved.size}</span></a>
           <p>Intelligence</p>
-          <a href="#deal-board" onClick={() => setQuickFilter("high-confidence")}><CircleDollarSign size={18} /> Market values</a>
+          <a href="#deal-board" onClick={() => { setQuickFilter("all"); setSort("confidence"); }}><CircleDollarSign size={18} /> Market values</a>
           <Link href="/comps"><Database size={18} /> Comp ledger</Link>
           <a href="#source-health"><HeartPulse size={18} /> Data health</a>
         </nav>
@@ -1038,12 +962,12 @@ export function DealBoard() {
             <article>
               <div className="metric-icon green"><CircleDollarSign size={18} /></div>
               <div><span>Modeled headroom</span><strong>{dollars(totalHeadroom)}</strong><small>{marketValuedCount} of {auctions.length} vehicles valued</small></div>
-              <em>{marketValueRefreshActive ? "Pulling market values…" : totalHeadroom === null ? "Awaiting numeric evidence" : "After risk reserves"}</em>
+              <em>{totalHeadroom === null ? "Insufficient evidence" : "After risk reserves"}</em>
             </article>
             <article>
               <div className="metric-icon violet"><TrendingUp size={18} /></div>
               <div><span>Median value gap</span><strong>{medianDiscount === null ? "—" : `${Math.round(medianDiscount * 100)}%`}</strong><small>{medianDiscount === null ? "Verified value required" : "At projected close"}</small></div>
-              <em>{medianDiscount === null ? "Not yet scored" : "Reference-only"}</em>
+              <em>{medianDiscount === null ? "Insufficient evidence" : "Reference-only"}</em>
             </article>
             <article>
               <div className="metric-icon amber"><Clock3 size={18} /></div>
@@ -1056,9 +980,7 @@ export function DealBoard() {
             <ShieldCheck size={18} />
             <div>
               <strong>Automatic market pricing</strong>
-              <span>{marketValueRefreshActive
-                ? `Pulling numeric market evidence automatically for ${marketValueLoadingIds.size} vehicles. Each result shows its provider, range, mileage adjustment, sample size, as-of date, and confidence.`
-                : `${marketValuedCount} of ${auctions.length} active vehicles currently have automatic numeric market evidence. Source and confidence remain visible beside every value.`}</span>
+              <span>{marketValuedCount} of {auctions.length} tracked vehicles currently have automatic numeric market evidence. Source and confidence remain visible beside every value.</span>
             </div>
             <a href="#source-health">View source ledger <ArrowRight size={14} /></a>
           </section>
@@ -1089,11 +1011,12 @@ export function DealBoard() {
                 ["all", "Best deals"],
                 ["coming", `Coming soon (${comingSoonCount})`],
                 ["closing", "Closing soon"],
-                ["high-confidence", "High confidence"],
                 ["under-10k", "Under $10k"],
                 ["trucks", "Trucks"],
+                ["cars", "Cars"],
+                ["other", "Other"],
               ] as const).map(([value, label]) => (
-                <button key={value} type="button" className={quickFilter === value ? "active" : ""} onClick={() => setQuickFilter(value)}>{label}</button>
+                <button key={value} type="button" role="tab" aria-selected={quickFilter === value} className={quickFilter === value ? "active" : ""} onClick={() => setQuickFilter(value)}>{label}</button>
               ))}
             </div>
             <div className="board-controls">
@@ -1123,7 +1046,7 @@ export function DealBoard() {
 
           <section className={`opportunity-list ${compact ? "compact-list" : ""}`}>
             {renderedOpportunities.map((auction) => (
-              <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} livePollingAvailable={livePollingForAuction(auction, sourceMeta.liveBidPollingBySource)} marketValueLoading={marketValueLoadingIds.has(auction.externalId)} photosRefreshing={photosNeedRefresh && boardSource(auction) === "gsa-auctions"} />
+              <OpportunityCard key={auction.id} auction={auction} now={now} saved={saved.has(auction.id)} onSave={() => toggleSaved(auction.id)} compact={compact} livePollingAvailable={livePollingForAuction(auction, sourceMeta.liveBidPollingBySource)} />
             ))}
             {renderedOpportunities.length < opportunities.length && (
               <div className="show-more-opportunities">

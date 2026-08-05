@@ -107,6 +107,15 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /fetch\(publicApiUrl\("\/api\/opportunities"\)/);
   assert.match(board, /fetchGsaRunnerSnapshot/);
   assert.match(board, /publishedSnapshotOpportunities/);
+  const loadOpportunitiesSource = board.slice(
+    board.indexOf("const loadOpportunities ="),
+    board.indexOf("const loadLiveBid ="),
+  );
+  assert.ok(
+    loadOpportunitiesSource.indexOf('fetch(publicApiUrl("/api/opportunities")') <
+      loadOpportunitiesSource.indexOf("await publishedSnapshotOpportunities()"),
+    "the complete API response must be attempted before the Auctions-only fallback",
+  );
   assert.match(board, /OPPORTUNITY_REQUEST_TIMEOUT_MS/);
   assert.match(board, /LIVE_BID_REQUEST_TIMEOUT_MS/);
   assert.match(board, /controller\.abort\(\)/);
@@ -123,11 +132,13 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(liveDetail, /LIVE_BID_REQUEST_TIMEOUT_MS/);
   assert.match(comparableLedger, /LEDGER_REQUEST_TIMEOUT_MS/);
   assert.match(board, /setInterval\(\(\) => void loadOpportunities\(\), 60 \* 60_000\)/);
-  assert.match(board, /PHOTOS_RETRY_INTERVAL_MS/);
+  assert.doesNotMatch(board, /PHOTOS_RETRY_INTERVAL_MS/);
   assert.match(board, /visibilitychange/);
-  assert.match(board, /Photos temporarily refreshing/);
-  assert.match(board, /photosRefreshing=\{photosNeedRefresh && boardSource\(auction\) === "gsa-auctions"\}/);
+  assert.doesNotMatch(board, /Photos temporarily refreshing/);
+  assert.doesNotMatch(board, /photosNeedRefresh/);
   assert.match(board, /setAuctions\(\(current\) =>/);
+  assert.match(board, /opportunityLoadGeneration/);
+  assert.match(board, /mergeAuthoritativeOpportunityFeed/);
   assert.match(board, /params\.set\("id", auction\.externalId\)/);
   assert.match(board, /\/api\/live-bid\?\$\{params\.toString\(\)\}/);
   assert.match(board, /getRefreshDecision/);
@@ -135,16 +146,24 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /livePollingForAuction\(auction, sourceMeta\.liveBidPollingBySource\)/);
   assert.match(board, /Snapshot only · verify bid/);
   assert.match(board, /MarketValueEvidence/);
-  assert.match(board, /\/api\/market-values\?ids=/);
-  assert.match(board, /applyValuationToOpportunity/);
+  assert.doesNotMatch(board, /\/api\/market-values\?ids=/);
+  assert.doesNotMatch(board, /loadMarketValues/);
   assert.match(board, /VehicleGallery/);
   assert.match(board, /value: "confidence", label: "Highest confidence"/);
   assert.match(board, /sort === "confidence"[^\n]+assessment\.confidence/);
+  assert.match(board, /compareBestDealOpportunities\(a, b\)/);
+  assert.match(board, /\["closing", "Closing soon"\][^]*\["under-10k", "Under \$10k"\][^]*\["trucks", "Trucks"\][^]*\["cars", "Cars"\][^]*\["other", "Other"\]/);
+  assert.doesNotMatch(board, /"high-confidence"/);
+  assert.match(board, /quickFilter === "under-10k"/);
+  assert.match(board, /boardVehicleCategory\(auction\) !== quickFilter/);
+  assert.match(board, /setSort\("confidence"\)/);
+  assert.match(board, /Insufficient close-price evidence/);
+  assert.match(board, /Insufficient evidence/);
   assert.match(board, /selectedSort\.orderCopy/);
-  assert.match(evidenceLabels, /Projected close · evidence pending/);
+  assert.match(evidenceLabels, /Projected close · insufficient evidence/);
   assert.match(evidenceLabels, /valuation .*comps.* used/);
   assert.doesNotMatch(board, /forecast\.sampleSize\} GSA comps/);
-  assert.match(styles, /\.state-select select, \.sort-select select \{ position: absolute; inset: 0;[^}]+opacity: 0;/);
+  assert.match(styles, /\.state-select select, \.sort-select select \{ position: absolute; inset: 0;[^}]+width: 100%;[^}]+height: 100%;[^}]+opacity: 0;/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   for (const publicClient of [board, liveDetail, comparableLedger]) {
     assert.doesNotMatch(publicClient, /cache:\s*["']no-store["']/);
@@ -160,7 +179,8 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
   assert.match(opportunityRoute, /compactOpportunityForBoard/);
-  assert.match(opportunityPresentation, /outcomeAnchors: \[\]/);
+  assert.match(opportunityPresentation, /ACTIVE_BOARD_OUTCOME_ANCHOR_LIMIT/);
+  assert.match(opportunityPresentation, /opportunity\.status === "active"/);
   assert.match(opportunityRoute, /recordsByOpportunityId/);
   assert.match(opportunityRoute, /fetchGsaFleetVehicleDetail/);
   assert.match(gallery, /aria-modal="true"/);

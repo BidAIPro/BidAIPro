@@ -1,5 +1,7 @@
 import type { AuctionOpportunity } from "./auction-types";
 
+const ACTIVE_BOARD_OUTCOME_ANCHOR_LIMIT = 15;
+
 /**
  * Keeps every sortable board fact while removing detail-only ledgers and Fleet
  * galleries. The selected-vehicle endpoint returns the unabridged record.
@@ -34,7 +36,16 @@ export function compactOpportunityForBoard(
       ? ["MARKET_ONLY_BEFORE_PUBLIC_BID"]
       : [],
     evidenceIds: [],
-    outcomeAnchors: [],
+    // Urgent 30/15-second browser bid polling must retain enough terminal
+    // evidence to recompute the same close model without abruptly downgrading a
+    // highly rated card. Preview rows cannot be polled and keep no anchors.
+    outcomeAnchors:
+      opportunity.status === "active" || opportunity.status === "closing"
+        ? (opportunity.forecast.outcomeAnchors ?? []).slice(
+            0,
+            ACTIVE_BOARD_OUTCOME_ANCHOR_LIMIT,
+          )
+        : [],
   } as unknown as AuctionOpportunity["forecast"];
   const assessment = {
     status: opportunity.assessment.status,

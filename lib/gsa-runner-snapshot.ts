@@ -350,8 +350,8 @@ export async function fetchGsaRunnerSnapshot(options: {
   const timeoutMs = Math.min(options.timeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  // Discover renewed image signatures promptly during the board's two-minute
-  // expired-photo retry window.
+  // Avoid pinning an older bounded runner artifact behind intermediary caches
+  // after a newer validated snapshot has been published.
   const cacheBucket = Math.floor(now.getTime() / 60_000);
   try {
     const response = await fetchImpl(`${GSA_RUNNER_SNAPSHOT_URL}?v=${cacheBucket}`, {

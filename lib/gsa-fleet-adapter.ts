@@ -203,6 +203,13 @@ export function buildGsaFleetComparableIndex(
     const comparable = gsaFleetClosedComparable(row);
     return comparable ? [comparable] : [];
   });
+  return buildGsaFleetComparableIndexFromComparables(all);
+}
+
+/** Indexes already-normalized durable outcomes without retaining source rows. */
+export function buildGsaFleetComparableIndexFromComparables(
+  all: readonly GsaClosedComparable[],
+): GsaFleetComparableIndex {
   const byFamily = new Map<string, GsaClosedComparable[]>();
   const byClass = new Map<string, GsaClosedComparable[]>();
   for (const comparable of all) {

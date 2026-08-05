@@ -377,6 +377,74 @@ export const dealAssessments = sqliteTable(
   ],
 );
 
+/**
+ * Immutable inventory generations keep the last complete board available
+ * while a newer generation is being assembled. Bid-only refreshes may update
+ * rows inside the current complete generation without changing its inventory
+ * freshness deadline.
+ */
+export const dealBoardSnapshots = sqliteTable(
+  "deal_board_snapshots",
+  {
+    id: text("id").primaryKey(),
+    cacheKey: text("cache_key").notNull().default("deal-board"),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    status: text("status").notNull(),
+    generatedAt: text("generated_at").notNull(),
+    refreshedAt: text("refreshed_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    itemCount: integer("item_count").notNull().default(0),
+    metadataJson: text("metadata_json").notNull().default("{}"),
+    opportunityIndexJson: text("opportunity_index_json").notNull().default("{}"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index("idx_deal_board_snapshots_cache_status_generated").on(
+      table.cacheKey,
+      table.status,
+      table.generatedAt,
+    ),
+    index("idx_deal_board_snapshots_expires").on(table.expiresAt),
+  ],
+);
+
+export const dealBoardSnapshotChunks = sqliteTable(
+  "deal_board_snapshot_chunks",
+  {
+    id: text("id").primaryKey(),
+    snapshotId: text("snapshot_id")
+      .notNull()
+      .references(() => dealBoardSnapshots.id, { onDelete: "cascade" }),
+    chunkIndex: integer("chunk_index").notNull(),
+    itemCount: integer("item_count").notNull(),
+    payloadCount: integer("payload_count").notNull().default(0),
+    activeCount: integer("active_count").notNull().default(0),
+    containsGsaAuctions: integer("contains_gsa_auctions", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    containsGsaFleet: integer("contains_gsa_fleet", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    payloadJson: text("payload_json").notNull(),
+    boardJson: text("board_json").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("uq_deal_board_snapshot_chunks_snapshot_index").on(
+      table.snapshotId,
+      table.chunkIndex,
+    ),
+    index("idx_deal_board_snapshot_chunks_snapshot_active").on(
+      table.snapshotId,
+      table.activeCount,
+    ),
+  ],
+);
+
 export const refreshJobs = sqliteTable(
   "refresh_jobs",
   {
@@ -461,5 +529,7 @@ export type ValuationRow = typeof valuations.$inferSelect;
 export type ComparableSaleRow = typeof comparableSales.$inferSelect;
 export type ForecastRow = typeof forecasts.$inferSelect;
 export type DealAssessmentRow = typeof dealAssessments.$inferSelect;
+export type DealBoardSnapshotRow = typeof dealBoardSnapshots.$inferSelect;
+export type DealBoardSnapshotChunkRow = typeof dealBoardSnapshotChunks.$inferSelect;
 export type SourceCheckRow = typeof sourceChecks.$inferSelect;
 export type RefreshJobRow = typeof refreshJobs.$inferSelect;

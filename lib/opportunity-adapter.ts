@@ -187,8 +187,9 @@ export function discoveryToOpportunity(
     source: "gsa-auctions",
     title,
     sourceUrl: auction.url,
-    // PPMS signs official listing images for one hour. The feed refreshes them
-    // with headroom and the client falls back cleanly if a signature expires.
+    // PPMS signs official listing images for a limited window. Retain the
+    // signature supplied by the source; the image component degrades cleanly
+    // when it is expired or unavailable.
     imageUrl: images[0] ?? "",
     images,
     imageSource: "gsa-auctions",

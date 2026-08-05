@@ -15,7 +15,7 @@ export function valuationEvidenceCountLabel(
 export function closeForecastEvidenceLabel(
   forecast: Pick<ClosingForecast, "sampleSize" | "status" | "provenance">,
 ) {
-  if (forecast.status === "insufficient") return "Projected close · evidence pending";
+  if (forecast.status === "insufficient") return "Projected close · insufficient evidence";
   if (
     forecast.sampleSize === 0 &&
     forecast.provenance === "market-reference-heuristic"
