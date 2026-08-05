@@ -41,7 +41,7 @@ test("server-renders the production Deal Board", async () => {
   assert.match(html, /The deal board/i);
   assert.match(html, /Official GSA vehicle intelligence/i);
   assert.match(html, /Safe bid ceiling/i);
-  assert.match(html, /demo references|licensed KBB|not KBB/i);
+  assert.match(html, /not copied into a deal score|authorized numeric evidence/i);
   assert.match(html, /Not affiliated with or endorsed by/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
@@ -58,8 +58,10 @@ test("server-renders a complete vehicle underwriting dossier", async () => {
   assert.match(html, /Current bid .*no added costs/i);
   assert.match(html, /Modeled added-cost total/i);
   assert.match(html, /Modeled all-in cost now/i);
-  assert.match(html, /Check value at KBB/i);
-  assert.match(html, /No KBB value is imported or represented as integrated yet/i);
+  assert.match(html, /Free independent market references/i);
+  assert.match(html, /KBB value lookup/i);
+  assert.match(html, /Sold-listing search/i);
+  assert.match(html, /No copied or invented values/i);
   assert.match(html, /Comparable outcome ledger/i);
   assert.match(html, /Open official auction/i);
 });
@@ -89,9 +91,10 @@ test("keeps social metadata and database capability wired", async () => {
 });
 
 test("keeps the open deal board fresh and expires reference snapshots", async () => {
-  const [board, opportunityRoute] = await Promise.all([
+  const [board, opportunityRoute, gallery] = await Promise.all([
     readFile(new URL("../app/components/deal-board.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/opportunities/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/vehicle-gallery.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(board, /fetch\(publicApiUrl\("\/api\/opportunities"\)/);
@@ -102,10 +105,16 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(board, /remainingMs > 30 \* 60_000/);
   assert.match(board, /if \(!sourceMeta\.liveBidPolling\) return/);
   assert.match(board, /Snapshot only · verify bid/);
+  assert.match(board, /MarketReferenceLinks/);
+  assert.match(board, /VehicleGallery/);
   assert.doesNotMatch(board, /setTimeout\(\(\) =>[^]*650/);
   assert.match(opportunityRoute, /Date\.parse\(auction\.endsAt\) > now/);
   assert.match(opportunityRoute, /status: "stale"/);
   assert.match(opportunityRoute, /liveBidPolling: false/);
   assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
+  assert.match(gallery, /aria-modal="true"/);
+  assert.match(gallery, /ArrowLeft/);
+  assert.match(gallery, /ArrowRight/);
+  assert.match(gallery, /Escape/);
 });

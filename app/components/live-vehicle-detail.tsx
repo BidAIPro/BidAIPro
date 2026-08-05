@@ -24,7 +24,8 @@ import type { AuctionOpportunity } from "../../lib/auction-types";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
-import { VehicleImage } from "./vehicle-image";
+import { MarketReferenceLinks } from "./market-reference-links";
+import { VehicleGallery } from "./vehicle-gallery";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -172,7 +173,7 @@ export function LiveVehicleDetail() {
 
         <section className="detail-hero">
           <div className="detail-photo">
-            <VehicleImage src={auction.imageUrl} alt={`${auction.title} shown in the official GSA listing`} fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make} ${auction.vehicle.model}`} fallbackCopy="Official photo unavailable here. Open the GSA record to view its complete gallery." variant="detail" priority />
+            <VehicleGallery images={[auction.imageUrl, ...(auction.images ?? [])]} title={auction.title} fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make} ${auction.vehicle.model}`} fallbackCopy="Official photo unavailable here. Open the GSA record to view its complete gallery." variant="detail" priority />
             <div className="detail-photo-overlay" />
             <span className="official-image-label"><BadgeCheck size={13} /> Official listing media</span>
             <div className="detail-photo-meta"><span><MapPin size={13} /> {auction.location.city}, {auction.location.state}</span><span><Gauge size={13} /> {mileage(auction)} · {odometerStatusLabel(auction.vehicle.odometerStatus)}</span></div>
@@ -191,7 +192,7 @@ export function LiveVehicleDetail() {
             <div className="decision-grid">
               <article><span>Current bid · before costs</span><strong>{dollars(auction.currentBidCents)}</strong><small>Observed GSA auction price only</small></article>
               <article className="all-in-decision"><span>Modeled all-in now</span><strong>{dollars(allInNow)}</strong><small>{addedCostsNow === null ? "Added costs unavailable" : `Includes ${dollars(addedCostsNow)} modeled added costs`}</small></article>
-              <article><span>Market reference</span><strong>{dollars(auction.valuation.medianCents)}</strong><small>{auction.valuation.status === "provider" ? auction.valuation.provider : auction.valuation.status === "reference-only" ? "Reference only · verify externally" : "No licensed value connected"}</small></article>
+              <article><span>Market reference</span><strong>{auction.valuation.medianCents === null ? "Free checks" : dollars(auction.valuation.medianCents)}</strong><small>{auction.valuation.status === "provider" ? auction.valuation.provider : "Direct provider and comp links"}</small></article>
               <article className="primary-decision"><span>Safe bid ceiling · before costs</span><strong>{dollars(auction.assessment.safeMaxBidCents)}</strong><small>Maximum auction bid under current assumptions</small></article>
             </div>
 
@@ -232,7 +233,8 @@ export function LiveVehicleDetail() {
             <div className="section-heading"><div><p>Market intelligence</p><h2>Independent value verification</h2></div><FileSearch size={18} /></div>
             <p className="section-copy">The displayed reference is kept independent of the live bid. Condition, mileage, title, operability, and geography must match before relying on any value.</p>
             <div className="provenance-note"><FileSearch size={16} /><div><strong>{auction.valuation.provider}</strong><span>{auction.valuation.provenanceNote}</span></div><em>{auction.valuation.status === "provider" ? "Licensed source" : auction.valuation.status === "reference-only" ? "Reference only · not KBB" : "No licensed value connected"}</em></div>
-            <div className="valuation-verification"><div><BadgeCheck size={18} /><span><strong>Verify the price independently</strong><small>No KBB value is imported or represented as integrated yet.</small></span></div><p>Have these facts ready: VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{mileage(auction)}</b>, ZIP <b>{auction.location.postalCode}</b>, and condition <b>{auction.vehicle.condition}</b>.</p><a href="https://www.kbb.com/car-values/" target="_blank" rel="noreferrer">Check value at KBB <ExternalLink size={14} /></a></div>
+            <p className="market-vehicle-facts">References are prepared for <b>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</b>. Refine them with VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{mileage(auction)}</b>, ZIP <b>{auction.location.postalCode || "not captured"}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
+            <MarketReferenceLinks auction={auction} />
           </section>
 
           <section className="analysis-card cost-card" id="cost-model">

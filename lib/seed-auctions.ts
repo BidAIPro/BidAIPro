@@ -92,6 +92,7 @@ function seedAuction(definition: SeedDefinition): AuctionOpportunity {
     // credentials would create broken or sensitive seed data, so the UI should
     // use its local fallback until a live source check supplies a fresh URL.
     imageUrl: "",
+    images: [],
     imageSource: "gsa-auctions",
     status: "active",
     currentBidCents: definition.currentBidCents,

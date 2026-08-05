@@ -107,6 +107,7 @@ export function discoveryToOpportunity(
   const year = auction.year ?? Number(title.match(/\b(19|20)\d{2}\b/)?.[0] ?? 0);
   const make = auction.make ?? "Make pending";
   const model = auction.modelLabel ?? title.replace(/^\s*(?:19|20)\d{2}\s+/, "").trim();
+  const images = [...new Set([auction.imageUrl, ...auction.images].filter((value): value is string => Boolean(value)))];
 
   return {
     id: `live-${auction.id.replace(/[^a-z0-9]+/gi, "-")}`,
@@ -118,7 +119,8 @@ export function discoveryToOpportunity(
     sourceUrl: auction.url,
     // PPMS signs official listing images for one hour. The feed refreshes them
     // with headroom and the client falls back cleanly if a signature expires.
-    imageUrl: auction.imageUrl ?? auction.images[0] ?? "",
+    imageUrl: images[0] ?? "",
+    images,
     imageSource: "gsa-auctions",
     status: auction.status === "active" ? "active" : "preview",
     currentBidCents,

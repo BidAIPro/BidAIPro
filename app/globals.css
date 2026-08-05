@@ -719,6 +719,92 @@ body { font-size: 15px; line-height: 1.45; }
 .filter-summary span { font-size: 12px; }
 .filter-summary strong { font-size: 11px; }
 
+/* Official multi-photo gallery */
+.vehicle-gallery--card, .vehicle-gallery--detail { position: absolute; inset: 0; }
+.vehicle-gallery__trigger { position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; overflow: hidden; color: inherit; background: transparent; border: 0; cursor: zoom-in; }
+.vehicle-gallery__trigger > img { width: 100%; height: 100%; object-fit: cover; }
+.vehicle-gallery__expand { position: absolute; top: 50%; left: 50%; display: grid; width: 46px; height: 46px; place-items: center; color: #fff; background: rgba(8, 18, 14, .68); border: 1px solid rgba(255,255,255,.46); border-radius: 50%; box-shadow: 0 8px 30px rgba(0,0,0,.22); opacity: 0; pointer-events: none; transform: translate(-50%, -44%) scale(.9); transition: opacity .2s ease, transform .2s ease; backdrop-filter: blur(8px); }
+.vehicle-gallery__expand svg { width: 20px; height: 20px; }
+.vehicle-gallery__trigger:hover .vehicle-gallery__expand, .vehicle-gallery__trigger:focus-visible .vehicle-gallery__expand { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.vehicle-gallery__trigger:focus-visible { outline: 3px solid #65d5b3; outline-offset: -3px; }
+.vehicle-gallery__count { position: absolute; right: 11px; bottom: 30px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; color: #fff; background: rgba(8,18,14,.7); border: 1px solid rgba(255,255,255,.25); border-radius: 99px; font-size: 11px; font-weight: 750; pointer-events: none; backdrop-filter: blur(8px); }
+.vehicle-gallery__count svg { width: 13px; height: 13px; }
+.detail-photo .vehicle-gallery__count { bottom: 54px; }
+.countdown, .image-source, .detail-photo-overlay, .official-image-label, .detail-photo-meta { pointer-events: none; }
+
+.vehicle-gallery__overlay { position: fixed; inset: 0; z-index: 1000; display: grid; padding: 18px; place-items: center; color: #fff; background: rgba(3,8,6,.96); backdrop-filter: blur(14px); }
+.vehicle-gallery__dialog { display: grid; width: min(1480px, 100%); height: min(940px, calc(100vh - 36px)); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; background: #0b1310; border: 1px solid rgba(255,255,255,.14); border-radius: 16px; box-shadow: 0 32px 100px rgba(0,0,0,.55); }
+.vehicle-gallery__header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 18px; padding: 15px 17px; background: rgba(18,29,24,.96); border-bottom: 1px solid rgba(255,255,255,.1); }
+.vehicle-gallery__header h2 { margin: 0; overflow: hidden; font-size: 18px; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.vehicle-gallery__header p { margin: 3px 0 0; color: #9eb0a8; font-size: 12px; }
+.vehicle-gallery__position { color: #c9d6d1; font: 700 12px var(--font-geist-mono), monospace; }
+.vehicle-gallery__close, .vehicle-gallery__previous, .vehicle-gallery__next { display: grid; place-items: center; color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 50%; cursor: pointer; transition: background .18s ease, transform .18s ease; }
+.vehicle-gallery__close { width: 38px; height: 38px; }
+.vehicle-gallery__close svg { width: 20px; height: 20px; }
+.vehicle-gallery__close:hover, .vehicle-gallery__previous:hover, .vehicle-gallery__next:hover { background: rgba(255,255,255,.2); transform: scale(1.04); }
+.vehicle-gallery__close:focus-visible, .vehicle-gallery__previous:focus-visible, .vehicle-gallery__next:focus-visible, .vehicle-gallery__thumbnail:focus-visible { outline: 3px solid #65d5b3; outline-offset: 2px; }
+.vehicle-gallery__stage { position: relative; display: grid; min-height: 0; grid-template-columns: 58px minmax(0, 1fr) 58px; align-items: center; padding: 12px; background: radial-gradient(circle at 50% 42%, #18231e 0, #080e0b 68%); }
+.vehicle-gallery__figure { position: relative; display: grid; width: 100%; height: 100%; min-height: 0; grid-column: 2; margin: 0; place-items: center; }
+.vehicle-gallery__figure > img { display: block; width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
+.vehicle-gallery__figure .detail-photo-placeholder { position: absolute; inset: 0; }
+.vehicle-gallery__figure figcaption { position: absolute; right: 12px; bottom: 10px; padding: 5px 8px; color: #ced8d4; background: rgba(3,8,6,.62); border-radius: 6px; font-size: 12px; }
+.vehicle-gallery__previous, .vehicle-gallery__next { z-index: 1; width: 44px; height: 44px; justify-self: center; }
+.vehicle-gallery__previous svg, .vehicle-gallery__next svg { width: 25px; height: 25px; }
+.vehicle-gallery__thumbnails { display: flex; gap: 9px; padding: 12px 15px 14px; overflow-x: auto; background: #101a16; border-top: 1px solid rgba(255,255,255,.09); scrollbar-color: #587068 #15221d; }
+.vehicle-gallery__thumbnail { position: relative; flex: 0 0 98px; height: 66px; padding: 0; overflow: hidden; color: #b8c8c1; background: #1c2923; border: 2px solid transparent; border-radius: 8px; cursor: pointer; opacity: .64; transition: opacity .18s ease, border-color .18s ease, transform .18s ease; }
+.vehicle-gallery__thumbnail:hover { opacity: .9; transform: translateY(-1px); }
+.vehicle-gallery__thumbnail.is-active { border-color: #59d0aa; opacity: 1; }
+.vehicle-gallery__thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.vehicle-gallery__thumbnail > span { display: grid; height: 100%; place-items: center; align-content: center; gap: 3px; font-size: 11px; }
+.vehicle-gallery__thumbnail > span svg { width: 17px; height: 17px; }
+
+/* Free external market research */
+.market-reference-compact { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 9px 10px; color: #38536d; background: #f2f7fc; border: 1px solid #dbe7f2; border-radius: 9px; }
+.market-reference-compact > span { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; font-size: 12px; font-weight: 760; }
+.market-reference-compact > span svg { color: #3971a5; }
+.market-reference-compact > div { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.market-reference-compact a { display: inline-flex; align-items: center; gap: 3px; padding: 5px 7px; color: #245d92; background: #fff; border: 1px solid #d3e1ee; border-radius: 6px; font-size: 12px; font-weight: 700; }
+.market-reference-compact a:hover { color: #153f66; border-color: #9fbdd8; }
+.market-vehicle-facts { margin: 12px 0 0; padding: 11px 12px; color: #556c61; background: #f5f8f7; border: 1px solid #e0e8e4; border-radius: 8px; font-size: 12px; line-height: 1.6; }
+.market-reference-panel { margin-top: 11px; overflow: hidden; background: #f7fafc; border: 1px solid #d9e5ef; border-radius: 10px; }
+.market-reference-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 13px; background: #edf5fb; border-bottom: 1px solid #d9e5ef; }
+.market-reference-heading > div { display: flex; align-items: center; gap: 8px; }
+.market-reference-heading > div > svg { flex: 0 0 auto; color: #3971a5; }
+.market-reference-heading span { display: flex; flex-direction: column; }
+.market-reference-heading strong { color: #294b67; font-size: 13px; }
+.market-reference-heading small { margin-top: 2px; color: #718596; font-size: 12px; }
+.market-reference-heading > em { flex: 0 0 auto; padding: 5px 7px; color: #536c80; background: #fff; border: 1px solid #d5e2ec; border-radius: 99px; font-size: 11px; font-style: normal; font-weight: 700; }
+.market-reference-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 10px; }
+.market-reference-link { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px; color: #344f63; background: #fff; border: 1px solid #e0e8ee; border-radius: 8px; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.market-reference-link:hover { border-color: #a9c3d7; box-shadow: 0 5px 16px rgba(30,70,100,.08); transform: translateY(-1px); }
+.market-reference-link > svg { color: #8195a4; }
+.market-reference-icon { display: grid; width: 32px; height: 32px; place-items: center; color: #2e6c9e; background: #eaf3fa; border-radius: 8px; }
+.market-reference-link.sold-listings .market-reference-icon { color: #7a561b; background: #fff3dd; }
+.market-reference-link.asking-comps .market-reference-icon { color: #247054; background: #e9f7f1; }
+.market-reference-link > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; }
+.market-reference-link strong { color: #28485f; font-size: 12px; }
+.market-reference-link small { margin-top: 2px; color: #637989; font-size: 12px; line-height: 1.4; }
+.market-reference-link em { margin-top: 4px; overflow: hidden; color: #8798a4; font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.market-reference-note { margin: 0; padding: 0 12px 12px; color: #71828e; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .market-reference-compact { align-items: flex-start; flex-direction: column; }
+  .market-reference-compact > div { justify-content: flex-start; }
+  .market-reference-grid { grid-template-columns: 1fr; }
+  .market-reference-heading { align-items: flex-start; flex-direction: column; }
+  .vehicle-gallery__overlay { padding: 0; }
+  .vehicle-gallery__dialog { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+  .vehicle-gallery__header { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px; }
+  .vehicle-gallery__header p { display: none; }
+  .vehicle-gallery__header h2 { font-size: 15px; }
+  .vehicle-gallery__position { grid-column: 1; grid-row: 2; }
+  .vehicle-gallery__close { grid-column: 2; grid-row: 1 / span 2; }
+  .vehicle-gallery__stage { grid-template-columns: 44px minmax(0, 1fr) 44px; padding: 5px; }
+  .vehicle-gallery__previous, .vehicle-gallery__next { width: 44px; height: 44px; }
+  .vehicle-gallery__thumbnail { flex-basis: 78px; height: 54px; }
+  .vehicle-gallery__expand { width: 42px; height: 42px; opacity: .9; }
+}
+
 .back-link { font-size: 12px; }
 .detail-source-status, .detail-breadcrumb { font-size: 12px; }
 .detail-photo-placeholder span { font-size: 13px; }

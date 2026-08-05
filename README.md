@@ -23,9 +23,9 @@ It is configured to push `main` to `https://github.com/BidAIPro/BidAIPro.git`. T
 - The official source is [`gsaauctions.gov`](https://gsaauctions.gov/), not `gsaauctions.com`.
 - Primary discovery uses the same first-party PPMS category-300 catalog, lot-detail, image-signing, and live-auction JSON services used by the public GSA Auctions site. It does not scrape auction-page HTML.
 - The catalog is paginated and rejected if its returned rows do not match GSA's advertised active-vehicle count. The legacy documented [GSA Auctions API](https://gsa.github.io/auctions_api/) remains a fallback and uses `GSA_API_KEY` when configured.
-- Official listing photos use short-lived GSA-signed URLs. They are refreshed with expiry headroom and degrade to an accessible placeholder if GSA cannot supply an image.
+- Official listing photos use short-lived GSA-signed URLs. Up to six photos per lot are preserved in an accessible full-screen gallery with keyboard and thumbnail navigation; expired links degrade to a placeholder.
 - Structured odometer mileage is retained as the primary source fact. When the narrative description reports a different mileage, both readings are preserved and the vehicle is visibly marked for verification.
-- KBB is not scraped or impersonated. The dossier links to KBB's consumer verification flow and shows the VIN, mileage, ZIP, and condition needed for a manual check. Automatic KBB values require a licensed commercial integration.
+- CARFAX, KBB, Edmunds, and J.D. Power are not scraped or impersonated. Each dossier provides free user-opened valuation workflows plus active-listing and sold-listing searches, using the VIN, mileage, ZIP, and condition wherever GSA captured them. CARFAX is offered only for a valid captured VIN, and sold-listing prices are not represented as confirmed transaction amounts. Those outbound results remain research evidence and do not activate a deal score; automatic numeric values require an authorized integration.
 - A closed GSA high bid is not called a sale until an authoritative award source confirms the outcome.
 - The comparable ledger currently accrues outcomes for lots observed by this installation. Historical bulk backfill is intentionally not active without an authorized, dependable closed-record source.
 

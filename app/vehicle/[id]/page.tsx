@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { VehicleImage } from "../../components/vehicle-image";
+import { MarketReferenceLinks } from "../../components/market-reference-links";
+import { VehicleGallery } from "../../components/vehicle-gallery";
 import type { AuctionOpportunity } from "../../../lib/auction-types";
 import { SEED_AUCTIONS } from "../../../lib/seed-auctions";
 
@@ -105,9 +106,9 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
 
         <section className="detail-hero">
           <div className="detail-photo">
-            <VehicleImage
-              src={auction.imageUrl}
-              alt={`${auction.title} shown in the official GSA listing`}
+            <VehicleGallery
+              images={[auction.imageUrl, ...auction.images]}
+              title={auction.title}
               fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make} ${auction.vehicle.model}`}
               fallbackCopy="Official photo unavailable here. Open the GSA record to view its complete gallery."
               variant="detail"
@@ -175,11 +176,8 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
             </div>
             <div className="market-legend"><span><i className="dot bid" /> Current bid {dollars(auction.currentBidCents)}</span><span><i className="dot forecast" /> Projected close {dollars(auction.forecast.expectedCents)}</span><span><i className="dot ceiling" /> Safe ceiling {dollars(auction.assessment.safeMaxBidCents)}</span></div>
             <div className="provenance-note"><FileSearch size={16} /><div><strong>{auction.valuation.provider}</strong><span>{auction.valuation.provenanceNote}</span></div><em>{auction.valuation.status === "provider" ? "Licensed source" : auction.valuation.status === "reference-only" ? "Reference only · not KBB" : "No licensed value connected"}</em></div>
-            <div className="valuation-verification">
-              <div><BadgeCheck size={18} aria-hidden="true" /><span><strong>Verify the price independently</strong><small>No KBB value is imported or represented as integrated yet.</small></span></div>
-              <p>Have these listing facts ready: VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "unknown" : `${integer.format(auction.vehicle.mileage)} mi`}</b>, ZIP <b>{auction.location.postalCode}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
-              <a href="https://www.kbb.com/car-values/" target="_blank" rel="noreferrer">Check value at KBB <ExternalLink size={14} /></a>
-            </div>
+            <p className="market-vehicle-facts">References are prepared for <b>{auction.vehicle.year} {auction.vehicle.make} {auction.vehicle.model}</b>. Refine them with VIN <b>{auction.vehicle.vin ?? "not captured"}</b>, mileage <b>{auction.vehicle.mileage === null || auction.vehicle.mileage === undefined ? "unknown" : `${integer.format(auction.vehicle.mileage)} mi`}</b>, ZIP <b>{auction.location.postalCode || "not captured"}</b>, and condition <b>{auction.vehicle.condition}</b>.</p>
+            <MarketReferenceLinks auction={auction} />
           </section>
 
           <section className="analysis-card vehicle-card-detail">

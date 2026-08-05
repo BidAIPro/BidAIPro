@@ -165,6 +165,7 @@ export interface AuctionOpportunity {
   title: string;
   sourceUrl: string;
   imageUrl: string;
+  images: readonly string[];
   imageSource: "gsa-auctions";
   status: AuctionStatus;
   currentBidCents: MoneyCents | null;

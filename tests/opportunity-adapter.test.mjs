@@ -23,7 +23,11 @@ function discovery(overrides = {}) {
     inactivityMinutes: 10,
     url: "https://www.gsaauctions.gov/auctions/preview/372498",
     imageUrl: "https://example.com/signed.jpg",
-    images: ["https://example.com/signed.jpg"],
+    images: [
+      "https://example.com/signed.jpg",
+      "https://example.com/side.jpg",
+      "https://example.com/signed.jpg",
+    ],
     vin: "NM0GE9E26M1495395",
     mileage: 11081,
     odometerStatus: "reported-not-verified",
@@ -57,6 +61,10 @@ test("official discovery stays visible without fabricating value or a safe ceili
   assert.equal(opportunity.bidderCount, 3);
   assert.equal(opportunity.vehicle.vin, "NM0GE9E26M1495395");
   assert.equal(opportunity.imageUrl, "https://example.com/signed.jpg");
+  assert.deepEqual(opportunity.images, [
+    "https://example.com/signed.jpg",
+    "https://example.com/side.jpg",
+  ]);
   assert.equal(opportunity.vehicle.mileage, 11081);
   assert.equal(opportunity.vehicle.odometerStatus, "reported-not-verified");
   assert.equal(opportunity.vehicle.condition, "good");

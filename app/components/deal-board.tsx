@@ -37,7 +37,8 @@ import type { AuctionOpportunity } from "../../lib/auction-types";
 import { applyLiveBidSnapshot, type LiveBidSnapshot } from "../../lib/live-bid-snapshot";
 import { publicApiUrl } from "../../lib/public-api";
 import { getRefreshDecision } from "../../lib/refresh-policy";
-import { VehicleImage } from "./vehicle-image";
+import { MarketReferenceLinks } from "./market-reference-links";
+import { VehicleGallery } from "./vehicle-gallery";
 
 type SortKey = "deal" | "ending" | "profit" | "bid";
 type QuickFilter = "all" | "closing" | "trucks" | "high-confidence" | "under-10k" | "saved";
@@ -194,9 +195,9 @@ function OpportunityCard({
   return (
     <article className={`opportunity-card ${compact ? "is-compact" : ""}`}>
       <div className="vehicle-media">
-        <VehicleImage
-          src={auction.imageUrl}
-          alt={`${auction.title} shown in the official GSA listing`}
+        <VehicleGallery
+          images={[auction.imageUrl, ...(auction.images ?? [])]}
+          title={auction.title}
           fallbackTitle={`${auction.vehicle.year} ${auction.vehicle.make}`}
           fallbackCopy="Official photo unavailable here; open the GSA listing for its gallery."
           variant="card"
@@ -267,8 +268,8 @@ function OpportunityCard({
           </div>
           <div>
             <span>Market reference</span>
-            <strong>{dollars(marketValue)}</strong>
-            <small>{auction.valuation.status === "provider" ? auction.valuation.provider : auction.valuation.status === "reference-only" ? "Demo reference · not KBB" : "Not connected · verify at KBB"}</small>
+            <strong>{marketValue === null ? "Free sources" : dollars(marketValue)}</strong>
+            <small>{auction.valuation.status === "provider" ? auction.valuation.provider : "KBB · Edmunds · J.D. Power"}</small>
           </div>
           <div className="all-in-metric">
             <span>Modeled all-in now</span>
@@ -276,6 +277,8 @@ function OpportunityCard({
             <small>{addedCostsNow === null ? "Added costs unavailable" : `Bid + ${dollars(addedCostsNow)} modeled costs`}</small>
           </div>
         </div>
+
+        <MarketReferenceLinks auction={auction} compact />
 
         <div className="headroom-row">
           <div className="headroom-copy">
@@ -618,7 +621,7 @@ export function DealBoard() {
             <ShieldCheck size={18} />
             <div>
               <strong>Evidence-aware by design</strong>
-              <span>Market values are unavailable or explicitly labeled demo references until a licensed KBB, Black Book, J.D. Power, or other provider is connected. A safe bid ceiling activates only with sufficient independent evidence; current GSA bids never substitute for value.</span>
+              <span>Every vehicle now includes free KBB, Edmunds, J.D. Power, active-listing, and sold-listing research links; CARFAX is included when GSA provides a valid VIN. Their results stay with the provider and are not copied into a deal score; the safe bid ceiling stays disabled until authorized numeric evidence is imported.</span>
             </div>
             <a href="#source-health">View source ledger <ArrowRight size={14} /></a>
           </section>
