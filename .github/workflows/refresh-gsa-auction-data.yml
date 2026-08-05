@@ -41,7 +41,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22.13.0
+          # Node 24 runs the repository's type-stripped .ts imports used by
+          # the validated snapshot exporter without adding a runtime loader.
+          node-version: 24.14.0
           cache: pnpm
 
       - name: Install dependencies
