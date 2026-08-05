@@ -183,6 +183,7 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.match(opportunityRoute, /searchParams\.get\("warm"\) !== "1"/);
   assert.match(opportunityRoute, /scheduleSnapshotRebuild\(\)/);
   assert.match(opportunityRoute, /readDealBoardSnapshotFreshness/);
+  assert.match(opportunityRoute, /WARM_SNAPSHOT_MINIMUM_FRESH_MS = 35 \* 60_000/);
   assert.match(opportunityRoute, /"Cache-Control", "no-store"/);
   assert.match(opportunityRoute, /DEAL_BOARD_SNAPSHOT_VERIFY_FAILED/);
   assert.doesNotMatch(opportunityRoute, /if \(isWarmRequest\(request\)\)/);

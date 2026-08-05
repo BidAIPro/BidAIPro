@@ -54,6 +54,7 @@ const DETAIL_CACHE_CONTROL =
   "public, max-age=0, s-maxage=60, stale-while-revalidate=120, stale-if-error=300";
 const DIRECT_GSA_DEADLINE_MS = 18_000;
 const ON_DEMAND_SNAPSHOT_MAX_AGE_MS = 10 * 60_000;
+const WARM_SNAPSHOT_MINIMUM_FRESH_MS = 35 * 60_000;
 
 function scheduleSnapshotRebuild(): boolean {
   return scheduleDealBoardSnapshotTask(
@@ -844,7 +845,7 @@ export async function POST(request: Request) {
     const existing = await readDealBoardSnapshotFreshness(
       env.DB,
       now,
-      0,
+      WARM_SNAPSHOT_MINIMUM_FRESH_MS,
     );
     if (existing?.fresh) {
       return Response.json(
@@ -862,7 +863,11 @@ export async function POST(request: Request) {
       }),
       { now, skipFreshSnapshot: false },
     );
-    const verified = await readDealBoardSnapshotFreshness(env.DB, new Date(), 0);
+    const verified = await readDealBoardSnapshotFreshness(
+      env.DB,
+      new Date(),
+      WARM_SNAPSHOT_MINIMUM_FRESH_MS,
+    );
     if (result.status === "executed") {
       if (!verified?.fresh || verified.snapshotId !== result.value.snapshotId) {
         return Response.json(
