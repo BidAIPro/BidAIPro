@@ -108,6 +108,42 @@ test("uses a sparse close Fleet outcome without widening to a remote model year"
   assert.ok(refreshed.forecast.expectedCents >= 750_000);
 });
 
+test("keeps scrap outcomes out of usable Fleet valuation and forecast evidence", () => {
+  const subject = row({ conditionCode: "4" });
+  const normalA = sold({
+    sourceId: "usable-a",
+    conditionCode: "4",
+    saleProceedsCents: 2_000_000,
+    finalPriceCents: 2_000_000,
+  });
+  const normalB = sold({
+    sourceId: "usable-b",
+    conditionCode: "4",
+    saleProceedsCents: 2_200_000,
+    finalPriceCents: 2_200_000,
+  });
+  const scrap = sold({
+    sourceId: "scrap-outcome",
+    conditionCode: "S",
+    saleProceedsCents: 10_000,
+    finalPriceCents: 10_000,
+  });
+  const index = buildGsaFleetComparableIndex([normalA, normalB, scrap]);
+  const opportunity = gsaFleetListingToOpportunity(
+    subject,
+    gsaFleetComparableCandidates(subject, index),
+  );
+
+  assert.equal(opportunity.vehicle.condition, "fair");
+  assert.equal(opportunity.valuation.sampleSize, 2);
+  assert.equal(opportunity.forecast.sampleSize, 2);
+  assert.equal(
+    opportunity.forecast.evidenceIds.includes("gsa-fleet:scrap-outcome"),
+    false,
+  );
+  assert.ok(opportunity.valuation.lowCents > 1_000_000);
+});
+
 test("scheduled live Fleet sales stay preview-only and never invent an online bid", () => {
   const subject = row({
     saleType: "Live",

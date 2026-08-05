@@ -2,6 +2,7 @@ import type {
   AuctionOpportunity,
   DealAssessment,
   ValuationReference,
+  VehicleCondition,
   VehicleSnapshot,
 } from "./auction-types.ts";
 import {
@@ -25,6 +26,7 @@ import {
   classifyVehicle,
   type GsaMarketValuationSubject,
 } from "./gsa-market-valuations.ts";
+import type { GsaVehicleCondition } from "./gsa-normalizer.ts";
 
 const FLEET_PROVIDER = "Official GSA Fleet awarded-sale comps";
 
@@ -82,6 +84,49 @@ export function normalizeGsaFleetModel(value: string | null): string | null {
   return titleCase(clean, clean);
 }
 
+export function gsaFleetValuationCondition(
+  value: string | null,
+): GsaVehicleCondition {
+  switch (value?.trim().toUpperCase()) {
+    case "1":
+    case "N":
+    case "NEW":
+      return "new";
+    case "4":
+    case "U":
+    case "USABLE":
+      return "usable";
+    case "7":
+    case "R":
+    case "REPAIRABLE":
+      return "repairable";
+    case "X":
+    case "SALVAGE":
+      return "salvage";
+    case "S":
+    case "SCRAP":
+      return "scrap";
+    default:
+      return "unknown";
+  }
+}
+
+function gsaFleetDisplayCondition(value: string | null): VehicleCondition {
+  switch (gsaFleetValuationCondition(value)) {
+    case "new":
+      return "good";
+    case "usable":
+      return "fair";
+    case "repairable":
+      return "repairable";
+    case "salvage":
+    case "scrap":
+      return "salvage";
+    default:
+      return "unknown";
+  }
+}
+
 function opportunityTitle(row: GsaFleetVehicleRecord): string {
   const year = row.year ?? 0;
   const make = titleCase(row.make, "Make pending");
@@ -101,7 +146,7 @@ function subjectFor(row: GsaFleetVehicleRecord): GsaMarketValuationSubject {
     vin: row.vin,
     mileage: row.mileage,
     bodyType: row.vehicleType,
-    condition: "unknown",
+    condition: gsaFleetValuationCondition(row.conditionCode),
     operability: "unknown",
   };
 }
@@ -141,7 +186,7 @@ export function gsaFleetClosedComparable(
     vin: row.vin,
     mileage: row.mileage,
     bodyType: row.vehicleType,
-    condition: "unknown",
+    condition: gsaFleetValuationCondition(row.conditionCode),
     operability: "unknown",
     damageFlags: [],
     issueFlags: [],
@@ -346,7 +391,7 @@ function vehicleSnapshot(
     fuelType: detail?.fuelType ?? row.fuelType ?? undefined,
     drivetrain: detail?.drivetrain ?? undefined,
     color: detail?.color ?? undefined,
-    condition: "unknown",
+    condition: gsaFleetDisplayCondition(row.conditionCode),
     operability: "unknown",
     description: detail?.comments?.trim() ||
       `${row.channel === "live" ? "Scheduled in-person" : "Internet"} GSA Fleet sale through ${row.location.vendorName ?? "the listed vendor"}. Review the official condition report and listing before bidding.`,
