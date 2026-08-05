@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { getRequestExecutionContext } from "vinext/shims/request-context";
 import { getGsaVehicleAuctions, GsaClientError } from "../../../lib/gsa-client";
 import {
   fetchGsaRunnerSnapshot,
@@ -15,8 +16,14 @@ import type { AuctionOpportunity } from "../../../lib/auction-types";
 import { compactOpportunityForBoard } from "../../../lib/opportunity-presentation";
 import { applyLiveBidSnapshot } from "../../../lib/live-bid-snapshot";
 import {
+  persistDealBoardSnapshot,
   readDealBoardSnapshot,
+  readDealBoardSnapshotFreshness,
   readDealBoardSnapshotOpportunity,
+  rebuildDealBoardSnapshot,
+  runWithDealBoardSnapshotLease,
+  scheduleDealBoardSnapshotTask,
+  type BuiltDealBoardSnapshot,
 } from "../../../lib/deal-board-snapshot";
 import {
   buildGsaFleetComparableIndex,
@@ -46,6 +53,65 @@ const CACHE_CONTROL =
 const DETAIL_CACHE_CONTROL =
   "public, max-age=0, s-maxage=60, stale-while-revalidate=120, stale-if-error=300";
 const DIRECT_GSA_DEADLINE_MS = 18_000;
+const ON_DEMAND_SNAPSHOT_MAX_AGE_MS = 10 * 60_000;
+
+function scheduleSnapshotRebuild(): boolean {
+  return scheduleDealBoardSnapshotTask(
+    getRequestExecutionContext(),
+    () => runWithDealBoardSnapshotLease(
+      env.DB,
+      () => rebuildDealBoardSnapshot(env.DB, {
+        apiKey: env.GSA_API_KEY,
+        signal: AbortSignal.timeout(55_000),
+      }),
+    ),
+  );
+}
+
+function scheduleComputedSnapshot(
+  opportunities: AuctionOpportunity[],
+  metadata: Record<string, unknown>,
+  now: Date,
+  gsaInventoryMode: BuiltDealBoardSnapshot["gsaInventoryMode"],
+  upstreamExpiresAt: string,
+): void {
+  if (opportunities.length === 0) return;
+  const upstreamExpiryMs = Date.parse(upstreamExpiresAt);
+  if (!Number.isFinite(upstreamExpiryMs) || upstreamExpiryMs <= now.getTime()) return;
+  const generatedAt = now.toISOString();
+  const expiresAt = new Date(
+    Math.min(now.getTime() + ON_DEMAND_SNAPSHOT_MAX_AGE_MS, upstreamExpiryMs),
+  ).toISOString();
+  const originalSnapshot = metadata.snapshot !== null &&
+      typeof metadata.snapshot === "object" &&
+      !Array.isArray(metadata.snapshot)
+    ? metadata.snapshot as Record<string, unknown>
+    : {};
+  scheduleDealBoardSnapshotTask(
+    getRequestExecutionContext(),
+    () => runWithDealBoardSnapshotLease(
+      env.DB,
+      () => persistDealBoardSnapshot(env.DB, {
+        generatedAt,
+        expiresAt,
+        opportunities,
+        gsaInventoryMode,
+        metadata: {
+          ...metadata,
+          snapshot: {
+            ...originalSnapshot,
+            upstreamGeneratedAt: originalSnapshot.generatedAt ?? null,
+            upstreamExpiresAt,
+            generatedAt,
+            refreshedAt: generatedAt,
+            expiresAt,
+          },
+        },
+      }),
+      { skipFreshSnapshot: false },
+    ),
+  );
+}
 
 interface FleetBoardSnapshot {
   opportunities: AuctionOpportunity[];
@@ -433,13 +499,14 @@ async function persistSnapshotOnce(snapshot: GsaRunnerSnapshot, now: number) {
 }
 
 export async function GET(request: Request) {
-  const requestedId = requestedOpportunityId(request);
   const requestNow = new Date();
+  const requestedId = requestedOpportunityId(request);
   try {
     const precomputed = requestedId
       ? await readDealBoardSnapshotOpportunity(env.DB, requestedId, requestNow)
       : await readDealBoardSnapshot(env.DB, requestNow);
     if (precomputed) {
+      if (precomputed.stale && !requestedId) scheduleSnapshotRebuild();
       const responseData = requestedId && precomputed.data[0]
         ? [await enrichPrecomputedFleetDetail(precomputed.data[0])]
         : precomputed.data;
@@ -544,29 +611,39 @@ export async function GET(request: Request) {
       fleet.data !== null &&
       fleet.data.cacheStatus === "refresh" &&
       fleet.data.closedOutcomeErrorCode === null;
+    const responseMeta = {
+      mode: fleet.data
+        ? "official-gsa-auctions-and-fleet"
+        : "official-gsa-public-catalog",
+      coverage: combinedCoverage(
+        gsaCoverage,
+        activeAuctions.length,
+        fleet.data,
+      ),
+      sourceHealth: {
+        ...combinedSourceHealth(
+          discovery.sourceHealth as unknown as Record<string, unknown>,
+          gsaLive,
+          fleet.data,
+        ),
+        fleetErrorCode: fleet.errorCode,
+        partial: !completeBoardResponse,
+      },
+    };
+    if (!requestedId && completeBoardResponse) {
+      scheduleComputedSnapshot(
+        opportunities,
+        responseMeta,
+        new Date(),
+        "live",
+        discovery.sourceHealth.cachedUntil,
+      );
+    }
 
     return Response.json(
       {
         data: responseOpportunities,
-        meta: {
-          mode: fleet.data
-            ? "official-gsa-auctions-and-fleet"
-            : "official-gsa-public-catalog",
-          coverage: combinedCoverage(
-            gsaCoverage,
-            activeAuctions.length,
-            fleet.data,
-          ),
-          sourceHealth: {
-            ...combinedSourceHealth(
-              discovery.sourceHealth as unknown as Record<string, unknown>,
-              gsaLive,
-              fleet.data,
-            ),
-            fleetErrorCode: fleet.errorCode,
-            partial: !completeBoardResponse,
-          },
-        },
+        meta: responseMeta,
       },
       { headers: publicApiHeaders({
         "Cache-Control": requestedId
@@ -614,48 +691,62 @@ export async function GET(request: Request) {
         requestedId,
         fleet.data,
       );
-
+      const responseMeta = {
+        mode: fleet.data
+          ? "official-gsa-fleet-with-gsa-auctions-snapshot"
+          : "official-gsa-runner-snapshot",
+        coverage: combinedCoverage(
+          gsaCoverage,
+          responseAuctions.length,
+          fleet.data,
+        ),
+        persistence,
+        snapshot: {
+          revision: snapshot.revision,
+          generatedAt: snapshot.generatedAt,
+          expiresAt: snapshot.expiresAt,
+          imageExpiresAt: snapshot.imageExpiresAt,
+          imagesFresh,
+        },
+        sourceHealth: {
+          ...combinedSourceHealth(
+            {
+              ...snapshot.sourceHealth,
+              status: "stale",
+              cache: "stale-fallback",
+              staleSince: snapshot.generatedAt,
+              ageSeconds: Math.max(
+                0,
+                Math.floor((now - Date.parse(snapshot.generatedAt)) / 1_000),
+              ),
+              lastErrorCode: directErrorCode,
+              delivery: "github-branch-snapshot",
+            },
+            false,
+            fleet.data,
+          ),
+          cache: "stale-fallback",
+          fleetErrorCode: fleet.errorCode,
+        },
+      };
+      const completeRunnerBoardResponse = fleet.data !== null &&
+        fleet.data.cacheStatus === "refresh" &&
+        fleet.data.closedOutcomeErrorCode === null &&
+        Number.isFinite(Date.parse(snapshot.expiresAt)) &&
+        Date.parse(snapshot.expiresAt) > now;
+      if (!requestedId && completeRunnerBoardResponse) {
+        scheduleComputedSnapshot(
+          combinedOpportunities,
+          responseMeta,
+          new Date(),
+          "runner-snapshot",
+          snapshot.expiresAt,
+        );
+      }
       return Response.json(
         {
           data: responseData,
-          meta: {
-            mode: fleet.data
-              ? "official-gsa-fleet-with-gsa-auctions-snapshot"
-              : "official-gsa-runner-snapshot",
-            coverage: combinedCoverage(
-              gsaCoverage,
-              responseAuctions.length,
-              fleet.data,
-            ),
-            persistence,
-            snapshot: {
-              revision: snapshot.revision,
-              generatedAt: snapshot.generatedAt,
-              expiresAt: snapshot.expiresAt,
-              imageExpiresAt: snapshot.imageExpiresAt,
-              imagesFresh,
-            },
-            sourceHealth: {
-              ...combinedSourceHealth(
-                {
-                  ...snapshot.sourceHealth,
-                  status: "stale",
-                  cache: "stale-fallback",
-                  staleSince: snapshot.generatedAt,
-                  ageSeconds: Math.max(
-                    0,
-                    Math.floor((now - Date.parse(snapshot.generatedAt)) / 1_000),
-                  ),
-                  lastErrorCode: directErrorCode,
-                  delivery: "github-branch-snapshot",
-                },
-                false,
-                fleet.data,
-              ),
-              cache: "stale-fallback",
-              fleetErrorCode: fleet.errorCode,
-            },
-          },
+          meta: responseMeta,
         },
         {
           headers: publicApiHeaders({
@@ -676,22 +767,23 @@ export async function GET(request: Request) {
           requestedId,
           fleet.data,
         );
+        const responseMeta = {
+          mode: "official-gsa-fleet-only",
+          coverage: combinedCoverage(null, 0, fleet.data),
+          sourceHealth: combinedSourceHealth(
+            {
+              status: "partial",
+              lastErrorCode: `${directErrorCode}__${snapshotErrorCode}`,
+              discoveryCadence: "hourly",
+            },
+            false,
+            fleet.data,
+          ),
+        };
         return Response.json(
           {
             data: responseData,
-            meta: {
-              mode: "official-gsa-fleet-only",
-              coverage: combinedCoverage(null, 0, fleet.data),
-              sourceHealth: combinedSourceHealth(
-                {
-                  status: "partial",
-                  lastErrorCode: `${directErrorCode}__${snapshotErrorCode}`,
-                  discoveryCadence: "hourly",
-                },
-                false,
-                fleet.data,
-              ),
-            },
+            meta: responseMeta,
           },
           { headers: publicApiHeaders({
             "Cache-Control": requestedId ? DETAIL_CACHE_CONTROL : "no-store",
@@ -722,5 +814,91 @@ export async function GET(request: Request) {
         },
       );
     }
+  }
+}
+
+function warmErrorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && /^[A-Z0-9_]{1,120}$/.test(code)) return code;
+  }
+  return "DEAL_BOARD_SNAPSHOT_REBUILD_FAILED";
+}
+
+function warmHeaders(extra: HeadersInit = {}): Headers {
+  const headers = publicApiHeaders(extra);
+  headers.set("Cache-Control", "no-store");
+  return headers;
+}
+
+/** Public, idempotent warm-up action; durable D1 state throttles all callers. */
+export async function POST(request: Request) {
+  const now = new Date();
+  try {
+    if (new URL(request.url).searchParams.get("warm") !== "1") {
+      return Response.json(
+        { status: "invalid-action" },
+        { status: 400, headers: warmHeaders() },
+      );
+    }
+    const existing = await readDealBoardSnapshotFreshness(
+      env.DB,
+      now,
+      0,
+    );
+    if (existing?.fresh) {
+      return Response.json(
+        { status: "fresh", snapshotId: existing.snapshotId, expiresAt: existing.expiresAt },
+        { headers: warmHeaders() },
+      );
+    }
+
+    const result = await runWithDealBoardSnapshotLease(
+      env.DB,
+      () => rebuildDealBoardSnapshot(env.DB, {
+        now,
+        apiKey: env.GSA_API_KEY,
+        signal: AbortSignal.timeout(55_000),
+      }),
+      { now, skipFreshSnapshot: false },
+    );
+    const verified = await readDealBoardSnapshotFreshness(env.DB, new Date(), 0);
+    if (result.status === "executed") {
+      if (!verified?.fresh || verified.snapshotId !== result.value.snapshotId) {
+        return Response.json(
+          { status: "failed", errorCode: "DEAL_BOARD_SNAPSHOT_VERIFY_FAILED" },
+          { status: 503, headers: warmHeaders() },
+        );
+      }
+      return Response.json(
+        { status: "rebuilt", snapshotId: verified.snapshotId, expiresAt: verified.expiresAt },
+        { headers: warmHeaders() },
+      );
+    }
+    if (verified?.fresh) {
+      return Response.json(
+        { status: "fresh", snapshotId: verified.snapshotId, expiresAt: verified.expiresAt },
+        { headers: warmHeaders() },
+      );
+    }
+    if (result.status === "cooldown") {
+      const retrySeconds = Math.max(
+        1,
+        Math.ceil((Date.parse(result.retryAt) - Date.now()) / 1_000),
+      );
+      return Response.json(
+        { status: "cooldown", retryAt: result.retryAt },
+        { status: 503, headers: warmHeaders({ "Retry-After": String(retrySeconds) }) },
+      );
+    }
+    return Response.json(
+      { status: result.status === "busy" ? "busy" : "not-rebuilt" },
+      { status: 409, headers: warmHeaders({ "Retry-After": "15" }) },
+    );
+  } catch (error) {
+    return Response.json(
+      { status: "failed", errorCode: warmErrorCode(error) },
+      { status: 503, headers: warmHeaders({ "Retry-After": "300" }) },
+    );
   }
 }

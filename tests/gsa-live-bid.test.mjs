@@ -211,7 +211,10 @@ test("serves live snapshots with Pages CORS and no more than ten seconds of edge
 
   const preflight = liveBidPreflight();
   assert.equal(preflight.status, 204);
-  assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, OPTIONS");
+  assert.equal(
+    preflight.headers.get("access-control-allow-methods"),
+    "GET, POST, OPTIONS",
+  );
   assert.equal(
     preflight.headers.get("access-control-allow-headers"),
     "Accept, Content-Type, Cache-Control, Pragma",

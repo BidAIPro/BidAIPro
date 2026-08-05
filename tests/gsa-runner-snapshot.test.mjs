@@ -6,6 +6,7 @@ import {
   fetchGsaRunnerSnapshot,
   GsaRunnerSnapshotError,
 } from "../lib/gsa-runner-snapshot.ts";
+import { GSA_AUCTIONS_ENDPOINT } from "../lib/gsa-client.ts";
 
 const NOW = new Date("2026-08-05T15:00:00.000Z");
 
@@ -148,6 +149,43 @@ test("accepts a complete official PPMS runner snapshot", async () => {
   assert.equal(result.auctions.every((item) => item.images.length === 1), true);
 });
 
+test("accepts a keyed official Auctions API snapshot with stable GSA images", async () => {
+  const value = snapshot({
+    source: "gsa-auctions-api",
+    imageExpiresAt: "2026-08-06T14:45:00.000Z",
+    sourceHealth: {
+      source: "GSA Auctions API",
+      official: true,
+      endpoint: GSA_AUCTIONS_ENDPOINT,
+      sourceMode: "legacy-bulk-feed",
+      status: "live",
+      cache: "refresh",
+      credentialMode: "configured",
+      fetchedAt: "2026-08-05T14:45:00.000Z",
+      observedAt: "2026-08-05T14:45:00.000Z",
+      cachedUntil: "2026-08-05T15:30:00.000Z",
+      staleSince: null,
+      ageSeconds: 0,
+      lastErrorCode: null,
+      discoveryCadence: "hourly",
+      limitations: ["Official documented API snapshot."],
+    },
+  });
+  for (const [index, item] of value.auctions.entries()) {
+    const image = `https://images.gsa.gov/auctions/${index + 1}.jpg`;
+    item.imageUrl = image;
+    item.images = [image];
+  }
+  value.revision = createHash("sha256")
+    .update(JSON.stringify({ generatedAt: value.generatedAt, auctions: value.auctions }))
+    .digest("hex");
+
+  const result = await fetchGsaRunnerSnapshot({ fetchImpl: responseFor(value), now: NOW });
+  assert.equal(result.source, "gsa-auctions-api");
+  assert.equal(result.sourceHealth.sourceMode, "legacy-bulk-feed");
+  assert.equal(result.imageExpiresAt, result.expiresAt);
+});
+
 test("keeps vehicle facts usable after signed image URLs expire", async () => {
   const value = snapshot({ imageExpiresAt: "2026-08-05T14:59:00.000Z" });
   const result = await fetchGsaRunnerSnapshot({ fetchImpl: responseFor(value), now: NOW });
@@ -199,6 +237,22 @@ test("rejects expired, collapsed, duplicate, unsafe, and tampered snapshots", as
     await assert.rejects(
       fetchGsaRunnerSnapshot({ fetchImpl: responseFor(value), now: NOW }),
       (error) => error instanceof GsaRunnerSnapshotError && error.code === "GSA_RUNNER_SNAPSHOT_AUCTION_INVALID",
+    );
+  });
+
+  await t.test("legacy snapshot source and metadata must agree", async () => {
+    const value = snapshot({ source: "gsa-auctions-api" });
+    for (const [index, item] of value.auctions.entries()) {
+      const image = `https://images.gsa.gov/auctions/${index + 1}.jpg`;
+      item.imageUrl = image;
+      item.images = [image];
+    }
+    value.revision = createHash("sha256")
+      .update(JSON.stringify({ generatedAt: value.generatedAt, auctions: value.auctions }))
+      .digest("hex");
+    await assert.rejects(
+      fetchGsaRunnerSnapshot({ fetchImpl: responseFor(value), now: NOW }),
+      (error) => error instanceof GsaRunnerSnapshotError && error.code === "GSA_RUNNER_SNAPSHOT_META_INVALID",
     );
   });
 

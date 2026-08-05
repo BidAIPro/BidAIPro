@@ -7,11 +7,14 @@ on:
       - .github/workflows/refresh-gsa-auction-data.yml
       - scripts/export-gsa-snapshot.mjs
       - lib/gsa-client.ts
+      - lib/gsa-normalizer.ts
       - lib/gsa-ppms-client.ts
       - lib/gsa-ppms-normalizer.ts
+      - lib/gsa-runner-snapshot.ts
+      - lib/gsa-snapshot-export.ts
   schedule:
-    # GSA photo signatures last one hour. Refresh twice hourly so a delayed
-    # runner does not normally leave the public board with expired images.
+    # Refresh bids twice hourly and renew PPMS image signatures whenever that
+    # primary source is reachable; documented-API ImageURL values are stable.
     - cron: "17,47 * * * *"
   workflow_dispatch:
 
@@ -24,24 +27,48 @@ concurrency:
 
 jobs:
   refresh:
-    # GSA rejects the Azure egress used by GitHub's Linux runners with HTTP
-    # 403. GitHub's macOS runner uses a separate network for the same public
-    # catalog request exercised by the validated local exporter.
-    runs-on: macos-latest
+    # PPMS remains the collector's primary source, but GSA currently rejects
+    # GitHub-hosted runner egress. A configured personal API key lets the same
+    # exporter fall back to GSA's documented official Auctions API.
+    runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      - name: Check collector configuration
+        id: configuration
+        shell: bash
+        env:
+          GSA_API_KEY: ${{ secrets.GSA_API_KEY }}
+        run: |
+          if [[ -n "${GSA_API_KEY//[[:space:]]/}" ]]; then
+            echo "configured=true" >> "${GITHUB_OUTPUT}"
+            {
+              echo "## GSA Auctions snapshot collector"
+              echo "Status: configured. PPMS is primary and the keyed official Auctions API is available as the hosted-runner fallback."
+            } >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+            {
+              echo "## GSA Auctions snapshot collector"
+              echo "Status: not configured. Add the repository Actions secret \`GSA_API_KEY\` to enable hosted collection."
+              echo "The collector is a successful no-op; the board warm-up still runs without using DEMO_KEY or overwriting the last validated snapshot."
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
       - name: Check out application source
+        if: steps.configuration.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Install pnpm
+        if: steps.configuration.outputs.configured == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
           run_install: false
 
       - name: Install Node.js
+        if: steps.configuration.outputs.configured == 'true'
         uses: actions/setup-node@v6
         with:
           # Node 24 runs the repository's type-stripped .ts imports used by
@@ -50,12 +77,17 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
+        if: steps.configuration.outputs.configured == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Export a complete official vehicle snapshot
+        if: steps.configuration.outputs.configured == 'true'
+        env:
+          GSA_API_KEY: ${{ secrets.GSA_API_KEY }}
         run: node scripts/export-gsa-snapshot.mjs work/gsa-vehicles.json
 
       - name: Publish the validated snapshot data branch
+        if: steps.configuration.outputs.configured == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -73,3 +105,16 @@ jobs:
           fi
           git commit -m "chore(data): refresh official GSA auction snapshot"
           git push origin HEAD:gsa-auction-data
+
+      - name: Warm the website's precomputed deal board
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --request POST \
+            --retry 2 --retry-all-errors \
+            --connect-timeout 15 \
+            --max-time 90 \
+            --output /dev/null \
+            "https://bidai-pro-gsa-vehicles.zk8619.chatgpt.site/api/opportunities?warm=1"

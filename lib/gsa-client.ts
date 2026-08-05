@@ -22,10 +22,10 @@ const LEGACY_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 
 export const GSA_PUBLIC_FEED_LIMITATIONS = [
-  "Discovery uses the first-party public GSA Auctions category-300 JSON catalog and bounded lot-detail requests, not auction-page HTML scraping.",
+  "Discovery prefers the first-party public GSA Auctions category-300 JSON catalog and bounded lot-detail requests; the documented keyed Auctions API is the official fallback when configured.",
   "Bid amount and bidder count are point-in-time fields and can lag the interactive bidding screen.",
   "Mileage is seller-reported and not independently verified; conflicting structured and narrative readings are retained and flagged.",
-  "Images use GSA-issued short-lived storage URLs and are refreshed before their one-hour expiry.",
+  "PPMS images use short-lived GSA storage signatures; repository snapshots host-validate documented Auctions API ImageURL values before publication.",
   "VIN, mileage, body style, images, condition details, and reserve information are not guaranteed for every lot.",
   "The GSA catalog does not provide a dependable closed-sale comp history or Kelley Blue Book valuation.",
 ] as const;

@@ -179,6 +179,13 @@ test("keeps the open deal board fresh and expires reference snapshots", async ()
   assert.doesNotMatch(opportunityRoute, /SEED_AUCTIONS/);
   assert.match(opportunityRoute, /publicApiHeaders/);
   assert.match(opportunityRoute, /compactOpportunityForBoard/);
+  assert.match(opportunityRoute, /export async function POST/);
+  assert.match(opportunityRoute, /searchParams\.get\("warm"\) !== "1"/);
+  assert.match(opportunityRoute, /scheduleSnapshotRebuild\(\)/);
+  assert.match(opportunityRoute, /readDealBoardSnapshotFreshness/);
+  assert.match(opportunityRoute, /"Cache-Control", "no-store"/);
+  assert.match(opportunityRoute, /DEAL_BOARD_SNAPSHOT_VERIFY_FAILED/);
+  assert.doesNotMatch(opportunityRoute, /if \(isWarmRequest\(request\)\)/);
   assert.match(opportunityPresentation, /ACTIVE_BOARD_OUTCOME_ANCHOR_LIMIT/);
   assert.match(opportunityPresentation, /opportunity\.status === "active"/);
   assert.match(opportunityRoute, /recordsByOpportunityId/);

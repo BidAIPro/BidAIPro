@@ -3,7 +3,7 @@ const GITHUB_PAGES_ORIGIN = "https://bidaipro.github.io";
 export function publicApiHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init);
   headers.set("Access-Control-Allow-Origin", GITHUB_PAGES_ORIGIN);
-  headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   // Chromium may promote request cache directives to a CORS preflight. Allow
   // them defensively even though the public client no longer sets no-cache.
   headers.set(

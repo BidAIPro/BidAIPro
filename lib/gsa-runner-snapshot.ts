@@ -11,12 +11,14 @@ const MAX_FUTURE_SKEW_MS = 5 * 60_000;
 const MIN_VEHICLE_COUNT = 10;
 const MAX_IMAGES_PER_AUCTION = 6;
 const REVISION_PATTERN = /^[a-f0-9]{64}$/;
+const PPMS_CATALOG_ENDPOINT = "https://gsaauctions.gov/gw/auction/ppms/api/v1/auctions";
+const DOCUMENTED_AUCTIONS_ENDPOINT = "https://api.gsa.gov/assets/gsaauctions/v2/auctions";
 
 type JsonRecord = Record<string, unknown>;
 
 export interface GsaRunnerSnapshot {
   schemaVersion: 1;
-  source: "gsa-ppms";
+  source: "gsa-ppms" | "gsa-auctions-api";
   revision: string;
   itemCount: number;
   generatedAt: string;
@@ -94,15 +96,23 @@ function isListingUrl(value: unknown): value is string {
   }
 }
 
-function isSignedGsaImageUrl(value: unknown): value is string {
+function isRunnerImageUrl(
+  value: unknown,
+  sourceMode: GsaSourceHealth["sourceMode"],
+): value is string {
   if (!isText(value, 4_096, false)) return false;
   try {
     const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+    if (sourceMode === "ppms-public-catalog") {
+      return /(?:^|\.)s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com$/i.test(url.hostname);
+    }
+    const hostname = url.hostname.toLowerCase();
     return (
-      url.protocol === "https:" &&
-      !url.username &&
-      !url.password &&
-      /(?:^|\.)s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com$/i.test(url.hostname)
+      hostname === "gsa.gov" ||
+      hostname.endsWith(".gsa.gov") ||
+      hostname === "gsaauctions.gov" ||
+      hostname.endsWith(".gsaauctions.gov")
     );
   } catch {
     return false;
@@ -119,7 +129,10 @@ function isLocation(value: unknown): boolean {
   );
 }
 
-function isAuction(value: unknown): value is GsaVehicleAuction {
+function isAuction(
+  value: unknown,
+  sourceMode: GsaSourceHealth["sourceMode"],
+): value is GsaVehicleAuction {
   if (!isRecord(value)) return false;
   return (
     isText(value.id, 160, false) &&
@@ -138,10 +151,10 @@ function isAuction(value: unknown): value is GsaVehicleAuction {
     isNullableFiniteNumber(value.reserve, 1_000_000_000) &&
     isNullableInteger(value.inactivityMinutes, 100_000) &&
     isListingUrl(value.url) &&
-    (value.imageUrl === null || isSignedGsaImageUrl(value.imageUrl)) &&
+    (value.imageUrl === null || isRunnerImageUrl(value.imageUrl, sourceMode)) &&
     Array.isArray(value.images) &&
     value.images.length <= MAX_IMAGES_PER_AUCTION &&
-    value.images.every(isSignedGsaImageUrl) &&
+    value.images.every((image) => isRunnerImageUrl(image, sourceMode)) &&
     isNullableText(value.vin, 32) &&
     isNullableInteger(value.mileage, 2_000_000) &&
     ["reported-not-verified", "conflicting-readings", "not-reported"].includes(String(value.odometerStatus)) &&
@@ -199,13 +212,19 @@ function isCoverage(value: unknown, auctionCount: number): value is GsaCoverage 
   );
 }
 
-function isSourceHealth(value: unknown): value is GsaSourceHealth {
+function isSourceHealth(
+  value: unknown,
+  sourceMode: GsaSourceHealth["sourceMode"],
+): value is GsaSourceHealth {
+  if (!isRecord(value)) return false;
+  const sourceConfigurationIsValid = sourceMode === "ppms-public-catalog"
+    ? value.endpoint === PPMS_CATALOG_ENDPOINT && value.credentialMode === "public-catalog"
+    : value.endpoint === DOCUMENTED_AUCTIONS_ENDPOINT && value.credentialMode === "configured";
   return (
-    isRecord(value) &&
     value.source === "GSA Auctions API" &&
     value.official === true &&
-    value.sourceMode === "ppms-public-catalog" &&
-    value.credentialMode === "public-catalog" &&
+    value.sourceMode === sourceMode &&
+    sourceConfigurationIsValid &&
     isText(value.endpoint, 2_048, false) &&
     isIsoDate(value.fetchedAt) &&
     isIsoDate(value.observedAt) &&
@@ -236,7 +255,7 @@ async function normalizeSnapshot(value: unknown, now: Date): Promise<GsaRunnerSn
     );
   }
   if (
-    value.source !== "gsa-ppms" ||
+    !["gsa-ppms", "gsa-auctions-api"].includes(String(value.source)) ||
     typeof value.revision !== "string" ||
     !REVISION_PATTERN.test(value.revision) ||
     !Number.isSafeInteger(value.itemCount) ||
@@ -249,6 +268,9 @@ async function normalizeSnapshot(value: unknown, now: Date): Promise<GsaRunnerSn
       "The runner snapshot header was invalid.",
     );
   }
+  const sourceMode: GsaSourceHealth["sourceMode"] = value.source === "gsa-auctions-api"
+    ? "legacy-bulk-feed"
+    : "ppms-public-catalog";
   const generatedAt = Date.parse(value.generatedAt);
   const expiresAt = Date.parse(value.expiresAt);
   const imageExpiresAt = Date.parse(value.imageExpiresAt);
@@ -274,7 +296,7 @@ async function normalizeSnapshot(value: unknown, now: Date): Promise<GsaRunnerSn
       "The runner snapshot vehicle count was invalid.",
     );
   }
-  if (!value.auctions.every(isAuction)) {
+  if (!value.auctions.every((auction) => isAuction(auction, sourceMode))) {
     throw new GsaRunnerSnapshotError(
       "GSA_RUNNER_SNAPSHOT_AUCTION_INVALID",
       "The runner snapshot contained an invalid vehicle record.",
@@ -287,7 +309,10 @@ async function normalizeSnapshot(value: unknown, now: Date): Promise<GsaRunnerSn
       "The runner snapshot contained duplicate vehicle records.",
     );
   }
-  if (!isCoverage(value.coverage, value.auctions.length) || !isSourceHealth(value.sourceHealth)) {
+  if (
+    !isCoverage(value.coverage, value.auctions.length) ||
+    !isSourceHealth(value.sourceHealth, sourceMode)
+  ) {
     throw new GsaRunnerSnapshotError(
       "GSA_RUNNER_SNAPSHOT_META_INVALID",
       "The runner snapshot metadata was invalid.",

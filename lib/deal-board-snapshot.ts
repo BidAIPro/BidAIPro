@@ -117,6 +117,189 @@ export interface DealBoardBidReconciliationSummary {
   reconciledAt: string;
 }
 
+export interface DealBoardBackgroundContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+export interface DealBoardSnapshotFreshness {
+  snapshotId: string;
+  generatedAt: string;
+  expiresAt: string;
+  itemCount: number;
+  fresh: boolean;
+}
+
+let pendingOnDemandSnapshotTask: Promise<void> | null = null;
+const ON_DEMAND_SNAPSHOT_LEASE_ID = "deal-board:on-demand-warm-lease";
+const ON_DEMAND_SNAPSHOT_LEASE_CODE = "DEAL_BOARD_ON_DEMAND_WARM_LEASE";
+const ON_DEMAND_SNAPSHOT_COOLDOWN_CODE = "DEAL_BOARD_ON_DEMAND_WARM_COOLDOWN";
+const ON_DEMAND_SNAPSHOT_FAILURE_COOLDOWN_MS = 5 * 60_000;
+
+/** Coalesces request-triggered cache warming within one Worker isolate. */
+export function scheduleDealBoardSnapshotTask(
+  context: DealBoardBackgroundContext | null,
+  task: () => Promise<unknown>,
+): boolean {
+  if (!context || pendingOnDemandSnapshotTask) return false;
+  const pending = Promise.resolve()
+    .then(task)
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      if (pendingOnDemandSnapshotTask === pending) {
+        pendingOnDemandSnapshotTask = null;
+      }
+    });
+  pendingOnDemandSnapshotTask = pending;
+  context.waitUntil(pending);
+  return true;
+}
+
+/**
+ * Claims a D1-backed lease before public request warming. The fixed primary
+ * key makes the warm endpoint idempotent across Worker isolates, while the
+ * freshness predicate avoids rebuilding a board with more than ten minutes
+ * of useful life remaining.
+ */
+export async function runWithDealBoardSnapshotLease<T>(
+  db: D1Database,
+  task: () => Promise<T>,
+  options: {
+    now?: Date;
+    minimumFreshMs?: number;
+    skipFreshSnapshot?: boolean;
+  } = {},
+): Promise<
+  | { status: "executed"; value: T }
+  | { status: "busy" }
+  | { status: "cooldown"; retryAt: string }
+  | { status: "skipped" }
+> {
+  const now = validDate(options.now ?? new Date(), "now");
+  const minimumFreshMs = options.minimumFreshMs ?? 10 * 60_000;
+  if (
+    !Number.isSafeInteger(minimumFreshMs) ||
+    minimumFreshMs < 0 ||
+    minimumFreshMs > 60 * 60_000
+  ) {
+    throw new RangeError("minimumFreshMs must be between 0 and 3600000.");
+  }
+  const nowIso = now.toISOString();
+  const staleBefore = new Date(
+    now.getTime() - ABANDONED_BUILD_LEASE_MS,
+  ).toISOString();
+  await db.prepare(
+    `DELETE FROM deal_board_snapshots
+     WHERE id = ?1 AND (
+       (status = 'building'
+         AND error_code = '${ON_DEMAND_SNAPSHOT_LEASE_CODE}'
+         AND updated_at < ?2)
+       OR
+       (status = 'failed'
+         AND error_code = '${ON_DEMAND_SNAPSHOT_COOLDOWN_CODE}'
+         AND expires_at <= ?3)
+     )`,
+  ).bind(ON_DEMAND_SNAPSHOT_LEASE_ID, staleBefore, nowIso).run();
+
+  const freshUntil = new Date(now.getTime() + minimumFreshMs).toISOString();
+  const skipFreshPredicate = options.skipFreshSnapshot === false
+    ? ""
+    : `WHERE NOT EXISTS (
+         SELECT 1 FROM deal_board_snapshots
+         WHERE cache_key = ?2 AND schema_version = ?3
+           AND status = 'complete' AND expires_at > ?5
+       )`;
+  const claimStatement = db.prepare(
+    `INSERT OR IGNORE INTO deal_board_snapshots (
+       id, cache_key, schema_version, status, generated_at, refreshed_at,
+       expires_at, item_count, metadata_json, opportunity_index_json,
+       error_code, error_message, created_at, updated_at
+     ) SELECT ?1, ?2, ?3, 'building', ?4, ?4, ?4, 0, '{}', '{}',
+       '${ON_DEMAND_SNAPSHOT_LEASE_CODE}', NULL, ?4, ?4
+     ${skipFreshPredicate}`,
+  );
+  const claimed = await (options.skipFreshSnapshot === false
+    ? claimStatement.bind(
+        ON_DEMAND_SNAPSHOT_LEASE_ID,
+        DEAL_BOARD_CACHE_KEY,
+        DEAL_BOARD_SNAPSHOT_SCHEMA_VERSION,
+        nowIso,
+      )
+    : claimStatement.bind(
+        ON_DEMAND_SNAPSHOT_LEASE_ID,
+        DEAL_BOARD_CACHE_KEY,
+        DEAL_BOARD_SNAPSHOT_SCHEMA_VERSION,
+        nowIso,
+        freshUntil,
+      )).run();
+  if (Number(claimed.meta.changes) !== 1) {
+    const existing = await db.prepare(
+      `SELECT status, expires_at, error_code
+       FROM deal_board_snapshots
+       WHERE id = ?1
+       LIMIT 1`,
+    ).bind(ON_DEMAND_SNAPSHOT_LEASE_ID).first<{
+      status: string;
+      expires_at: string;
+      error_code: string | null;
+    }>();
+    if (
+      existing?.status === "failed" &&
+      existing.error_code === ON_DEMAND_SNAPSHOT_COOLDOWN_CODE &&
+      Date.parse(existing.expires_at) > now.getTime()
+    ) {
+      return { status: "cooldown", retryAt: existing.expires_at };
+    }
+    if (
+      existing?.status === "building" &&
+      existing.error_code === ON_DEMAND_SNAPSHOT_LEASE_CODE
+    ) {
+      return { status: "busy" };
+    }
+    return { status: "skipped" };
+  }
+
+  try {
+    const value = await task();
+    try {
+      await db.prepare(
+        `DELETE FROM deal_board_snapshots
+         WHERE id = ?1 AND status = 'building'
+           AND error_code = '${ON_DEMAND_SNAPSHOT_LEASE_CODE}'`,
+      ).bind(ON_DEMAND_SNAPSHOT_LEASE_ID).run();
+    } catch {
+      // The completed generation is authoritative. A stranded lease is reaped
+      // after its bounded lifetime and must not turn a successful rebuild into
+      // a false public failure.
+    }
+    return { status: "executed", value };
+  } catch (error) {
+    const detail = errorDetail(error);
+    const retryAt = new Date(
+      now.getTime() + ON_DEMAND_SNAPSHOT_FAILURE_COOLDOWN_MS,
+    ).toISOString();
+    try {
+      await db.prepare(
+        `UPDATE deal_board_snapshots SET
+           status = 'failed', expires_at = ?2,
+           error_code = '${ON_DEMAND_SNAPSHOT_COOLDOWN_CODE}',
+           error_message = ?3, updated_at = ?4
+         WHERE id = ?1 AND status = 'building'
+           AND error_code = '${ON_DEMAND_SNAPSHOT_LEASE_CODE}'`,
+      ).bind(
+        ON_DEMAND_SNAPSHOT_LEASE_ID,
+        retryAt,
+        detail.message,
+        nowIso,
+      ).run();
+    } catch {
+      // Preserve the source failure. The original building lease still
+      // throttles retries and is eventually recovered as abandoned.
+    }
+    throw error;
+  }
+}
+
 interface SnapshotRow {
   id: string;
   generated_at: string;
@@ -968,6 +1151,13 @@ export async function rebuildDealBoardSnapshot(
           },
         },
       };
+    } else {
+      const error = new Error(
+        "GSA Auctions inventory is unavailable; a Fleet-only board cannot replace the last complete combined snapshot.",
+      ) as Error & { code: string };
+      error.code = "DEAL_BOARD_GSA_INCOMPLETE";
+      await recordBuildFailure(db, error, now);
+      throw error;
     }
   }
   return persistDealBoardSnapshot(db, built);
@@ -1027,6 +1217,50 @@ async function latestCompleteSnapshot(
   db: D1Database,
 ): Promise<SnapshotRow | null> {
   return (await recentCompleteSnapshots(db))[0] ?? null;
+}
+
+/** Checks the promoted generation without loading its multi-megabyte chunks. */
+export async function readDealBoardSnapshotFreshness(
+  db: D1Database,
+  nowValue = new Date(),
+  minimumFreshMs = 10 * 60_000,
+): Promise<DealBoardSnapshotFreshness | null> {
+  const now = validDate(nowValue, "now");
+  if (
+    !Number.isSafeInteger(minimumFreshMs) ||
+    minimumFreshMs < 0 ||
+    minimumFreshMs > 60 * 60_000
+  ) {
+    throw new RangeError("minimumFreshMs must be between 0 and 3600000.");
+  }
+  const row = await db.prepare(
+    `SELECT id, generated_at, expires_at, item_count
+     FROM deal_board_snapshots
+     WHERE cache_key = ?1 AND schema_version = ?2 AND status = 'complete'
+     ORDER BY generated_at DESC
+     LIMIT 1`,
+  ).bind(DEAL_BOARD_CACHE_KEY, DEAL_BOARD_SNAPSHOT_SCHEMA_VERSION).first<{
+    id: string;
+    generated_at: string;
+    expires_at: string;
+    item_count: number;
+  }>();
+  if (
+    !row || !row.id ||
+    !Number.isFinite(Date.parse(row.generated_at)) ||
+    !Number.isFinite(Date.parse(row.expires_at)) ||
+    !Number.isSafeInteger(row.item_count) ||
+    row.item_count <= 0 || row.item_count > MAX_SNAPSHOT_ITEMS
+  ) {
+    return null;
+  }
+  return {
+    snapshotId: row.id,
+    generatedAt: row.generated_at,
+    expiresAt: row.expires_at,
+    itemCount: row.item_count,
+    fresh: Date.parse(row.expires_at) > now.getTime() + minimumFreshMs,
+  };
 }
 
 function snapshotMetadata(snapshot: SnapshotRow): JsonRecord | null {

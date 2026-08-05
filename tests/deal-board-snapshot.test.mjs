@@ -5,9 +5,12 @@ import {
   buildDealBoardSnapshot,
   persistDealBoardSnapshot,
   readDealBoardSnapshot,
+  readDealBoardSnapshotFreshness,
   readDealBoardSnapshotOpportunity,
   rebuildDealBoardSnapshot,
   reconcileDealBoardSnapshotBids,
+  runWithDealBoardSnapshotLease,
+  scheduleDealBoardSnapshotTask,
 } from "../lib/deal-board-snapshot.ts";
 import { compactOpportunityForBoard } from "../lib/opportunity-presentation.ts";
 import { SEED_AUCTIONS } from "../lib/seed-auctions.ts";
@@ -27,6 +30,15 @@ class FakeStatement {
 
   async first() {
     this.database.operations.push({ kind: "first", sql: this.sql, args: this.args });
+    if (this.sql.includes("SELECT status, expires_at, error_code")) {
+      return this.database.leaseRow;
+    }
+    if (
+      this.sql.includes("SELECT id, generated_at, expires_at, item_count") &&
+      this.sql.includes("status = 'complete'")
+    ) {
+      return this.database.freshnessRow;
+    }
     if (this.sql.includes("COUNT(*) AS chunk_count")) {
       return this.database.aggregateRow;
     }
@@ -53,6 +65,16 @@ class FakeStatement {
   async run() {
     this.database.operations.push({ kind: "run", sql: this.sql, args: this.args });
     if (
+      this.sql.includes("INSERT OR IGNORE INTO deal_board_snapshots") &&
+      this.sql.includes("DEAL_BOARD_ON_DEMAND_WARM_LEASE")
+    ) {
+      return {
+        success: true,
+        results: [],
+        meta: { changes: this.database.leaseClaimChanges.shift() ?? 1 },
+      };
+    }
+    if (
       this.database.failFirstChunkWrite &&
       this.sql.includes("INSERT INTO deal_board_snapshot_chunks")
     ) {
@@ -76,6 +98,9 @@ class FakeD1 {
     failFirstChunkWrite = false,
     snapshotRows = null,
     boardRowsBySnapshot = null,
+    leaseClaimChanges = [],
+    leaseRow = null,
+    freshnessRow = null,
   } = {}) {
     this.snapshotRows = snapshotRows ?? (snapshotRow ? [snapshotRow] : []);
     this.boardRows = boardRows;
@@ -87,6 +112,9 @@ class FakeD1 {
     this.retainedRows = retainedRows;
     this.aggregateRow = aggregateRow;
     this.failFirstChunkWrite = failFirstChunkWrite;
+    this.leaseClaimChanges = [...leaseClaimChanges];
+    this.leaseRow = leaseRow;
+    this.freshnessRow = freshnessRow;
     this.operations = [];
   }
 
@@ -609,7 +637,7 @@ test("preserves upstream stale provenance and explicit retained-image freshness"
   assert.equal(served.meta.snapshot.imagesFresh, false);
 });
 
-test("does not republish retained GSA inventory observed more than 24 hours ago", async () => {
+test("rejects a Fleet-only rebuild when retained GSA inventory is too old", async () => {
   const oldGsa = storedOpportunity({
     status: "preview",
     endsAt: null,
@@ -642,20 +670,139 @@ test("does not republish retained GSA inventory observed more than 24 hours ago"
     retainedRows: [{ payload_json: JSON.stringify([oldGsa]) }],
   });
 
-  await rebuildDealBoardSnapshot(database, {
-    now: NOW,
-    detailLimit: 0,
-    getGsaAuctions: async () => {
-      throw new Error("direct unavailable");
-    },
-    getGsaRunnerSnapshot: async () => {
-      throw new Error("runner unavailable");
-    },
-    getFleetActive: async () => fleetSnapshot("active-and-coming", [active]),
-    getFleetClosed: async () => fleetSnapshot("closed-results", [closed]),
-  });
+  await assert.rejects(
+    rebuildDealBoardSnapshot(database, {
+      now: NOW,
+      detailLimit: 0,
+      getGsaAuctions: async () => {
+        throw new Error("direct unavailable");
+      },
+      getGsaRunnerSnapshot: async () => {
+        throw new Error("runner unavailable");
+      },
+      getFleetActive: async () => fleetSnapshot("active-and-coming", [active]),
+      getFleetClosed: async () => fleetSnapshot("closed-results", [closed]),
+    }),
+    (error) => error.code === "DEAL_BOARD_GSA_INCOMPLETE",
+  );
   const written = database.operations.find((operation) =>
     operation.kind === "run" && operation.sql.includes("deal_board_snapshot_chunks")
   );
-  assert.doesNotMatch(written.args[9], new RegExp(oldGsa.id));
+  assert.equal(written, undefined);
+});
+
+test("coalesces request-triggered snapshot warming in one Worker isolate", async () => {
+  const waits = [];
+  const context = { waitUntil(promise) { waits.push(promise); } };
+  let release;
+  const first = scheduleDealBoardSnapshotTask(
+    context,
+    () => new Promise((resolve) => { release = resolve; }),
+  );
+  const duplicate = scheduleDealBoardSnapshotTask(context, async () => {});
+
+  assert.equal(first, true);
+  assert.equal(duplicate, false);
+  assert.equal(waits.length, 1);
+  await Promise.resolve();
+  release();
+  await waits[0];
+
+  assert.equal(scheduleDealBoardSnapshotTask(context, async () => {}), true);
+  assert.equal(waits.length, 2);
+  await waits[1];
+  assert.equal(scheduleDealBoardSnapshotTask(null, async () => {}), false);
+});
+
+test("uses a durable lease to make public snapshot warming idempotent", async () => {
+  const database = new FakeD1({ leaseClaimChanges: [1] });
+  let executions = 0;
+  const result = await runWithDealBoardSnapshotLease(
+    database,
+    async () => { executions += 1; return "rebuilt"; },
+    { now: NOW },
+  );
+
+  assert.deepEqual(result, { status: "executed", value: "rebuilt" });
+  assert.equal(executions, 1);
+  const claim = database.operations.find((operation) =>
+    operation.kind === "run" &&
+    operation.sql.includes("INSERT OR IGNORE INTO deal_board_snapshots")
+  );
+  assert.match(claim.sql, /expires_at > \?5/);
+  assert.equal(claim.args[0], "deal-board:on-demand-warm-lease");
+  assert.equal(claim.args[4], "2026-08-05T18:10:00.000Z");
+  const releases = database.operations.filter((operation) =>
+    operation.kind === "run" &&
+    operation.sql.includes("WHERE id = ?1") &&
+    operation.sql.includes("DEAL_BOARD_ON_DEMAND_WARM_LEASE")
+  );
+  assert.equal(releases.length, 2);
+
+  const alreadyClaimed = new FakeD1({ leaseClaimChanges: [0] });
+  const skipped = await runWithDealBoardSnapshotLease(
+    alreadyClaimed,
+    async () => { throw new Error("must not execute"); },
+    { now: NOW },
+  );
+  assert.deepEqual(skipped, { status: "skipped" });
+});
+
+test("retains a durable cooldown after a public warm rebuild fails", async () => {
+  const failed = new FakeD1({ leaseClaimChanges: [1] });
+  await assert.rejects(
+    runWithDealBoardSnapshotLease(
+      failed,
+      async () => { throw new Error("upstream unavailable"); },
+      { now: NOW, skipFreshSnapshot: false },
+    ),
+    /upstream unavailable/,
+  );
+  const cooldownWrite = failed.operations.find((operation) =>
+    operation.kind === "run" &&
+    operation.sql.includes("UPDATE deal_board_snapshots SET") &&
+    operation.sql.includes("DEAL_BOARD_ON_DEMAND_WARM_COOLDOWN") &&
+    operation.sql.includes("status = 'failed'")
+  );
+  assert.ok(cooldownWrite);
+  assert.equal(cooldownWrite.args[1], "2026-08-05T18:05:00.000Z");
+
+  const cooling = new FakeD1({
+    leaseClaimChanges: [0],
+    leaseRow: {
+      status: "failed",
+      expires_at: "2026-08-05T18:05:00.000Z",
+      error_code: "DEAL_BOARD_ON_DEMAND_WARM_COOLDOWN",
+    },
+  });
+  assert.deepEqual(
+    await runWithDealBoardSnapshotLease(
+      cooling,
+      async () => { throw new Error("must not execute"); },
+      { now: NOW, skipFreshSnapshot: false },
+    ),
+    { status: "cooldown", retryAt: "2026-08-05T18:05:00.000Z" },
+  );
+});
+
+test("checks promoted snapshot freshness without loading chunks", async () => {
+  const database = new FakeD1({
+    freshnessRow: {
+      id: "complete-1",
+      generated_at: "2026-08-05T17:55:00.000Z",
+      expires_at: "2026-08-05T18:15:00.000Z",
+      item_count: 111,
+    },
+  });
+  const result = await readDealBoardSnapshotFreshness(database, NOW, 10 * 60_000);
+  assert.deepEqual(result, {
+    snapshotId: "complete-1",
+    generatedAt: "2026-08-05T17:55:00.000Z",
+    expiresAt: "2026-08-05T18:15:00.000Z",
+    itemCount: 111,
+    fresh: true,
+  });
+  assert.equal(database.operations.some((item) =>
+    item.sql.includes("deal_board_snapshot_chunks")
+  ), false);
 });
